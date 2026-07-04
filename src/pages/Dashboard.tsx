@@ -19,6 +19,7 @@ import {
   Image as ImageIcon,
   Search,
   User,
+  Clock,
   Settings,
   LogOut,
   LayoutGrid,
@@ -48,6 +49,7 @@ import {
   FileSpreadsheet,
   AlertCircle,
   CloudOff,
+  Menu,
   HelpCircle,
   MessageSquare,
   Sun,
@@ -72,7 +74,7 @@ import { processAndOcrImage } from '../services/ocrService';
 import { supabase } from '../lib/supabase';
 import { uploadToCloudinary, getOptimizedCloudinaryUrl, getExportOptimizedCloudinaryUrl, getUserCloudinaryFolder, resolveAttachmentUrl } from '../services/cloudinary';
 import imageCompression from 'browser-image-compression';
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx-js-style';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
@@ -221,6 +223,9 @@ interface Transaction {
   is_imported?: boolean;
   import_batch_id?: string;
   source?: 'AI' | 'Imported' | 'Manual' | string;
+  user_name?: string;
+  created_at?: string;
+  attachment_details?: any[];
 }
 
 function getTransactionSource(t: any): 'AI' | 'Imported' | 'Manual' {
@@ -239,6 +244,31 @@ interface Cashbook {
   name: string;
   transactions: Transaction[];
   createdAt: Date;
+  user_name?: string;
+}
+
+function formatDateTime12h(dateVal: any): string {
+  if (!dateVal) return 'N/A';
+  try {
+    const d = typeof dateVal === 'string' || typeof dateVal === 'number' ? new Date(dateVal) : dateVal;
+    if (d instanceof Date && !isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      
+      let hours = d.getHours();
+      const minutes = String(d.getMinutes()).padStart(2, '0');
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12; // the hour '0' should be '12'
+      const formattedHours = String(hours).padStart(2, '0');
+
+      return `${day}-${month}-${year} ${formattedHours}:${minutes} ${ampm}`;
+    }
+  } catch (e) {
+    console.error(e);
+  }
+  return 'N/A';
 }
 
 function safeFormatDate(dateVal: any, options?: Intl.DateTimeFormatOptions, locales: string = 'en-IN'): string {
@@ -872,15 +902,6 @@ const MobileTransactionRow = React.memo(({
           )}>
             {t.mode}
           </span>
-          {getTransactionSource(t) === 'AI' && (
-            <span className={cn(
-              "px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded-lg transition-colors shrink-0 flex items-center gap-0.5",
-              theme === 'dark' ? "bg-amber-955/30 text-amber-400 border border-amber-900/40" : "bg-amber-50 text-amber-600 border-amber-200"
-            )}>
-              <Sparkles size={10} />
-              AI
-            </span>
-          )}
           {getTransactionSource(t) === 'Imported' && (
             <span className={cn(
               "px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded-lg transition-colors shrink-0",
@@ -1017,8 +1038,23 @@ const MobileTransactionRow = React.memo(({
             "text-[10px] font-bold tracking-tight transition-colors duration-300",
             theme === 'dark' ? "text-zinc-500" : "text-slate-400"
           )}>
-            {t.date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+            {formatDateTime12h(t.created_at || t.date)}
           </span>
+          {t.user_name && (
+            <>
+              <span className={cn(
+                "transition-colors duration-300",
+                theme === 'dark' ? "text-zinc-800" : "text-slate-150"
+              )}>•</span>
+              <span className={cn(
+                "text-[10px] font-bold tracking-tight transition-colors duration-300 flex items-center gap-1",
+                theme === 'dark' ? "text-zinc-500" : "text-slate-400"
+              )}>
+                <User size={10} className="opacity-70 shrink-0" />
+                <span className="truncate max-w-[80px]">{t.user_name}</span>
+              </span>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
@@ -1128,21 +1164,26 @@ const DesktopTransactionRow = React.memo(({
           "font-bold text-sm",
           theme === 'dark' ? "text-slate-200" : "text-slate-800"
         )}>
-          {safeFormatDate(t.date, { day: '2-digit', month: 'short', year: 'numeric' })}
-        </p>
-        <p className={cn(
-          "text-[10px] font-bold uppercase tracking-tight",
-          theme === 'dark' ? "text-slate-400" : "text-slate-500"
-        )}>
-          {safeFormatTime(t.date, { hour: '2-digit', minute: '2-digit', hour12: true })}
+          {formatDateTime12h(t.created_at || t.date)}
         </p>
       </td>
       <td className="px-3 sm:px-6 py-4 min-w-[120px]">
         <div className="flex items-center gap-2 flex-wrap">
-          <p className={cn(
-            "text-sm font-bold transition-colors duration-300",
-            theme === 'dark' ? "text-slate-300" : "text-black"
-          )}>{t.description || '--'}</p>
+          <div>
+            <p className={cn(
+              "text-sm font-bold transition-colors duration-300",
+              theme === 'dark' ? "text-slate-300" : "text-black"
+            )}>{t.description || '--'}</p>
+            {t.user_name && (
+              <p className={cn(
+                "text-[10px] font-medium flex items-center gap-1 mt-0.5",
+                theme === 'dark' ? "text-slate-500" : "text-slate-400"
+              )}>
+                <User size={10} className="opacity-70 shrink-0" />
+                <span>By {t.user_name}</span>
+              </p>
+            )}
+          </div>
           {getTransactionSource(t) === 'Imported' && (
             <span className={cn(
               "px-1.5 py-0.5 text-[9px] font-black rounded-full border uppercase shrink-0 transition-all",
@@ -1383,8 +1424,8 @@ async function fetchAttachmentsDeduplicated(entryIds: string[]): Promise<{ attac
     try {
       const startTime = performance.now();
       const [attachmentsRes, aiAttachmentsRes] = await Promise.all([
-        supabase.from('attachments').select('entry_id, file_url').in('entry_id', entryIds),
-        supabase.from('ai_attachments').select('entry_id, file_url').in('entry_id', entryIds)
+        supabase.from('attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', entryIds),
+        supabase.from('ai_attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', entryIds)
       ]);
       const duration = performance.now() - startTime;
       console.log(`[Performance] Attachments load timing: fetched from db in ${duration.toFixed(2)}ms for ${entryIds.length} entries`);
@@ -1619,12 +1660,66 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   // Global State
   const [userName, setUserName] = useState('Siva');
+  const [books, setBooks] = useState<Cashbook[]>([]);
+  
+  const booksLengthRef = useRef(books.length);
+  useEffect(() => {
+    booksLengthRef.current = books.length;
+  }, [books.length]);
+
+  const resolveUserDataForAttachments = async () => {
+    if (!session?.user) return { id: null, name: "Unknown User", email: "" };
+    
+    const userId = session.user.id;
+    const userEmail = session.user.email || "";
+    
+    let resolvedName = "";
+    
+    // 1. Authenticated Profile Name
+    try {
+      if (supabase) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', userId)
+          .maybeSingle();
+        if (profile?.full_name) {
+          resolvedName = profile.full_name;
+        }
+      }
+    } catch (err) {
+      console.warn('[resolveUserDataForAttachments] Failed to fetch profile:', err);
+    }
+    
+    // 2. Google Display Name
+    if (!resolvedName) {
+      resolvedName = session.user.user_metadata?.full_name || 
+                     session.user.user_metadata?.name || 
+                     session.user.user_metadata?.display_name || "";
+    }
+    
+    // 3. Email Prefix
+    if (!resolvedName && userEmail) {
+      resolvedName = userEmail.split('@')[0];
+    }
+    
+    // 4. "Unknown User"
+    if (!resolvedName) {
+      resolvedName = "Unknown User";
+    }
+    
+    return {
+      id: userId,
+      name: resolvedName,
+      email: userEmail
+    };
+  };
+
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [helpQuery, setHelpQuery] = useState('');
   const [helpResponse, setHelpResponse] = useState('');
   const [isHelpLoading, setIsHelpLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [books, setBooks] = useState<Cashbook[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeBookId, setActiveBookIdState] = useState<string | null>(null);
   const [isEntriesLoading, setIsEntriesLoading] = useState(false);
@@ -1636,13 +1731,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     const handleNetworkChange = (state: any) => {
       const offline = state === 'offline';
       setIsOffline(offline);
-      if (offline && books.length === 0) {
+      if (offline && booksLengthRef.current === 0) {
         setShowOfflineDialog(true);
       }
     };
     const unsubscribe = syncManager.network.subscribe(handleNetworkChange);
     return () => unsubscribe();
-  }, [books.length]);
+  }, []);
 
   const setActiveBookId = (id: string | null) => {
     setActiveBookIdState(id);
@@ -2250,6 +2345,62 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [showDuplicateAiWarning, setShowDuplicateAiWarning] = useState<{ onConfirm: () => void; onCancel: () => void } | null>(null);
+  const [currentSection, setCurrentSection] = useState<'dashboard' | 'cashbooks' | 'processing-center' | 'ai-upload' | 'exports' | 'imports' | 'shared-entries' | 'settings'>('dashboard');
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isOpenMobile, setIsOpenMobile] = useState(false);
+  const [exportTasks, setExportTasks] = useState<any[]>(backgroundExportManager.getTaskList());
+
+  useEffect(() => {
+    const unsubscribe = backgroundExportManager.subscribe(() => {
+      setExportTasks(backgroundExportManager.getTaskList());
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleClearData = async () => {
+    try {
+      await backgroundExportManager.clearAllData();
+      await syncManager.db.clearAllData();
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.reload();
+    } catch (e) {
+      console.error('Error clearing data:', e);
+    }
+  };
+
+  const handleSaveProfileName = async () => {
+    if (!supabase || !session?.user) return;
+    try {
+      await supabase.auth.updateUser({
+        data: { full_name: userName }
+      });
+      try {
+        await supabase.from('profiles').upsert({
+          id: session.user.id,
+          email: session.user.email || null,
+          full_name: userName,
+          phone: session.user.phone || null,
+          phone_verified: session.user.phone_confirmed_at ? true : false,
+        }, { onConflict: 'id' });
+      } catch (dbErr) {
+        console.warn('Profiles table sync failed:', dbErr);
+      }
+    } catch (err) {
+      console.error('Error saving profile name:', err);
+    }
+  };
+
+  const handleLinkPhoneStub = async (phone: string) => {
+    setUserPhone(phone);
+    setShowPhoneLinkingComingSoon(true);
+    return true;
+  };
+
+  const handleVerifyOtpStub = async (otp: string) => {
+    setUserPhoneVerified(true);
+    return true;
+  };
   const [previewTransactionId, setPreviewTransactionId] = useState<string | null>(null);
   const [animatingDeleteId, setAnimatingDeleteId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(20);
@@ -2738,12 +2889,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [imageLayout, setImageLayout] = useState<'split' | 'merge'>('split');
 
-  // Restrict merge layout - automatically fallback to split if there are less than 2 images
+  // Restrict merge layout - automatically fallback to split if there are less than 2 images and we aren't currently editing an existing transaction
   useEffect(() => {
+    if (editingTransaction) return; // Prevent overwriting stored imageLayout when opening edit details!
     if (selectedImages.length < 2 && imageLayout === 'merge') {
       setImageLayout('split');
     }
-  }, [selectedImages, imageLayout]);
+  }, [selectedImages, imageLayout, editingTransaction]);
 
   // Clear selected transactions when exiting a book to avoid leaking selection bar onto book homepage
   useEffect(() => {
@@ -2848,6 +3000,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         // Fetch attachments for all entries in a single step
         let attachmentsMap = new Map<string, string[]>();
+        let attachmentsDetailsMap = new Map<string, any[]>();
         let aiEntryIds = new Set<string>();
         if (allEntryIds.length > 0) {
           const { attachments, aiAttachments } = await fetchAttachmentsDeduplicated(allEntryIds);
@@ -2858,6 +3011,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   attachmentsMap.set(att.entry_id, []);
                 }
                 attachmentsMap.get(att.entry_id)!.push(att.file_url);
+
+                if (!attachmentsDetailsMap.has(att.entry_id)) {
+                  attachmentsDetailsMap.set(att.entry_id, []);
+                }
+                attachmentsDetailsMap.get(att.entry_id)!.push(att);
               }
             }
           }
@@ -2869,6 +3027,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   attachmentsMap.set(att.entry_id, []);
                 }
                 attachmentsMap.get(att.entry_id)!.push(att.file_url);
+
+                if (!attachmentsDetailsMap.has(att.entry_id)) {
+                  attachmentsDetailsMap.set(att.entry_id, []);
+                }
+                attachmentsDetailsMap.get(att.entry_id)!.push(att);
               }
             }
           }
@@ -2878,6 +3041,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           const rawEntries = entriesMapByCashbook.get(cb.id) || [];
           const entryList = rawEntries.map(t => {
             const images = attachmentsMap.get(t.id) || [];
+            const details = attachmentsDetailsMap.get(t.id) || [];
             const isMerged = t.image_layout === 'merge' || t.bill_type === 'MERGE' || t.billType === 'MERGE';
             const isAi = aiEntryIds.has(t.id) || !!t.isAi || t.source === 'AI';
             return {
@@ -2885,8 +3049,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               imageLayout: isMerged ? 'merge' : (t.image_layout || 'split'),
               date: t.date ? new Date(t.date) : new Date(),
               images,
+              attachment_details: details,
               isAi,
-              source: t.source || (isAi ? 'AI' : ((t.is_imported || t.imported_from_share_code) ? 'Imported' : 'Manual'))
+              source: t.source || (isAi ? 'AI' : ((t.is_imported || t.imported_from_share_code) ? 'Imported' : 'Manual')),
+              user_name: t.user_name,
+              created_at: t.created_at
             };
           });
 
@@ -2897,7 +3064,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           return {
             ...cb,
             transactions: entryList,
-            createdAt: cb.created_at ? new Date(cb.created_at) : new Date()
+            createdAt: cb.created_at ? new Date(cb.created_at) : new Date(),
+            user_name: cb.user_name
           };
         });
 
@@ -3323,15 +3491,29 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     // Then handle Supabase in background
     if (supabase) {
       try {
+        const resolvedUser = await resolveUserDataForAttachments();
+        const payload: any = { 
+          id: newBook.id, 
+          name: newBook.name, 
+          created_at: safeToISOString(newBook.createdAt),
+          user_id: session.user.id,
+          user_name: resolvedUser.name
+        };
         const { error } = await supabase
           .from('cashbooks')
-          .insert([{ 
-            id: newBook.id, 
-            name: newBook.name, 
-            created_at: safeToISOString(newBook.createdAt),
-            user_id: session.user.id 
-          }]);
-        if (error) throw error;
+          .insert([payload]);
+        if (error) {
+          if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
+            const fallbackPayload = { ...payload };
+            delete fallbackPayload.user_name;
+            const { error: retryError } = await supabase
+              .from('cashbooks')
+              .insert([fallbackPayload]);
+            if (retryError) throw retryError;
+          } else {
+            throw error;
+          }
+        }
       } catch (error) {
         console.error('Error creating book in Supabase:', error);
         // If it fails, we might want to revert local state, but usually it's fine
@@ -3366,6 +3548,91 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setTimeout(() => {
       setJustEditedBookId(null);
     }, 2000);
+  };
+
+  const handleDuplicateBook = async (bookId: string) => {
+    vibrate(15);
+    const bookToDup = books.find(b => b.id === bookId);
+    if (!bookToDup || !session) return;
+    
+    const newName = `${bookToDup.name} (Copy)`;
+    const newBookId = 'book_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    
+    if (supabase) {
+      try {
+        const resolvedUser = await resolveUserDataForAttachments();
+        const payload: any = {
+          id: newBookId,
+          name: newName,
+          user_id: session.user.id,
+          user_name: resolvedUser.name
+        };
+        const { error } = await supabase.from('cashbooks').insert(payload);
+        if (error) {
+          if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
+            const fallbackPayload = { ...payload };
+            delete fallbackPayload.user_name;
+            await supabase.from('cashbooks').insert(fallbackPayload);
+          } else {
+            throw error;
+          }
+        }
+      } catch (err) {
+        console.error('Error duplicating book in Supabase:', err);
+      }
+    }
+    
+    const sourceEntries = entriesCache.get(bookId) || bookToDup.transactions || [];
+    const dupTransactions = sourceEntries.map((t: any) => ({
+      ...t,
+      id: 'tx_' + Math.random().toString(36).substring(2, 11),
+      cashbook_id: newBookId,
+    }));
+    
+    if (supabase && dupTransactions.length > 0) {
+      try {
+        await supabase.from('transactions').insert(
+          dupTransactions.map((t: any) => ({
+            id: t.id,
+            cashbook_id: newBookId,
+            amount: t.amount,
+            type: t.type,
+            description: t.description,
+            category: t.category,
+            mode: t.mode,
+            date: t.date,
+            images: t.images || [],
+            image_layout: t.imageLayout || 'split',
+            is_ai: !!t.isAi,
+            source: t.source || 'Manual'
+          }))
+        );
+      } catch (err) {
+        console.error('Error duplicating transactions in Supabase:', err);
+      }
+    }
+    
+    const newBook = {
+      id: newBookId,
+      name: newName,
+      transactions: dupTransactions,
+      createdAt: new Date()
+    };
+    
+    entriesCache.set(newBookId, dupTransactions);
+    setBooks([newBook, ...books]);
+  };
+
+  const handleExportBookFromList = async (bookId: string, format: 'pdf' | 'excel') => {
+    vibrate(15);
+    const book = books.find(b => b.id === bookId);
+    if (!book) return;
+    const txs = entriesCache.get(bookId) || book.transactions || [];
+    if (format === 'excel') {
+      await backgroundExportManager.enqueueExcelTask(book.id, book.name, txs);
+    } else {
+      await backgroundExportManager.enqueueTask(book.id, book.name, txs, true);
+    }
   };
 
   const handleAskAi = async () => {
@@ -3408,21 +3675,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const bookToDeleteObj = books.find(b => b.id === deleteConfirmId);
       const originalIndex = books.findIndex(b => b.id === deleteConfirmId);
 
+      // Immediately remove from UI state
+      setBooks(prevBooks => prevBooks.filter(b => b.id !== deleteConfirmId));
+      setDeleteConfirmId(null);
+      if (activeBookId === deleteConfirmId) {
+        handleSelectBook(null);
+      }
+
       if (bookToDeleteObj) {
-        await handleStartUndoableDelete({
+        handleStartUndoableDelete({
           type: 'book',
           data: {
             book: bookToDeleteObj,
             cachedEntries: entriesCache.get(deleteConfirmId) || []
           },
           originalIndex
-        });
-      }
-
-      setBooks(books.filter(b => b.id !== deleteConfirmId));
-      setDeleteConfirmId(null);
-      if (activeBookId === deleteConfirmId) {
-        handleSelectBook(null);
+        }).catch(err => console.error('[confirmDeleteBook] Error starting undoable delete:', err));
       }
     }
   };
@@ -3442,16 +3710,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return books.findIndex(b => b.id === id);
     });
 
-    await handleStartUndoableDelete({
+    const idsSet = new Set(selectedBooks);
+
+    // Immediately remove from UI state
+    setBooks(prevBooks => prevBooks.filter(b => !idsSet.has(b.id)));
+    setSelectedBooks(new Set());
+    setShowBulkDeleteConfirm(false);
+
+    handleStartUndoableDelete({
       type: 'bulk_books',
       data: booksToDelete,
       originalIndexes
-    });
-
-    const idsSet = new Set(selectedBooks);
-    setBooks(books.filter(b => !idsSet.has(b.id)));
-    setSelectedBooks(new Set());
-    setShowBulkDeleteConfirm(false);
+    }).catch(err => console.error('[handleBulkDeleteBooks] Error starting undoable delete:', err));
   };
 
   const handleRetryUpload = (blobUrl: string, transactionId: string) => {
@@ -3486,8 +3756,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         selectedImages.every((img, i) => img === originalImages[i]);
 
       const layoutUnchanged = imageLayout === (editingTransaction.imageLayout || 'split');
+      const typeUnchanged = showForm === editingTransaction.type;
 
-      if (amountUnchanged && descUnchanged && catUnchanged && modeUnchanged && dateUnchanged && imagesUnchanged && layoutUnchanged) {
+      if (amountUnchanged && descUnchanged && catUnchanged && modeUnchanged && dateUnchanged && imagesUnchanged && layoutUnchanged && typeUnchanged) {
         hasChanges = false;
       }
     }
@@ -3624,41 +3895,68 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           };
         });
 
+        const resolvedUser = await resolveUserDataForAttachments();
         const payload: any = {
           amount: amountNum,
           type: showForm,
           description: description,
           category: finalCategory || 'General',
           mode: finalMode,
-          date: safeToISOString(dateObj)
+          date: safeToISOString(dateObj),
+          user_name: resolvedUser.name
         };
 
         // Update database metadata
-        const { error: entryError } = await supabase
+        let entryError: any = null;
+        const firstUpdate = await supabase
           .from('entries')
           .update({ ...payload, image_layout: imageLayout })
           .eq('id', editingTransaction.id)
           .eq('user_id', session.user.id);
+        entryError = firstUpdate.error;
         
-        if (entryError) {
-          if (entryError.code === '42703' || entryError.message?.includes('image_layout')) {
-            const { error: retryError } = await supabase
+        if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+          // Retry without image_layout
+          const secondUpdate = await supabase
+            .from('entries')
+            .update(payload)
+            .eq('id', editingTransaction.id)
+            .eq('user_id', session.user.id);
+          entryError = secondUpdate.error;
+
+          if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+            // Retry without user_name
+            const payloadNoUser = { ...payload };
+            delete payloadNoUser.user_name;
+            
+            const thirdUpdate = await supabase
               .from('entries')
-              .update(payload)
+              .update({ ...payloadNoUser, image_layout: imageLayout })
               .eq('id', editingTransaction.id)
               .eq('user_id', session.user.id);
-            if (retryError) throw retryError;
-          } else {
-            throw entryError;
+            entryError = thirdUpdate.error;
+
+            if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+              const fourthUpdate = await supabase
+                .from('entries')
+                .update(payloadNoUser)
+                .eq('id', editingTransaction.id)
+                .eq('user_id', session.user.id);
+              entryError = fourthUpdate.error;
+            }
           }
         }
+        if (entryError) throw entryError;
 
         // Synchronize attachment links
         await supabase.from('attachments').delete().eq('entry_id', editingTransaction.id);
         if (finalImages.length > 0) {
+          const resolvedUser = await resolveUserDataForAttachments();
           const attachmentInserts = finalImages.map(url => ({
             entry_id: editingTransaction.id,
             user_id: session.user.id,
+            user_name: resolvedUser.name,
+            user_email: resolvedUser.email,
             file_url: url
           }));
           await supabase.from('attachments').insert(attachmentInserts);
@@ -3775,10 +4073,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           };
         });
 
+        const resolvedUser = await resolveUserDataForAttachments();
         const payload: any = {
           id: tempId,
           cashbook_id: activeBookId,
           user_id: session.user.id,
+          user_name: resolvedUser.name,
           amount: amountNum,
           type: showForm,
           description: description,
@@ -3811,6 +4111,35 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
               const fourthTry = await supabase.from('entries').insert([payloadNoSource]);
               entryError = fourthTry.error;
+
+              if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+                // Fall back completely by removing user_name in case column does not exist
+                const payloadNoUser = { ...payload };
+                delete payloadNoUser.user_name;
+                const fifthTry = await supabase
+                  .from('entries')
+                  .insert([{ ...payloadNoUser, image_layout: imageLayout }]);
+                entryError = fifthTry.error;
+
+                if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+                  const sixthTry = await supabase.from('entries').insert([payloadNoUser]);
+                  entryError = sixthTry.error;
+
+                  if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+                    const payloadNoUserNoSource = { ...payloadNoUser };
+                    delete payloadNoUserNoSource.source;
+                    const seventhTry = await supabase
+                      .from('entries')
+                      .insert([{ ...payloadNoUserNoSource, image_layout: imageLayout }]);
+                    entryError = seventhTry.error;
+
+                    if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+                      const eighthTry = await supabase.from('entries').insert([payloadNoUserNoSource]);
+                      entryError = eighthTry.error;
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -3819,9 +4148,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         // Insert attachments if any exist
         if (finalImages.length > 0) {
+          const resolvedUser = await resolveUserDataForAttachments();
           const attachmentInserts = finalImages.map(url => ({
             entry_id: tempId,
             user_id: session.user.id,
+            user_name: resolvedUser.name,
+            user_email: resolvedUser.email,
             file_url: url
           }));
           const { error: attachError } = await supabase.from('attachments').insert(attachmentInserts);
@@ -3904,6 +4236,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   const handleAddTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!activeBookId || !showForm || !amount || !session || !supabase) return;
 
     setIsSubmitting(true);
@@ -4034,10 +4367,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const totalAmount = selectedTxs.reduce((sum, t) => sum + t.amount, 0);
       const newId = safeUUID();
 
+      const resolvedUser = await resolveUserDataForAttachments();
       const payload: any = {
         id: newId,
         cashbook_id: activeBookId,
         user_id: session.user.id,
+        user_name: resolvedUser.name,
         amount: totalAmount,
         type: mergeType,
         description: mergeDescription || 'Merged Transactions',
@@ -4048,45 +4383,102 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         bill_type: 'MERGE'
       };
 
-      const { error: insertError } = await supabase.from('entries').insert([payload]);
+      let insertError: any = null;
+      const { error: firstInsertError } = await supabase.from('entries').insert([payload]);
+      insertError = firstInsertError;
+
       if (insertError) {
-        if (insertError.code === '42703' || insertError.message?.includes('column "image_layout" does not exist') || insertError.message?.includes('column "bill_type" does not exist')) {
+        if (insertError.code === '42703' || insertError.message?.toLowerCase().includes('column')) {
           const fallbackPayload = { ...payload };
           delete fallbackPayload.image_layout;
           delete fallbackPayload.bill_type;
           const { error: retryError } = await supabase.from('entries').insert([fallbackPayload]);
-          if (retryError) throw retryError;
-        } else {
-          throw insertError;
+          insertError = retryError;
+
+          if (insertError && (insertError.code === '42703' || insertError.message?.toLowerCase().includes('column'))) {
+            const fallbackNoUser = { ...fallbackPayload };
+            delete fallbackNoUser.user_name;
+            const { error: retryError2 } = await supabase.from('entries').insert([fallbackNoUser]);
+            insertError = retryError2;
+          }
         }
       }
+
+      if (insertError) throw insertError;
 
       const selectedIds = Array.from(selectedTransactions);
       const { data: oldAtts } = await supabase.from('attachments').select('*').in('entry_id', selectedIds);
       const { data: oldAiAtts } = await supabase.from('ai_attachments').select('*').in('entry_id', selectedIds);
 
       if (oldAtts && oldAtts.length > 0) {
+        const resolvedUser = await resolveUserDataForAttachments();
         const newAtts = oldAtts.map(att => ({
           entry_id: newId,
           user_id: session.user.id,
+          user_name: resolvedUser.name,
+          user_email: resolvedUser.email,
           file_url: att.file_url,
           file_name: att.file_name || 'merged_attachment',
           file_type: att.file_type || 'image'
         }));
-        await supabase.from('attachments').insert(newAtts);
+        const { error: attachErr } = await supabase.from('attachments').insert(newAtts);
+        if (attachErr) {
+          if (attachErr.code === '42703' || attachErr.message?.toLowerCase().includes('column')) {
+            const fallbackAtts = oldAtts.map(att => ({
+              entry_id: newId,
+              user_id: session.user.id,
+              user_name: resolvedUser.name,
+              user_email: resolvedUser.email,
+              file_url: att.file_url
+            }));
+            const { error: retryAttachErr } = await supabase.from('attachments').insert(fallbackAtts);
+            if (retryAttachErr) throw retryAttachErr;
+          } else {
+            throw attachErr;
+          }
+        }
       }
 
       if (oldAiAtts && oldAiAtts.length > 0) {
+        const resolvedUser = await resolveUserDataForAttachments();
         const newAiAtts = oldAiAtts.map(att => ({
           entry_id: newId,
           user_id: session.user.id,
+          user_name: resolvedUser.name,
+          user_email: resolvedUser.email,
           file_url: att.file_url,
           file_name: att.file_name || 'merged_ai_attachment',
           file_type: att.file_type || 'image'
         }));
-        await supabase.from('ai_attachments').insert(newAiAtts);
+        const { error: aiAttachErr } = await supabase.from('ai_attachments').insert(newAiAtts);
+        if (aiAttachErr) {
+          if (aiAttachErr.code === '42703' || aiAttachErr.message?.toLowerCase().includes('column')) {
+            const fallbackAiAtts = oldAiAtts.map(att => ({
+              entry_id: newId,
+              user_id: session.user.id,
+              user_name: resolvedUser.name,
+              user_email: resolvedUser.email,
+              file_url: att.file_url
+            }));
+            const { error: retryAiAttachErr } = await supabase.from('ai_attachments').insert(fallbackAiAtts);
+            if (retryAiAttachErr) throw retryAiAttachErr;
+          } else {
+            throw aiAttachErr;
+          }
+        }
       }
 
+      // Delete old attachments first to prevent foreign key constraint violations
+      if (oldAtts && oldAtts.length > 0) {
+        const { error: delAttErr } = await supabase.from('attachments').delete().in('entry_id', selectedIds);
+        if (delAttErr) console.warn('[Merge] Warning deleting old attachments before parent entries:', delAttErr);
+      }
+      if (oldAiAtts && oldAiAtts.length > 0) {
+        const { error: delAiAttErr } = await supabase.from('ai_attachments').delete().in('entry_id', selectedIds);
+        if (delAiAttErr) console.warn('[Merge] Warning deleting old AI attachments before parent entries:', delAiAttErr);
+      }
+
+      // Now we can safely delete parent entries
       const { error: deleteError } = await supabase.from('entries').delete().in('id', selectedIds);
       if (deleteError) throw deleteError;
 
@@ -4367,14 +4759,34 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       // If there is no active book, create a new book!
       if (!targetBookId) {
         const newBookTitle = `Imported Book (${cleanedCode})`;
-        const { data: newBook, error: createError } = await supabase
+        const resolvedUser = await resolveUserDataForAttachments();
+        const payload: any = {
+          name: newBookTitle,
+          user_id: session.user.id,
+          user_name: resolvedUser.name
+        };
+        let newBook: any = null;
+        let createError: any = null;
+
+        const firstInsert = await supabase
           .from('cashbooks')
-          .insert([{
-            name: newBookTitle,
-            user_id: session.user.id
-          }])
+          .insert([payload])
           .select()
           .single();
+        newBook = firstInsert.data;
+        createError = firstInsert.error;
+
+        if (createError && (createError.code === '42703' || createError.message?.toLowerCase().includes('column'))) {
+          const fallbackPayload = { ...payload };
+          delete fallbackPayload.user_name;
+          const secondInsert = await supabase
+            .from('cashbooks')
+            .insert([fallbackPayload])
+            .select()
+            .single();
+          newBook = secondInsert.data;
+          createError = secondInsert.error;
+        }
 
         if (createError) {
           throw new Error('Failed to create imported cashbook.');
@@ -4446,6 +4858,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       // Rule 2 & 3: Generate deterministic signatures and compare to find final inserts
       const existingSignatures = new Set(existingEntries.map(item => getEntrySignature(item)));
       
+      const resolvedUser = await resolveUserDataForAttachments();
       const finalInserts: any[] = [];
       let skippedDuplicatesCount = 0;
 
@@ -4467,6 +4880,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             image_layout: t.image_layout || t.imageLayout || 'split',
             cashbook_id: targetBookId,
             user_id: session.user.id,
+            user_name: resolvedUser.name,
             imported_from_share_code: cleanedCode, // Rule 6
             is_imported: true,
             import_batch_id: cleanedCode,
@@ -4506,7 +4920,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         if (isColumnError) {
           // Rescue Step: Retry without is_imported and import_batch_id first (keep original column set)
           console.log('[Import] Retrying without is_imported and import_batch_id...');
-          const baseInserts = cleanInserts.map(({ is_imported, import_batch_id, source, ...rest }) => rest);
+          const baseInserts = cleanInserts.map(({ is_imported, import_batch_id, source, user_name, ...rest }) => rest);
           const { error: errBase } = await supabase
             .from('entries')
             .insert(baseInserts);
@@ -4774,6 +5188,48 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     const lastRow = XLSX.utils.decode_range(ws['!ref'] || 'A1').e.r;
     ws[XLSX.utils.encode_cell({ r: lastRow - 1, c: 3 })] = { v: 'TOTAL', t: 's' };
     ws[XLSX.utils.encode_cell({ r: lastRow, c: 3 })] = { v: 'BALANCE', t: 's' };
+
+    // Apply thin black borders and custom styling to all cells in the sheet
+    const borderStyle = {
+      top: { style: 'thin', color: { rgb: '000000' } },
+      bottom: { style: 'thin', color: { rgb: '000000' } },
+      left: { style: 'thin', color: { rgb: '000000' } },
+      right: { style: 'thin', color: { rgb: '000000' } }
+    };
+
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    for (let R = range.s.r; R <= range.e.r; ++R) {
+      // Skip the blank separator row between transactions and totals
+      if (R === lastRow - 2) continue;
+      
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cell_address = XLSX.utils.encode_cell({ r: R, c: C });
+        
+        // On summary rows, we only style cells starting from column 3 (TOTAL/BALANCE labels and their values)
+        if (R >= lastRow - 1 && C < 3) {
+          continue; 
+        }
+
+        if (!ws[cell_address]) {
+          ws[cell_address] = { t: 's', v: '' };
+        }
+        
+        const cell = ws[cell_address];
+        cell.s = cell.s || {};
+        cell.s.border = borderStyle;
+        
+        // Header styling: light gray background fill and bold text
+        if (R === 0) {
+          cell.s.fill = { fgColor: { rgb: 'F2F2F2' } };
+          cell.s.font = { bold: true };
+        }
+        
+        // Summary labels and values: bold text
+        if (R >= lastRow - 1) {
+          cell.s.font = { bold: true };
+        }
+      }
+    }
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Transactions");
@@ -5121,12 +5577,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               if (cloudinaryUrls.length > 0) {
                 console.log('[processFiles] Saving AI attachments rows...');
+                const resolvedUser = await resolveUserDataForAttachments();
                 const aiAttachmentInserts = await Promise.all(
                   cloudinaryUrls.map(async (url) => {
                     const validated = await validateAndResolveCloudinaryUrl(url, session.user);
                     return {
                       entry_id: newTransactionId,
                       user_id: session.user.id,
+                      user_name: resolvedUser.name,
+                      user_email: resolvedUser.email,
                       file_url: validated,
                       file_name: 'ai_merged_bill',
                       file_type: 'image'
@@ -5239,9 +5698,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
                       console.log('[processFiles] Saving single AI image attachment row...');
                       const validatedSingleUrl = await validateAndResolveCloudinaryUrl(cloudinaryUrl, session.user);
+                      const resolvedUser = await resolveUserDataForAttachments();
                       const aiAttachmentInserts = [{
                         entry_id: newTransactionId,
                         user_id: session.user.id,
+                        user_name: resolvedUser.name,
+                        user_email: resolvedUser.email,
                         file_url: validatedSingleUrl,
                         file_name: 'ai_detected_bill',
                         file_type: 'image'
@@ -5522,9 +5984,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
           if (imageUrl) {
             const validatedUrl = await validateAndResolveCloudinaryUrl(imageUrl, session.user);
+            const resolvedUser = await resolveUserDataForAttachments();
             const aiAttachmentInserts = [{
               entry_id: tempId,
               user_id: session.user.id,
+              user_name: resolvedUser.name,
+              user_email: resolvedUser.email,
               file_url: validatedUrl,
               file_name: JSON.stringify({
                 original_name: savedFile?.name || 'receipt',
@@ -5592,7 +6057,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       </div>
     );
   }
-
   return (
     <div className={cn(
       "min-h-screen transition-colors duration-300",
@@ -5630,7 +6094,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="bg-rose-500 text-white px-4 py-2 text-center text-sm font-medium flex items-center justify-center gap-2 sticky top-0 z-[60] flex-wrap"
+            className="fixed top-0 left-0 right-0 bg-rose-500 text-white px-4 py-2 text-center text-sm font-medium flex items-center justify-center gap-2 z-[100] flex-wrap"
           >
             <div className="flex items-center gap-2">
               <AlertCircle size={16} />
@@ -5650,7 +6114,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             initial={{ height: 0, opacity: 0, y: -20 }}
             animate={{ height: 'auto', opacity: 1, y: 0 }}
             exit={{ height: 0, opacity: 0, y: -20 }}
-            className="bg-emerald-600 dark:bg-emerald-700 text-white px-4 py-3 text-center text-xs sm:text-xs font-bold flex items-center justify-center gap-2 sticky top-0 z-[60] shadow-md tracking-wide"
+            className="fixed top-0 left-0 right-0 bg-emerald-600 dark:bg-emerald-700 text-white px-4 py-3 text-center text-xs font-bold flex items-center justify-center gap-2 z-[100] shadow-md tracking-wide"
           >
             <CheckSquare size={16} />
             <span>{restoredMessage}</span>
@@ -5704,7 +6168,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <Search size={20} />
               </button>
 
-              {/* Inline Download Center Trigger (Prevent absolute-position overlaps) */}
+              {/* Inline Download Center Trigger */}
               <DownloadCenterTrigger theme={theme} isOpen={showDownloadCenter} setIsOpen={setShowDownloadCenter} />
 
               <div className="relative shrink-0" ref={dropdownRef}>
@@ -5726,7 +6190,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
                       className={cn(
                         "absolute right-0 mt-2 w-64 rounded-2xl shadow-2xl border p-2 z-50 transition-colors duration-300",
-                        theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
+                        theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-200"
                       )}
                     >
                       <div className={cn(
@@ -6013,7 +6477,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           <p className={cn(
                             "text-[10px] sm:text-xs transition-colors duration-300",
                             theme === 'dark' ? "text-slate-500" : "text-slate-400"
-                          )}>Created on {safeFormatDate(book.createdAt)}</p>
+                          )}>Created on {formatDateTime12h(book.createdAt)}</p>
                         </div>
                       </div>
                       
@@ -6050,7 +6514,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               )}
             </motion.div>
           ) : (
-            /* PAGE 2: INDIVIDUAL CASHBOOK VIEW */
+              /* PAGE 2: INDIVIDUAL CASHBOOK VIEW */
             <motion.div
               key="cashbook"
               initial={{ opacity: 0, x: 20 }}
@@ -6338,18 +6802,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <Share size={16} />
                         Share Entries
                       </button>
-                      {selectedTransactions.size >= 2 && (
-                        <button
-                          onClick={openMergeDialog}
-                          className={cn(
-                            "flex items-center gap-2 px-4 h-11 bg-indigo-650 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
-                            theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
-                          )}
-                        >
-                          <Merge size={16} />
-                          Merge ({selectedTransactions.size})
-                        </button>
-                      )}
                       <button
                         onClick={() => { setShowBulkTransactionDeleteConfirm(true); setDeleteConfirmed(false); }}
                         className={cn(
@@ -10086,34 +10538,39 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   <div className="flex gap-3 pt-2">
                     <button
                       type="button"
+                      disabled={isSubmitting}
                       onClick={resetForm}
-                      className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs sm:text-sm"
+                      className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Cancel
                     </button>
                     {!editingTransaction && (
                       <button
                         type="submit"
+                        disabled={isSubmitting}
                         onClick={() => { vibrate(30); setSubmitAndAddNew(true); }}
                         className={cn(
-                          "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm",
-                          theme === 'dark' ? "bg-indigo-600 hover:bg-indigo-700 shadow-none" : "bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100"
+                          "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed",
+                          isSubmitting && submitAndAddNew ? "bg-slate-400" : (theme === 'dark' ? "bg-indigo-600 hover:bg-indigo-700 shadow-none" : "bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100")
                         )}
                       >
-                        Save &amp; Add New
+                        {isSubmitting && submitAndAddNew ? "Saving..." : "Save & Add New"}
                       </button>
                     )}
                     <button
                       type="submit"
+                      disabled={isSubmitting}
                       onClick={() => { vibrate(30); setSubmitAndAddNew(false); }}
                       className={cn(
-                        "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm",
-                        showForm === 'in' 
-                          ? (theme === 'dark' ? "bg-emerald-600 hover:bg-emerald-700 shadow-none" : "bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-100")
-                          : (theme === 'dark' ? "bg-rose-600 hover:bg-rose-700 shadow-none" : "bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-100")
+                        "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed",
+                        isSubmitting && !submitAndAddNew ? "bg-slate-400" : (
+                          showForm === 'in' 
+                            ? (theme === 'dark' ? "bg-emerald-600 hover:bg-emerald-700 shadow-none" : "bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-100")
+                            : (theme === 'dark' ? "bg-rose-600 hover:bg-rose-700 shadow-none" : "bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-100")
+                        )
                       )}
                     >
-                      {editingTransaction ? 'Save Changes' : 'Save'}
+                      {isSubmitting && !submitAndAddNew ? "Saving..." : (editingTransaction ? 'Save Changes' : 'Save')}
                     </button>
                   </div>
                 </form>
@@ -10170,7 +10627,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 15 }}
               transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-              className="relative w-full max-w-md bg-zinc-950/90 border border-slate-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center text-center overflow-hidden"
+              className={cn(
+                "relative w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center text-center overflow-hidden border transition-all duration-300",
+                theme === 'dark' 
+                  ? "bg-zinc-950/90 border-slate-800/80" 
+                  : "bg-white border-slate-200"
+              )}
             >
               {/* Star-sparkle glow background effect */}
               <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -10186,7 +10648,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     strokeWidth="4"
                     stroke="currentColor"
                     fill="transparent"
-                    className="text-slate-800/40"
+                    className={cn(
+                      theme === 'dark' ? "text-slate-800/40" : "text-slate-200"
+                    )}
                   />
                   <motion.circle
                     cx="48"
@@ -10240,13 +10704,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               <div className="mt-4 flex flex-col items-center">
                 <span className={cn(
                   "text-3xl font-black font-mono tracking-tight",
-                  progressModal.errorMsg ? "text-rose-400" : progressModal.success ? "text-emerald-400" : "text-white"
+                  progressModal.errorMsg ? "text-rose-400" : progressModal.success ? "text-emerald-400" : (theme === 'dark' ? "text-white" : "text-slate-900")
                 )}>
                   {progressModal.progress}%
                 </span>
                 
                 {/* Horizontal Progress bar */}
-                <div className="w-56 h-1.5 bg-slate-900 rounded-full overflow-hidden mt-3 border border-slate-800/40">
+                <div className={cn(
+                  "w-56 h-1.5 rounded-full overflow-hidden mt-3 border transition-all",
+                  theme === 'dark' ? "bg-slate-900 border-slate-800/40" : "bg-slate-100 border-slate-200"
+                )}>
                   <motion.div 
                     className={cn(
                       "h-full rounded-full",
@@ -10261,7 +10728,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               {/* Titles and Subtitles */}
               <div className="mt-6 space-y-2 px-2">
-                <h3 className="text-lg font-black tracking-tight text-white">
+                <h3 className={cn(
+                  "text-lg font-black tracking-tight",
+                  theme === 'dark' ? "text-white" : "text-slate-900"
+                )}>
                   {progressModal.success ? (
                     progressModal.type === 'create' ? "✓ Entry saved successfully" : "✓ Entry updated successfully"
                   ) : progressModal.errorMsg ? (
@@ -10271,7 +10741,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   )}
                 </h3>
                 
-                <p className="text-xs text-slate-400 leading-relaxed font-medium">
+                <p className={cn(
+                  "text-xs leading-relaxed font-medium",
+                  theme === 'dark' ? "text-slate-400" : "text-slate-600"
+                )}>
                   {progressModal.success ? (
                     "Your secure ledger has been successfully updated."
                   ) : progressModal.errorMsg ? (
@@ -10287,36 +10760,47 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
 
               {/* Steps Timeline checklist */}
-              <div className="mt-8 w-full max-w-[280px] bg-slate-900/40 border border-slate-800/40 rounded-2xl p-4 text-left space-y-3.5">
+              <div className={cn(
+                "mt-8 w-full max-w-[280px] rounded-2xl p-4 text-left space-y-3.5 border transition-all duration-300",
+                theme === 'dark' 
+                  ? "bg-slate-900/40 border-slate-800/40" 
+                  : "bg-slate-50 border-slate-150"
+              )}>
                 {progressModal.steps.map((step, idx) => (
                   <div key={idx} className="flex items-center justify-between text-xs font-bold tracking-tight">
                     <span className={cn(
                       "transition-colors duration-200 font-sans",
-                      step.status === 'success' ? "text-emerald-400" :
-                      step.status === 'loading' ? "text-white" :
-                      step.status === 'error' ? "text-rose-400" : "text-slate-500"
+                      step.status === 'success' ? (theme === 'dark' ? "text-emerald-400" : "text-emerald-600") :
+                      step.status === 'loading' ? (theme === 'dark' ? "text-white" : "text-slate-900") :
+                      step.status === 'error' ? (theme === 'dark' ? "text-rose-400" : "text-rose-600") : 
+                      (theme === 'dark' ? "text-slate-500" : "text-slate-400")
                     )}>
                       {step.label}
                     </span>
                     
                     <div className="flex items-center gap-1.5 font-mono text-[10px]">
                       {step.status === 'success' && (
-                        <span className="text-emerald-400 flex items-center gap-1">
+                        <span className={cn(
+                          "flex items-center gap-1",
+                          theme === 'dark' ? "text-emerald-400" : "text-emerald-600"
+                        )}>
                           <Check size={12} className="stroke-[3]" />
                           <span>Done</span>
                         </span>
                       )}
                       {step.status === 'loading' && (
-                        <span className="text-indigo-400 flex items-center gap-1.5 animate-pulse">
+                        <span className="text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 animate-pulse">
                           <Loader2 size={11} className="animate-spin" />
                           <span>Active</span>
                         </span>
                       )}
                       {step.status === 'pending' && (
-                        <span className="text-slate-600">Waiting</span>
+                        <span className={cn(
+                          theme === 'dark' ? "text-slate-600" : "text-slate-400"
+                        )}>Waiting</span>
                       )}
                       {step.status === 'error' && (
-                        <span className="text-rose-500 font-black">Failed</span>
+                        <span className="text-rose-600 dark:text-rose-500 font-black">Failed</span>
                       )}
                     </div>
                   </div>
@@ -10368,7 +10852,30 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </button>
                 <div>
                   <p className="font-bold">Attachment Preview</p>
-                  <p className="text-xs text-slate-400">{previewIndex + 1} of {previewImages.length}</p>
+                  <div className="flex flex-col text-xs text-slate-400 gap-0.5 mt-0.5">
+                    <p>{previewIndex + 1} of {previewImages.length}</p>
+                    {(() => {
+                      const activePreviewTx = activeBook?.transactions.find(tx => tx.id === previewTransactionId);
+                      const activeAttDetail = activePreviewTx?.attachment_details?.find(att => att.file_url === previewImages[previewIndex]) || activePreviewTx?.attachment_details?.[previewIndex];
+                      if (!activeAttDetail) return null;
+                      return (
+                        <div className="flex flex-col gap-0.5 mt-1 border-t border-white/10 pt-1">
+                          {activeAttDetail.user_name && (
+                            <p className="flex items-center gap-1 text-slate-350">
+                              <User size={10} className="text-indigo-400 shrink-0" />
+                              <span>By: <strong>{activeAttDetail.user_name}</strong> {activeAttDetail.user_email ? `(${activeAttDetail.user_email})` : ''}</span>
+                            </p>
+                          )}
+                          {(activeAttDetail.created_at || activePreviewTx?.created_at) && (
+                            <p className="flex items-center gap-1 text-slate-350">
+                              <Clock size={10} className="text-indigo-400 shrink-0" />
+                              <span>Uploaded: <strong>{formatDateTime12h(activeAttDetail.created_at || activePreviewTx?.created_at)}</strong></span>
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
                 </div>
               </div>
               
@@ -10866,7 +11373,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       </AnimatePresence>
 
       <AnimatePresence>
-        {isSubmitting && !submitAndAddNew && (
+        {isSubmitting && (
           <div className={cn(
             "fixed inset-0 z-[200] flex items-center justify-center p-4 backdrop-blur-md transition-colors duration-300",
             theme === 'dark' ? "bg-black/80" : "bg-slate-900/40"
@@ -10898,7 +11405,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <h3 className={cn(
                   "text-xl font-black transition-colors duration-300",
                   theme === 'dark' ? "text-white" : "text-black"
-                )}>{submittingMessage}</h3>
+                )}>{submitAndAddNew ? "Your entry is being saved..." : (submittingMessage || "Saving your entry...")}</h3>
                 <p className={cn(
                   "text-sm font-medium transition-colors duration-300",
                   theme === 'dark' ? "text-slate-400" : "text-slate-600"
@@ -11515,15 +12022,6 @@ Open TrackBook → Import Shared Entries`)}`}
                 <Share size={16} />
                 <span>Share</span>
               </button>
-              {selectedTransactions.size >= 2 && (
-                <button
-                  onClick={openMergeDialog}
-                  className="flex flex-col items-center justify-center h-16 rounded-[18px] transition-all font-bold font-sans text-[10px] tracking-wider uppercase gap-1.5 bg-indigo-650 border border-indigo-750 text-white cursor-pointer hover:bg-indigo-700 active:scale-95 duration-150 shadow-lg shadow-indigo-600/20"
-                >
-                  <Merge size={16} />
-                  <span>Merge</span>
-                </button>
-              )}
               <button
                 onClick={() => { setShowBulkTransactionDeleteConfirm(true); setDeleteConfirmed(false); }}
                 className="flex flex-col items-center justify-center h-16 rounded-[18px] transition-all font-bold font-sans text-[10px] tracking-wider uppercase gap-1.5 bg-rose-600 border border-rose-650 text-white cursor-pointer hover:bg-rose-700 active:scale-95 duration-150 shadow-lg shadow-rose-600/20"

@@ -77,7 +77,7 @@ function generateSmartDescription(billType: string, groupSize: number, meal?: st
   return `${billType} Expense`;
 }
 
-// Helper to strictly override classification if merchant name contains any travel keywords (BUG 1)
+// Helper to strictly override classification if merchant name or raw OCR contains any travel keywords (BUG 1)
 function overrideTravelClassificationIfNeeded(data: {
   merchant: string;
   category: string;
@@ -85,19 +85,66 @@ function overrideTravelClassificationIfNeeded(data: {
   description: string;
   groupSize: number;
   mealType?: string;
-}) {
-  const travelKeywords = [
-    "uber", "rapido", "ola", "auto ride", "auto", "taxi", "cab", "bike ride", "redbus", "red bus", "abhibus", "abhi bus", "bus", "train", "metro"
+  date?: string;
+}, rawOcrText?: string) {
+  const TRAVEL_CITIES = [
+    "delhi", "mumbai", "bangalore", "pune", "kolkata", "chennai", "hyderabad", 
+    "gurgaon", "noida", "jaipur", "ahmedabad", "surat", "coimbatore", "goa",
+    "bengaluru", "kochi", "patna", "lucknow"
+  ];
+
+  const TRAVEL_KEYWORDS = [
+    "pickup", "drop", "ride", "trip", "cab", "taxi", "uber", "ola", "rapido", 
+    "metro", "bus", "train", "flight", "airport", "travels", "travel", "blusmart", "savaari"
   ];
   
   const merchantLower = (data.merchant || "").toLowerCase();
-  const containsTravelKeyword = travelKeywords.some(kw => merchantLower.includes(kw));
+  const descLower = (data.description || "").toLowerCase();
+  const ocrLower = (rawOcrText || "").toLowerCase();
+
+  const isCityMatch = TRAVEL_CITIES.some(city => 
+    merchantLower.includes(city) || descLower.includes(city) || ocrLower.includes(city)
+  );
+
+  const isKeywordMatch = TRAVEL_KEYWORDS.some(kw => 
+    merchantLower.includes(kw) || descLower.includes(kw) || ocrLower.includes(kw)
+  );
   
-  if (containsTravelKeyword) {
-    data.category = "Travel";
-    data.billType = "Travel";
-    data.description = generateSmartDescription("Travel", data.groupSize);
+  if (isCityMatch || isKeywordMatch) {
+    data.category = "Transport";
+    
+    let matchedBillType = "Taxi";
+    const mLower = merchantLower;
+    const oLower = ocrLower;
+    const dLower = descLower;
+    if (mLower.includes("bus") || mLower.includes("redbus") || mLower.includes("abhibus") || oLower.includes("redbus") || oLower.includes("abhibus") || oLower.includes("red bus") || oLower.includes("abhi bus") || dLower.includes("bus")) {
+      matchedBillType = "Bus";
+    } else if (mLower.includes("train") || mLower.includes("metro") || oLower.includes("train") || oLower.includes("metro") || oLower.includes("irctc") || dLower.includes("train") || dLower.includes("metro")) {
+      matchedBillType = "Train";
+    } else if (mLower.includes("cab") || mLower.includes("ola") || oLower.includes("ola cab") || oLower.includes("ola-cab") || dLower.includes("cab") || dLower.includes("ola")) {
+      matchedBillType = "Cab";
+    } else if (mLower.includes("uber") || mLower.includes("rapido") || oLower.includes("uber") || oLower.includes("rapido") || dLower.includes("uber") || dLower.includes("rapido")) {
+      matchedBillType = "Taxi";
+    } else if (mLower.includes("flight") || mLower.includes("airport") || oLower.includes("flight") || oLower.includes("airport") || dLower.includes("flight") || dLower.includes("airport")) {
+      matchedBillType = "Flight";
+    }
+    data.billType = matchedBillType;
+    data.description = generateSmartDescription(matchedBillType, data.groupSize);
     data.mealType = undefined;
+
+    // Date is mandatory for Travel receipts. If a travel receipt is detected, a date must be present (or extracted).
+    if (!data.date || data.date === "24-06-2026") {
+      const extractedDate = parseAndStandardizeDate(rawOcrText || "");
+      if (extractedDate) {
+        data.date = extractedDate;
+      } else {
+        const today = new Date();
+        const day = String(today.getDate()).padStart(2, '0');
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const year = today.getFullYear();
+        data.date = `${day}-${month}-${year}`;
+      }
+    }
   }
 }
 
@@ -348,7 +395,7 @@ function extractTime(text: string): string | null {
 }
 
 // Helper to extract merchant name & category (strictly Food or Travel)
-function extractMerchantAndCategory(text: string): { merchant: string | null; category: "Food" | "Travel" | null } {
+function extractMerchantAndCategory(text: string): { merchant: string | null; category: "Food" | "Transport" | null } {
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   
   // 1. Check Travel first (Critical Issue #1)
@@ -390,7 +437,7 @@ function extractMerchantAndCategory(text: string): { merchant: string | null; ca
 
     return {
       merchant: travelMerchant || "Travel Expense",
-      category: "Travel"
+      category: "Transport"
     };
   }
 
@@ -444,7 +491,7 @@ function extractMerchantAndCategory(text: string): { merchant: string | null; ca
 
   return {
     merchant: merchantCandidate,
-    category: isFood ? "Food" : "Food" // Default non-travel category to Food as specified: only two supported categories are Food and Travel
+    category: isFood ? "Food" : "Other" // Default non-travel category to Other instead of Food
   };
 }
 
@@ -480,7 +527,7 @@ function runFallbackEngine(ocrText: string, ocrConfidence: number, groupSize: nu
     isHandwritten: false
   };
 
-  overrideTravelClassificationIfNeeded(fallbackRes);
+  overrideTravelClassificationIfNeeded(fallbackRes, ocrText);
   return fallbackRes;
 }
 
@@ -532,7 +579,7 @@ function runRuleEngine(ocrText: string, ocrConfidence: number, groupSize: number
     isHandwritten: false
   };
 
-  overrideTravelClassificationIfNeeded(ruleRes);
+  overrideTravelClassificationIfNeeded(ruleRes, ocrText);
   return ruleRes;
 }
 
@@ -650,19 +697,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
 
+  const { 
+    base64Image, 
+    mimeType, 
+    images,
+    groupSize = 1, 
+    isHandwritten = false, 
+    handwrittenTime = "", 
+    handwrittenIsFood = false,
+    ocrText = "",
+    ocrConfidence = 0
+  } = req.body || {};
+
   try {
-    const { 
-      base64Image, 
-      mimeType, 
-      images,
-      groupSize = 1, 
-      isHandwritten = false, 
-      handwrittenTime = "", 
-      handwrittenIsFood = false,
-      ocrText = "",
-      ocrConfidence = 0
-    } = req.body;
-    
     if (!ocrText && !base64Image && (!images || !Array.isArray(images) || images.length === 0)) {
       return res.status(400).json({ error: "No receipt image or OCR text provided." });
     }
@@ -730,8 +777,8 @@ ${customInstructions}
 Extract and classify into the following keys carefully:
 1. amount: This must be a number representing the total amount paid on the receipt. CRITICAL PRIORITY: If there is a 'Paid' (or 'Amount Paid', 'Paid Amount', 'Net Paid', etc.) line showing the actual amount paid (especially after discounts, coupons, or adjustments), you MUST extract that paid amount. If there is no 'Paid' amount, fall back to extracting the 'Grand Total' or 'Total' amount. If multiple receipts, return the SUM of their respective extracted amounts.
 2. merchant: Name of the vendor/merchant.
-3. billType: MUST be classified into exactly one of these: Food, Travel.
-4. category: Maps strictly to one of these: Food, Travel.
+3. billType: MUST be classified into exactly one of these: Restaurant, Food, Taxi, Cab, Bus, Train, Flight, Fuel, Groceries, Medical, Shopping, Utilities, Internet, Recharge, Hotel, Entertainment. (Note: Uber, Ola, Rapido and other ride/taxi receipts are strictly Taxi or Cab under billType and Transport under category. Never classify them as Restaurant or Food).
+4. category: Maps strictly to one of these: Food, Transport, Utilities, Shopping, Entertainment, Health, Education, Salary, Other.
 5. date: Extract the main payment/invoice date in DD-MM-YYYY format.
 6. time: ${isHandwritten && handwrittenTime ? `Return exactly "${handwrittenTime}"` : `Extract the time of the receipt. Use HH:mm format if possible or standard 12-hour AM/PM. If not found, return "12:00 PM".`}
 7. isHandwritten: Set to true if the receipt is handwritten, otherwise set to false.`
@@ -798,13 +845,72 @@ Extract and classify into the following keys carefully:
     };
     const finalAmount = cleanStringAmount(parsedData.amount);
     
-    // Normalize Category to strictly Food or Travel
-    let finalCategory = "Food";
-    if (parsedData.category === "Travel" || parsedData.category === "Transport" || ["Taxi", "Cab", "Bus", "Train", "Flight", "Fuel", "Travel"].some(t => t.toLowerCase() === String(parsedData.billType).toLowerCase())) {
-      finalCategory = "Travel";
+    // Normalize Category to match frontend options (strictly Food or Transport)
+    let finalCategory = "Other";
+    
+    const TRAVEL_CITIES = [
+      "delhi", "mumbai", "bangalore", "pune", "kolkata", "chennai", "hyderabad", 
+      "gurgaon", "noida", "jaipur", "ahmedabad", "surat", "coimbatore", "goa",
+      "bengaluru", "kochi", "patna", "lucknow"
+    ];
+
+    const TRAVEL_KEYWORDS = [
+      "pickup", "drop", "ride", "trip", "cab", "taxi", "uber", "ola", "rapido", 
+      "metro", "bus", "train", "flight", "airport", "travels", "travel", "blusmart", "savaari"
+    ];
+
+    const mLower = String(parsedData.merchant || "").toLowerCase();
+    const dLower = String(parsedData.description || "").toLowerCase();
+    const oLower = String(ocrText || "").toLowerCase();
+    const bLower = String(parsedData.billType || "").toLowerCase();
+
+    const isTravelMatch = TRAVEL_KEYWORDS.some(kw => mLower.includes(kw) || dLower.includes(kw) || oLower.includes(kw)) ||
+                           TRAVEL_CITIES.some(city => mLower.includes(city) || dLower.includes(city) || oLower.includes(city));
+
+    if (isTravelMatch || parsedData.category === "Travel" || parsedData.category === "Transport" || ["Taxi", "Cab", "Bus", "Train", "Flight", "Fuel", "Travel"].some(t => t.toLowerCase() === String(parsedData.billType).toLowerCase())) {
+      finalCategory = "Transport";
+    } else {
+      // Only classify as Food if there is a clear food-related merchant or item. Food should not be the fallback category for Travel-like transactions.
+      const foodKeywords = [
+        "biryani", "restaurant", "cafe", "kitchen", "hotel", "food", "dhaba", 
+        "canteen", "bakery", "pizza", "burger", "coffee", "tea", "sweets", "bar",
+        "diner", "grill", "bistro", "eatery", "kfc", "domino", "mcdonald", "paradise", "mehfil"
+      ];
+      
+      const isFoodMatch = foodKeywords.some(kw => mLower.includes(kw) || dLower.includes(kw) || oLower.includes(kw)) ||
+                          String(parsedData.category).toLowerCase() === "food" || String(parsedData.billType).toLowerCase() === "food" || String(parsedData.billType).toLowerCase() === "restaurant";
+
+      if (isFoodMatch) {
+        finalCategory = "Food";
+      } else {
+        finalCategory = "Other"; // Default fallback to Other instead of Food
+      }
     }
 
-    const finalBillType = finalCategory;
+    let finalBillType = "Food";
+    if (finalCategory === "Transport") {
+      let matchedBillType = "Taxi";
+      if (mLower.includes("bus") || mLower.includes("redbus") || mLower.includes("abhibus") || bLower.includes("bus")) {
+        matchedBillType = "Bus";
+      } else if (mLower.includes("train") || mLower.includes("metro") || bLower.includes("train") || bLower.includes("metro")) {
+        matchedBillType = "Train";
+      } else if (mLower.includes("cab") || mLower.includes("ola") || bLower.includes("cab")) {
+        matchedBillType = "Cab";
+      } else if (mLower.includes("uber") || mLower.includes("rapido") || bLower.includes("taxi")) {
+        matchedBillType = "Taxi";
+      } else if (mLower.includes("flight") || mLower.includes("airport") || bLower.includes("flight") || bLower.includes("airport")) {
+        matchedBillType = "Flight";
+      }
+      finalBillType = matchedBillType;
+    } else {
+      if (bLower.includes("restaurant") || bLower.includes("hotel") || bLower.includes("cafe") || bLower.includes("dine")) {
+        finalBillType = "Restaurant";
+      } else if (finalCategory === "Food") {
+        finalBillType = "Food";
+      } else {
+        finalBillType = parsedData.billType || "Expense";
+      }
+    }
     const finalMerchant = parsedData.merchant || "Unknown Vendor";
 
     // Standardize Date
@@ -835,7 +941,7 @@ Extract and classify into the following keys carefully:
       isHandwritten: parsedData.isHandwritten ?? isHandwritten
     };
 
-    overrideTravelClassificationIfNeeded(finalResult);
+    overrideTravelClassificationIfNeeded(finalResult, ocrText);
 
     return res.status(200).json(finalResult);
 

@@ -97,7 +97,7 @@ function NavigationHandler({
           navigate('/resetpassword' + currentHash, { replace: true });
         }
       } else if (event === 'SIGNED_IN' && (currentPath === '/login' || currentPath === '/register' || currentPath === '/signup')) {
-        navigate('/', { replace: true });
+        navigate('/cashbooks', { replace: true });
       } else if (event === 'SIGNED_OUT') {
         navigate('/login', { replace: true });
       }
@@ -204,7 +204,7 @@ export default function App() {
             path="/" 
             element={
               session ? (
-                <Dashboard session={session} theme={theme} setTheme={setTheme} />
+                <Navigate to="/cashbooks" replace />
               ) : (
                 // If we are still loading initial session, show a loader
                 loading ? (

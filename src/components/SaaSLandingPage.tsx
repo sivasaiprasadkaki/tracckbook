@@ -173,7 +173,7 @@ export default function SaaSLandingPage({
           ? "bg-[#030303]/85 border-zinc-900" 
           : "bg-white/90 border-[#E5E7EB] shadow-sm"
       )}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-[1366px] lg:max-w-[1440px] xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 h-16 flex items-center justify-between">
           <div className="flex items-center gap-1.5 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
             <span className="text-[22px] font-black text-blue-600 tracking-tight">Track</span>
             <span className={cn(
@@ -183,7 +183,7 @@ export default function SaaSLandingPage({
           </div>
 
           {/* Desktop scroll items */}
-          <nav className="hidden lg:flex items-center gap-10 text-[12px] font-semibold font-lora uppercase tracking-wide">
+          <nav className="hidden lg:flex items-center gap-10 lg:gap-12 xl:gap-16 2xl:gap-20 text-[12px] font-semibold font-lora uppercase tracking-wide">
             <button 
               onClick={() => scrollToId('trackbook-ai')}
               className={cn("hover:text-blue-500 transition-colors uppercase outline-none cursor-pointer", theme === 'dark' ? "text-zinc-400" : "text-[#6B7280]")}
@@ -221,7 +221,7 @@ export default function SaaSLandingPage({
       </header>
 
       {/* HERO SECTION DECORATED WITH FLOATING ELEMENTS */}
-      <section className="relative pt-24 pb-32 md:pt-32 md:pb-40 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 z-10 flex flex-col items-center">
+      <section className="relative pt-24 pb-32 md:pt-32 md:pb-40 max-w-[1366px] lg:max-w-[1440px] xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 z-10 flex flex-col items-center">
         {/* Subtle Wave SVG background behind text */}
         <div className="absolute inset-x-0 top-1/4 h-24 opacity-25 pointer-events-none overflow-hidden">
           <svg className="w-full h-full fill-none stroke-blue-500/20" viewBox="0 0 1440 100" preserveAspectRatio="none">
@@ -236,7 +236,7 @@ export default function SaaSLandingPage({
           </svg>
         </div>
 
-        <div className="text-center space-y-10 max-w-5xl mx-auto scale-95 lg:scale-100 transition-transform">
+        <div className="text-center space-y-10 max-w-[1100px] xl:max-w-[1300px] 2xl:max-w-[1500px] mx-auto scale-95 lg:scale-100 transition-transform">
           <motion.div
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
@@ -304,7 +304,7 @@ export default function SaaSLandingPage({
         </div>
 
         {/* Floating cards showcasing quick feature status */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-5xl w-full mt-24 relative">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-[1100px] xl:max-w-[1300px] 2xl:max-w-[1500px] w-full mt-24 relative">
           <motion.div 
             animate={{ y: [0, -6, 0] }}
             transition={{ repeat: Infinity, duration: 4.8, ease: "easeInOut" }}
@@ -384,13 +384,13 @@ export default function SaaSLandingPage({
       {/* FEATURE 1: TRACKBOOK AI SECTION */}
       <motion.section 
         id="trackbook-ai" 
-        className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-[#E5E7EB]/50"
+        className="py-20 max-w-[1366px] lg:max-w-[1440px] xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 border-t border-[#E5E7EB]/50"
         initial={{ opacity: 0, y: 30 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.1 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
       >
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 xl:gap-20 2xl:gap-24 items-center">
           <div className="lg:col-span-5 space-y-6 text-left">
             <span className="inline-block mb-2 text-[10px] font-black uppercase tracking-widest text-blue-600 bg-blue-500/10 px-3.5 py-1.5 rounded-full border border-blue-500/20">
               🔥 Feature #1: TrackBook AI Ingestion
@@ -608,13 +608,13 @@ export default function SaaSLandingPage({
       {/* FEATURE 2: IMPORT & EXPORT ENTRIES */}
       <motion.section 
         id="import-export" 
-        className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-[#E5E7EB]/50"
+        className="py-20 max-w-[1366px] lg:max-w-[1440px] xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 border-t border-[#E5E7EB]/50"
         initial={{ opacity: 0, y: 30 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.1 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
       >
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 xl:gap-20 2xl:gap-24 items-center">
           
           <div className="lg:col-span-7 order-2 lg:order-1">
             <div className={cn(
@@ -789,13 +789,13 @@ export default function SaaSLandingPage({
       {/* FEATURE 3: PDF & EXCEL REPORTS */}
       <motion.section 
         id="reports" 
-        className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-[#E5E7EB]/50"
+        className="py-20 max-w-[1366px] lg:max-w-[1440px] xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 border-t border-[#E5E7EB]/50"
         initial={{ opacity: 0, y: 30 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.1 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
       >
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 xl:gap-20 2xl:gap-24 items-center">
           
           <div className="lg:col-span-5 space-y-6 text-left">
             <span className="inline-block mb-2 text-[10px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3.5 py-1.5 rounded-full border border-emerald-500/20">
@@ -1041,13 +1041,13 @@ export default function SaaSLandingPage({
       {/* FEATURE 4: ANALYTICS */}
       <motion.section 
         id="analytics" 
-        className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-blue-100/30"
+        className="py-20 max-w-[1366px] lg:max-w-[1440px] xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 border-t border-blue-100/30"
         initial={{ opacity: 0, y: 30 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.1 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
       >
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 xl:gap-20 2xl:gap-24 items-center">
           
           <div className="lg:col-span-7">
             {/* Visual SVG chart preview with INR hover states */}
@@ -1187,13 +1187,13 @@ export default function SaaSLandingPage({
       {/* SECURITY PROTECTION SECTION */}
       <motion.section 
         id="security" 
-        className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-[#E5E7EB]/50"
+        className="py-20 max-w-[1366px] lg:max-w-[1440px] xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 border-t border-[#E5E7EB]/50"
         initial={{ opacity: 0, y: 30 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.1 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
       >
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 xl:gap-20 2xl:gap-24 items-center">
           <div className="lg:col-span-5 space-y-6 text-left">
             <span className="text-[10px] font-black uppercase tracking-widest text-[#3b82f6] bg-blue-500/10 px-3.5 py-1.5 rounded-full border border-blue-500/20">
               🛡️ Origin security
@@ -1256,7 +1256,7 @@ export default function SaaSLandingPage({
         "py-16 md:py-20 text-center transition-colors duration-300 border-t",
         theme === 'dark' ? "bg-[#050505] border-zinc-950" : "bg-[#F9FAFB] border-[#E5E7EB]"
       )}>
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+        <div className="max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 space-y-6">
           <h2 className="text-2xl sm:text-3xl font-bold font-lora tracking-tight leading-normal text-[#111111] dark:text-white">
             Ready to Track Smarter?
           </h2>
@@ -1294,7 +1294,7 @@ export default function SaaSLandingPage({
         "py-10 border-t font-mono text-[9px] text-center",
         theme === 'dark' ? "bg-black border-zinc-900 text-zinc-500" : "bg-[#F3F4F6] border-[#E5E7EB] text-[#4B5563]"
       )}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-2">
+        <div className="max-w-[1366px] lg:max-w-[1440px] xl:max-w-[1600px] 2xl:max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-12 space-y-2">
           <p className="font-black text-blue-600 uppercase tracking-widest text-[10px]">
             TrackBook Inc. • Secure Origin Isolated Platform • <a href="https://trackbook.xyz" target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-500 transition-colors normal-case">trackbook.xyz</a>
           </p>

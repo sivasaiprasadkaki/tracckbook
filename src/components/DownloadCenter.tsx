@@ -311,24 +311,37 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                 initial={{ opacity: 0, x: 50, y: -10 }}
                 animate={{ opacity: 1, x: 0, y: 0 }}
                 exit={{ opacity: 0, x: 50, scale: 0.9 }}
-                className="bg-zinc-950/95 border border-zinc-850 p-4 rounded-2xl shadow-2xl flex flex-col gap-3 pointer-events-auto backdrop-blur-md text-white"
+                className={cn(
+                  "p-4 rounded-2xl shadow-2xl flex flex-col gap-3 pointer-events-auto backdrop-blur-md transition-all duration-300 border",
+                  theme === 'dark'
+                    ? "bg-zinc-950/95 border-zinc-850 text-white"
+                    : "bg-white border-slate-200 text-slate-900"
+                )}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex gap-2">
                     <div className={cn(
                       "p-1.5 rounded-xl text-white mt-0.5",
-                      notif.type === 'ai' ? "bg-indigo-600" : notif.type === 'excel' ? "bg-emerald-600" : "bg-blue-600"
+                      notif.type === 'ai' ? "bg-indigo-600" : notif.type === 'excel' ? "bg-emerald-600" : "bg-red-600"
                     )}>
                       {notif.type === 'ai' ? <Sparkles size={14} /> : notif.type === 'excel' ? <FileSpreadsheet size={14} /> : <FileText size={14} />}
                     </div>
                     <div>
                       <h5 className="text-xs font-black tracking-tight">{notifTitle}</h5>
-                      <p className="text-[10px] text-zinc-400 font-semibold font-sans mt-0.5 leading-normal">{notif.message}</p>
+                      <p className={cn(
+                        "text-[10px] font-semibold font-sans mt-0.5 leading-normal",
+                        theme === 'dark' ? "text-zinc-400" : "text-slate-500"
+                      )}>{notif.message}</p>
                     </div>
                   </div>
                   <button 
                     onClick={() => backgroundExportManager.dismissNotification(notif.id)}
-                    className="p-1 rounded-md text-zinc-500 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer"
+                    className={cn(
+                      "p-1 rounded-md transition-colors cursor-pointer",
+                      theme === 'dark' 
+                        ? "text-zinc-500 hover:text-white hover:bg-zinc-900" 
+                        : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+                    )}
                   >
                     <X size={12} />
                   </button>
