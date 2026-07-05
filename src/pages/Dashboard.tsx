@@ -3950,6 +3950,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         // Synchronize attachment links
         await supabase.from('attachments').delete().eq('entry_id', editingTransaction.id);
+        await supabase.from('ai_attachments').delete().eq('entry_id', editingTransaction.id);
         if (finalImages.length > 0) {
           const resolvedUser = await resolveUserDataForAttachments();
           const attachmentInserts = finalImages.map(url => ({
