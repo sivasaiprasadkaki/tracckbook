@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&family=Hanken+Grotesk:wght@600;700&family=Geist:wght@400;500&display=swap');
 @import "tailwindcss";
 @variant dark (&:where(.dark, .dark *));
 @plugin "@tailwindcss/typography";
@@ -10,6 +10,76 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   --font-arvo: "Plus Jakarta Sans", sans-serif;
   --font-lora: "Plus Jakarta Sans", sans-serif;
+
+  /* Custom fonts from TrackBook Desktop Config */
+  --font-body-md: "Inter", sans-serif;
+  --font-headline-lg: "Hanken Grotesk", sans-serif;
+  --font-display-lg: "Hanken Grotesk", sans-serif;
+  --font-body-lg: "Inter", sans-serif;
+  --font-mono-data: "Geist", monospace;
+  --font-headline-lg-mobile: "Hanken Grotesk", sans-serif;
+  --font-body-sm: "Inter", sans-serif;
+  --font-headline-md: "Hanken Grotesk", sans-serif;
+  --font-label-md: "Geist", monospace;
+
+  /* Spacings from TrackBook Desktop Config */
+  --spacing-margin-mobile: 16px;
+  --spacing-stack-sm: 4px;
+  --spacing-container-max: 1280px;
+  --spacing-gutter: 24px;
+  --spacing-stack-md: 12px;
+  --spacing-stack-lg: 24px;
+  --spacing-base: 8px;
+  --spacing-margin-desktop: 40px;
+
+  /* Colors from TrackBook Desktop Config */
+  --color-on-secondary: #ffffff;
+  --color-tertiary: #5b00d2;
+  --color-surface-bright: #f8f9fd;
+  --color-on-surface-variant: #474556;
+  --color-on-secondary-fixed-variant: #004e60;
+  --color-on-primary-fixed-variant: #3e04db;
+  --color-primary-container: #5b3df5;
+  --color-error-container: #ffdad6;
+  --color-surface-container: #edeef2;
+  --color-surface-tint: #5738f1;
+  --color-tertiary-fixed-dim: #d1bcff;
+  --color-on-tertiary-fixed: #23005b;
+  --color-on-primary: #ffffff;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-fixed: #e9ddff;
+  --color-surface-container-lowest: #ffffff;
+  --color-outline-variant: #c8c4d9;
+  --color-primary-fixed-dim: #c7bfff;
+  --color-tertiary-container: #7621ff;
+  --color-inverse-on-surface: #eff1f5;
+  --color-on-tertiary-container: #e6d8ff;
+  --color-secondary-fixed: #b7eaff;
+  --color-on-primary-container: #e0daff;
+  --color-on-error-container: #93000a;
+  --color-primary-fixed: #e4dfff;
+  --color-background: #f8f9fd;
+  --color-error: #ba1a1a;
+  --color-secondary-fixed-dim: #4cd6ff;
+  --color-surface-container-low: #f2f3f7;
+  --color-inverse-surface: #2e3134;
+  --color-surface: #f8f9fd;
+  --color-on-primary-fixed: #170065;
+  --color-secondary-container: #00ccf9;
+  --color-secondary: #00677f;
+  --color-surface-container-highest: #e1e2e6;
+  --color-surface-dim: #d9dade;
+  --color-on-surface: #191c1f;
+  --color-on-tertiary-fixed-variant: #5700c9;
+  --color-on-secondary-container: #005266;
+  --color-surface-variant: #e1e2e6;
+  --color-outline: #787588;
+  --color-on-background: #191c1f;
+  --color-surface-container-high: #e7e8ec;
+  --color-inverse-primary: #c7bfff;
+  --color-on-error: #ffffff;
+  --color-on-secondary-fixed: #001f28;
+  --color-primary: #4212de;
 }
 
 @layer base {
@@ -34,6 +104,56 @@
   }
 }
 
+@utility text-body-md {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+}
+@utility text-headline-lg {
+  font-size: 32px;
+  line-height: 40px;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+@utility text-display-lg {
+  font-size: 48px;
+  line-height: 56px;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+@utility text-body-lg {
+  font-size: 18px;
+  line-height: 28px;
+  font-weight: 400;
+}
+@utility text-mono-data {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+@utility text-headline-lg-mobile {
+  font-size: 28px;
+  line-height: 36px;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+@utility text-body-sm {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+@utility text-headline-md {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 600;
+}
+@utility text-label-md {
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+}
+
 @keyframes progressMoving {
   0% { left: -40%; }
   100% { left: 100%; }
@@ -42,4 +162,109 @@
 .animate-progress-smooth {
   animation: progressMoving 1.5s infinite ease-in-out;
 }
+
+/* Custom Visual Styles for TrackBook Desktop UI */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-top: 1px solid rgba(255, 255, 255, 0.4);
+  border-left: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.glass-panel-opaque {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.04);
+}
+
+.glass-panel-opaque-shadow {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+.glass-panel-dark {
+  background: rgba(91, 61, 245, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.bg-mesh-gradient {
+  background-color: #4212de;
+  background-image: 
+    radial-gradient(at 0% 0%, hsla(271,100%,50%,1) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, hsla(190,100%,49%,1) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, hsla(271,100%,50%,1) 0px, transparent 50%),
+    radial-gradient(at 0% 100%, hsla(190,100%,49%,1) 0px, transparent 50%);
+}
+
+.mesh-gradient-bg {
+  background-image: radial-gradient(at 40% 20%, hsla(250, 89%, 60%, 1) 0px, transparent 50%),
+                    radial-gradient(at 80% 0%, hsla(190, 100%, 49%, 1) 0px, transparent 50%),
+                    radial-gradient(at 0% 50%, hsla(250, 100%, 85%, 1) 0px, transparent 50%);
+  background-color: #f8f9fd;
+}
+
+.input-glow:focus-within {
+  box-shadow: 0 0 0 3px rgba(91, 61, 245, 0.15);
+}
+
+.float-anim {
+  animation: float 6s ease-in-out infinite;
+}
+
+.float-anim-delayed {
+  animation: float 6s ease-in-out 3s infinite;
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+
+.fade-in-up {
+  animation: fadeInUp 0.8s ease-out forwards;
+  opacity: 0;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.input-field {
+  transition: all 0.3s ease;
+}
+.input-field:focus {
+  border-color: #5b3df5;
+  box-shadow: 0 0 0 4px rgba(91, 61, 245, 0.1);
+  outline: none;
+}
+
+.btn-primary {
+  background: #5b3df5;
+  color: white;
+  transition: all 0.3s ease;
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, #5b3df5 0%, #7621ff 100%);
+  box-shadow: 0 4px 15px rgba(91, 61, 245, 0.3);
+  transform: translateY(-1px);
+}
+
+.link-hover {
+  transition: color 0.2s ease;
+}
+.link-hover:hover {
+  color: #5b3df5;
+}
+
 

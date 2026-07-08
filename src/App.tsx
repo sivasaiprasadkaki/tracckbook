@@ -10,23 +10,6 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Login = lazy(() => import('./pages/Login'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const AdminPortal = lazy(() => import('./pages/AdminPortal'));
-const SaaSLandingPage = lazy(() => import('./components/SaaSLandingPage'));
-
-function PublicLandingPage({ theme }: { theme: 'light' | 'dark' }) {
-  const navigate = useNavigate();
-  return (
-    <SaaSLandingPage 
-      theme={theme} 
-      onActionClick={(mode) => {
-        if (mode === 'signup') {
-          navigate('/signup');
-        } else {
-          navigate('/login');
-        }
-      }} 
-    />
-  );
-}
 
 function NavigationHandler({ 
   session, 
@@ -215,7 +198,7 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <PublicLandingPage theme={theme} />
+                  <Navigate to="/login" replace />
                 )
               )
             } 
