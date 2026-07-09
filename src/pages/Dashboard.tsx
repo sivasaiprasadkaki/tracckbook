@@ -1038,7 +1038,7 @@ const MobileTransactionRow = React.memo(({
             "text-[10px] font-bold tracking-tight transition-colors duration-300",
             theme === 'dark' ? "text-zinc-500" : "text-slate-400"
           )}>
-            {formatDateTime12h(t.created_at || t.date)}
+            {formatDateTime12h(t.date || t.created_at)}
           </span>
           {t.user_name && (
             <>
@@ -1164,7 +1164,7 @@ const DesktopTransactionRow = React.memo(({
           "font-bold text-sm",
           theme === 'dark' ? "text-slate-200" : "text-slate-800"
         )}>
-          {formatDateTime12h(t.created_at || t.date)}
+          {formatDateTime12h(t.date || t.created_at)}
         </p>
       </td>
       <td className="px-3 sm:px-6 py-4 min-w-[120px]">
@@ -1333,7 +1333,7 @@ const SummaryCards = React.memo(({ totals, theme }: { totals: { in: number; out:
       </div>
 
       {/* Balance Cards Row (Desktop Only) */}
-      <div className="hidden lg:grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+      <div className="hidden lg:grid lg:grid-cols-3 w-full gap-4 sm:gap-6">
         <div className={cn(
           "p-6 rounded-3xl border flex items-center gap-4 shadow-sm transition-colors duration-300",
           theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
@@ -6129,7 +6129,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           "border-b sticky top-0 z-50 px-4 h-14 sm:h-16 transition-colors duration-300",
           theme === 'dark' ? "bg-black border-zinc-900" : "bg-white border-slate-100"
         )}>
-          <div className="max-w-[98%] mx-auto h-full flex items-center justify-between gap-2 sm:gap-4">
+          <div className="w-full h-full flex items-center justify-between gap-2 sm:gap-4 px-6 md:px-8">
             
             {/* Left: Logo */}
             <div className="flex items-center gap-2 shrink-0 font-outfit">
@@ -6300,7 +6300,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       )}
 
       {/* Main Content Area */}
-      <main className="w-full mx-auto p-2 sm:p-4 lg:p-6 lg:px-6 xl:px-10">
+      <main className="w-full px-6 md:px-8 py-6 sm:py-8">
         <AnimatePresence mode="wait">
           {!activeBookId ? (
             /* PAGE 1: HOME / BOOKS LIST */
@@ -6309,13 +6309,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="space-y-8"
+              className="space-y-6"
             >
               {/* User Welcome Section */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-0.5 sm:space-y-1">
                     <h2 className={cn(
-                      "text-2xl sm:text-3xl font-bold transition-colors duration-300 flex items-center gap-2 flex-wrap",
+                      "text-2xl sm:text-3xl lg:text-[clamp(1.5rem,2.2vw,1.875rem)] font-bold transition-colors duration-300 flex items-center gap-2 flex-wrap",
                       theme === 'dark' ? "text-slate-100" : "text-slate-800"
                     )}>
                       Hello, <span className="text-indigo-600 dark:text-indigo-400">{userName}</span>!
@@ -6428,9 +6428,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
               ) : (
                 <div className={cn(
-                  "grid gap-2 sm:gap-6",
+                  "grid gap-6 w-full",
                   viewMode === 'grid' 
-                    ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5" 
+                    ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" 
                     : "grid-cols-1"
                 )}>
                   {filteredBooks.map((book, index) => (
@@ -6453,7 +6453,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       onTouchEnd={onTouchEndBook}
                       onClick={() => handleBookPress(book.id)}
                       className={cn(
-                        "group p-4 sm:p-5 border rounded-2xl sm:rounded-3xl transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer",
+                        "group p-4 sm:p-5 md:p-4 border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full md:h-[120px]",
                         justEditedBookId === book.id
                           ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
                           : theme === 'dark' ? "bg-zinc-950 border-zinc-800" : "bg-white border-slate-100",
@@ -6466,45 +6466,45 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           </div>
                         </div>
                       )}
-                      <div className="flex-grow flex-1 min-w-0 flex items-center gap-2 sm:gap-4 pr-1 sm:pr-2">
-                        <div className="p-2 sm:p-3 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl sm:rounded-2xl group-hover:scale-110 transition-transform flex-shrink-0">
-                          <BookOpen size={20} className="sm:w-6 sm:h-6" />
+                      <div className="flex-grow flex-1 min-w-0 flex items-center gap-2 md:gap-3 pr-1 md:pr-1.5">
+                        <div className="p-2 md:p-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl md:rounded-[14px] group-hover:scale-110 transition-transform flex-shrink-0">
+                          <BookOpen size={18} className="w-[18px] h-[18px] md:w-5 md:h-5" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <h4 className={cn(
-                            "font-bold text-sm sm:text-lg break-words whitespace-normal leading-tight transition-colors duration-300",
+                            "font-bold text-xs sm:text-sm md:text-[14px] break-words whitespace-normal leading-snug line-clamp-2 transition-colors duration-300",
                             theme === 'dark' ? "text-slate-100" : "text-slate-800"
                           )}>{book.name}</h4>
                           <p className={cn(
-                            "text-[10px] sm:text-xs transition-colors duration-300",
+                            "text-[9px] md:text-[10px] mt-0.5 transition-colors duration-300",
                             theme === 'dark' ? "text-slate-500" : "text-slate-400"
                           )}>Created on {formatDateTime12h(book.createdAt)}</p>
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-2 sm:gap-6 flex-shrink-0 ml-3">
-                        <div className="flex items-center gap-0.5 sm:gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 sm:pl-4">
+                      <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0 ml-1.5 md:ml-3">
+                        <div className="flex items-center gap-0.5 md:gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 md:pl-2.5">
                           <button 
                             onClick={(e) => { e.stopPropagation(); setIsEditingBook(book.id); setEditBookName(book.name); }}
-                            className="p-1 sm:p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all"
+                            className="p-1 md:p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all"
                           >
-                            <Pencil size={12} className="sm:w-[18px] sm:h-[18px]" />
+                            <Pencil size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
                           </button>
                           <button 
                             onClick={(e) => { e.stopPropagation(); handleDeleteBook(book.id); }}
-                            className="p-1 sm:p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
+                            className="p-1 md:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
                           >
-                            <Trash2 size={12} className="sm:w-[18px] sm:h-[18px]" />
+                            <Trash2 size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
                           </button>
                           <button 
                             onClick={() => handleSelectBook(book.id)}
-                            className="p-1.5 sm:p-2 text-indigo-800 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all ml-0.5"
+                            className="p-1.5 md:p-1.5 text-indigo-800 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all ml-0.5"
                           >
                             <motion.div
                               animate={{ x: [0, 3, 0] }}
                               transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
                             >
-                              <ArrowRight size={18} className="sm:w-6 sm:h-6" />
+                              <ArrowRight size={16} className="w-[16px] h-[16px] md:w-[18px] md:h-[18px]" />
                             </motion.div>
                           </button>
                         </div>
@@ -6526,10 +6526,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               {/* STICKY TOP CONTROLS SECTION */}
               <div className={cn(
                 "lg:sticky lg:top-0 z-30 transition-colors duration-300 border-b",
-                "-mt-2 pt-2 -mx-2 px-2 pb-3 mb-2",
-                "sm:-mt-4 sm:pt-4 sm:-mx-4 sm:px-4 sm:pb-4 sm:mb-4",
-                "lg:-mt-6 lg:pt-6 lg:-mx-6 lg:px-6 lg:pb-5 lg:mb-5",
-                "xl:-mx-10 xl:px-10",
+                "-mt-2 pt-2 -mx-6 px-6 pb-3 mb-2",
+                "sm:-mt-4 sm:pt-4 sm:pb-4 sm:mb-4",
+                "md:-mt-6 md:pt-6 md:-mx-8 md:px-8 md:pb-5 md:mb-5",
                 "space-y-2.5 sm:space-y-4 shadow-sm",
                 theme === 'dark' ? "bg-black/95 backdrop-blur-md border-zinc-900" : "bg-slate-50/95 backdrop-blur-md border-slate-200"
               )}>
@@ -6553,7 +6552,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   </button>
                   <div className="flex items-center font-sans font-bold text-base sm:text-lg tracking-tight select-none leading-none">
                     <h2 className={cn(
-                      "font-black truncate max-w-[160px] sm:max-w-[280px] md:max-w-none transition-colors duration-300 text-slate-900 dark:text-slate-100",
+                      "font-black truncate max-w-[160px] sm:max-w-[280px] md:max-w-none lg:text-[clamp(1.125rem,2.2vw,1.5rem)] transition-colors duration-300 text-slate-900 dark:text-slate-100",
                     )}>{activeBook?.name}</h2>
                   </div>
                 </div>
@@ -6707,7 +6706,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <button
                   onClick={() => { vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
                   className={cn(
-                    "group/shortcut relative flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
+                    "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
                     theme === 'dark' 
                       ? "bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/40" 
                       : "bg-emerald-50/50 border border-emerald-150 text-emerald-800 hover:bg-emerald-100/70 shadow-sm shadow-emerald-50/20"
@@ -6722,7 +6721,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <button
                   onClick={() => { vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
                   className={cn(
-                    "group/shortcut relative flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
+                    "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
                     theme === 'dark' 
                       ? "bg-rose-900/20 text-rose-400 hover:bg-rose-900/40" 
                       : "bg-rose-50/50 border border-rose-150 text-rose-800 hover:bg-rose-100/70 shadow-sm shadow-rose-50/20"
@@ -6740,7 +6739,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     setShowAiWarning(true);
                   }}
                   className={cn(
-                    "group/shortcut relative flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
+                    "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
                     theme === 'dark' 
                       ? "bg-indigo-900/20 text-indigo-400 hover:bg-indigo-900/40" 
                       : "bg-indigo-50/40 border border-indigo-150 text-indigo-750 hover:bg-indigo-100 shadow-sm shadow-indigo-100/20"
@@ -6774,7 +6773,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     <button
                       onClick={toggleSelectAll}
                       className={cn(
-                        "flex items-center gap-2 px-4 h-11 rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200",
+                        "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200",
                         theme === 'dark' ? "bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm"
                       )}
                     >
@@ -6786,7 +6785,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <button
                         onClick={() => setSelectedTransactions(new Set())}
                         className={cn(
-                          "flex items-center gap-2 px-4 h-11 rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm",
+                          "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm",
                           theme === 'dark' && "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800"
                         )}
                       >
@@ -6796,7 +6795,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <button
                         onClick={() => setShowShareModal(true)}
                         className={cn(
-                          "flex items-center gap-2 px-4 h-11 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
+                          "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
                           theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
                         )}
                       >
@@ -6806,7 +6805,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <button
                         onClick={() => { setShowBulkTransactionDeleteConfirm(true); setDeleteConfirmed(false); }}
                         className={cn(
-                          "flex items-center gap-2 px-4 h-11 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
+                          "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
                           theme === 'dark' ? "shadow-none" : "shadow-lg shadow-rose-100"
                         )}
                       >
@@ -6910,7 +6909,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
 
               {/* Balance Cards Row (Desktop Only) */}
-              <div className="hidden lg:grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+              <div className="hidden lg:grid lg:grid-cols-3 w-full gap-4 sm:gap-6">
                 <div className={cn(
                   "p-6 rounded-3xl border flex items-center gap-4 shadow-sm transition-colors duration-300",
                   theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
