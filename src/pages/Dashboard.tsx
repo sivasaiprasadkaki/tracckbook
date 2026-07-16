@@ -1902,6 +1902,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [userPhoneLinkedAt, setUserPhoneLinkedAt] = useState<string | null>(null);
   const [showPhoneSecurityModal, setShowPhoneSecurityModal] = useState(false);
   const [showPhoneLinkingComingSoon, setShowPhoneLinkingComingSoon] = useState(false);
+  const [isAutomationMailConfirmOpen, setIsAutomationMailConfirmOpen] = useState(false);
   const [linkingSelectedCountry, setLinkingSelectedCountry] = useState<Country>(COUNTRIES[0]);
   const [profileSandboxMode, setProfileSandboxMode] = useState(false);
   const [isEditingBook, setIsEditingBook] = useState<string | null>(null);
@@ -6459,14 +6460,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </button>
 
                       <button 
-                        onClick={() => { setIsHelpOpen(true); setIsProfileOpen(false); }}
+                        onClick={() => { vibrate(5); setIsAutomationMailConfirmOpen(true); setIsProfileOpen(false); }}
                         className={cn(
                           "w-full flex items-center gap-3 p-3 rounded-xl transition-all",
                           theme === 'dark' ? "hover:bg-zinc-900 text-slate-300" : "hover:bg-slate-50 text-black"
                         )}
                       >
-                        <HelpCircle size={18} />
-                        <span className="font-medium flex-1 text-left">Help & Support</span>
+                        <Mail size={18} className="text-indigo-500" />
+                        <span className="font-medium flex-1 text-left flex items-center gap-2">
+                          <span>Automation Mail</span>
+                          <span className="px-1.5 py-0.5 text-[8px] font-extrabold bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 rounded-full uppercase tracking-widest border border-indigo-500/10">BETA</span>
+                        </span>
                       </button>
 
                       <button 
@@ -6477,7 +6481,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         )}
                       >
                         <Settings size={18} />
-                        <span className="font-medium flex-1 text-left">Profile Settings</span>
+                        <span className="font-medium flex-1 text-left">Settings</span>
                       </button>
 
                       <button 
@@ -6485,7 +6489,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-900/20 text-rose-600 transition-all"
                       >
                         <LogOut size={18} />
-                        <span className="font-medium flex-1 text-left">Sign Out</span>
+                        <span className="font-medium flex-1 text-left">Logout</span>
                       </button>
                     </motion.div>
                   )}
@@ -10379,6 +10383,82 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             type="link"
             theme={theme === 'dark' ? 'dark' : 'light'}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Automation Mail Beta Confirmation Modal */}
+      <AnimatePresence>
+        {isAutomationMailConfirmOpen && (
+          <div className={cn(
+            "fixed inset-0 z-[110] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
+            theme === 'dark' ? "bg-black/60" : "bg-indigo-900/10"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className={cn(
+                "w-full max-w-md rounded-3xl border p-6 space-y-6 shadow-2xl relative overflow-hidden",
+                theme === 'dark' ? "bg-[#12131a] border-zinc-800 text-[#c5c6c7]" : "bg-white border-slate-200 text-slate-800"
+              )}
+            >
+              {/* Background gradient blur */}
+              <div className="absolute -top-10 -right-10 w-24 h-24 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
+              
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-500/10 rounded-2xl text-indigo-500 border border-indigo-500/10 shrink-0">
+                  <Mail size={22} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className={cn(
+                      "font-black text-lg uppercase tracking-wide",
+                      theme === 'dark' ? "text-slate-100" : "text-slate-900"
+                    )}>
+                      🚀 Automation Mail
+                    </h3>
+                    <span className="px-2 py-0.5 text-[9px] font-extrabold bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 rounded-full uppercase tracking-widest border border-indigo-500/10">BETA</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className={cn(
+                  "text-sm space-y-3 leading-relaxed",
+                  theme === 'dark' ? "text-slate-300" : "text-slate-600"
+                )}>
+                  <p>This feature is currently available as a Beta Version.</p>
+                  <p>We're continuously improving it and adding more enterprise automation features.</p>
+                  <p>Thank you for helping us test the experience.</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => { vibrate(5); setIsAutomationMailConfirmOpen(false); }}
+                  className={cn(
+                    "px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest transition-all cursor-pointer",
+                    theme === 'dark' 
+                      ? "bg-zinc-900 border border-zinc-800 text-slate-300 hover:bg-zinc-850 hover:text-slate-200" 
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  )}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    vibrate(10);
+                    setIsAutomationMailConfirmOpen(false);
+                    navigate('/automation-mail');
+                  }}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/15"
+                >
+                  Continue to Beta
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

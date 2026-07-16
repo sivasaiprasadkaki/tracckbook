@@ -1,8 +1,10 @@
 import { jsPDF } from 'jspdf';
 
 export const TRACKBOOK_BRANDING = {
-  line1: "Powered by TrackBook, AI-Powered Expense Management",
+  line1: "Powered by",
+  line2: "TrackBook With AI & Automation Mail",
   url: "https://trackbook.xyz",
+  legacyText: "Powered by TrackBook With Automation Mail"
 };
 
 /**
@@ -21,30 +23,37 @@ export function addPdfBrandingFooter(doc: jsPDF, pageNum: number, totalPages: nu
   const originalTextColor = doc.getTextColor();
 
   // 1. Draw thin, light gray divider line
-  doc.setDrawColor(220, 220, 220);
+  doc.setDrawColor(230, 230, 230);
   doc.setLineWidth(0.1);
-  doc.line(15, pageHeight - 22, pageWidth - 15, pageHeight - 22);
+  doc.line(15, pageHeight - 24, pageWidth - 15, pageHeight - 24);
 
-  // 2. Set font styling for branding line
+  // 2. Set font styling for branding lines
+  doc.setFont("Helvetica", "normal");
   doc.setFontSize(7.5);
-  doc.setTextColor(140, 140, 140); // small professional light gray font
+  doc.setTextColor(140, 140, 140); // Subtle professional gray font
 
-  // 3. Center and render Line 1: "Powered by TrackBook, AI-Powered Expense Management"
+  // 3. Center and render Line 1: "Powered by"
   const line1Text = TRACKBOOK_BRANDING.line1;
   const line1Width = doc.getTextWidth(line1Text);
   const line1X = (pageWidth - line1Width) / 2;
-  doc.text(line1Text, line1X, pageHeight - 17);
+  doc.text(line1Text, line1X, pageHeight - 19);
 
-  // 4. Center and render Line 2: Clickable URL "https://trackbook.xyz"
+  // 4. Center and render Line 2: "TrackBook With AI & Automation Mail"
+  const line2Text = TRACKBOOK_BRANDING.line2;
+  const line2Width = doc.getTextWidth(line2Text);
+  const line2X = (pageWidth - line2Width) / 2;
+  doc.text(line2Text, line2X, pageHeight - 15);
+
+  // 5. Center and render Line 3: Clickable URL "https://trackbook.xyz"
   const urlText = TRACKBOOK_BRANDING.url;
   const urlWidth = doc.getTextWidth(urlText);
   const urlX = (pageWidth - urlWidth) / 2;
   
-  // Use textWithLink for native, perfectly overlayed clickable hyperlink
-  doc.setTextColor(79, 70, 229); // Modern Indigo color for the link to make it look clickable and premium
-  doc.textWithLink(urlText, urlX, pageHeight - 12, { url: urlText });
+  // Use textWithLink for native, perfectly overlayed clickable hyperlink with noticeable link color
+  doc.setTextColor(79, 70, 229); // Modern Indigo color to signal that it is a clickable link
+  doc.textWithLink(urlText, urlX, pageHeight - 11, { url: urlText });
 
-  // 5. Draw the standard Page X of Y and Document title in a matching subtle style
+  // 6. Draw the standard Page X of Y and Document title in a matching subtle style
   doc.setFontSize(7.5);
   doc.setTextColor(160, 160, 160);
   

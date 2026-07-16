@@ -10,6 +10,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Login = lazy(() => import('./pages/Login'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const AdminPortal = lazy(() => import('./pages/AdminPortal'));
+const AutomationMail = lazy(() => import('./pages/AutomationMail'));
 
 function NavigationHandler({ 
   session, 
@@ -181,6 +182,28 @@ export default function App() {
           <Route path="/signup" element={<Login theme={theme} initialMode="signup" />} />
           <Route path="/resetpassword" element={<ResetPassword />} />
           <Route path="/admin" element={<AdminPortal />} />
+
+          {/* Automation Mail Enterprise Module */}
+          <Route 
+            path="/automation-mail" 
+            element={
+              session ? (
+                <AutomationMail session={session} theme={theme} setTheme={setTheme} />
+              ) : (
+                loading ? suspenseFallback : <Navigate to="/login" replace />
+              )
+            } 
+          />
+          <Route 
+            path="/automation-mail/:stepName" 
+            element={
+              session ? (
+                <AutomationMail session={session} theme={theme} setTheme={setTheme} />
+              ) : (
+                loading ? suspenseFallback : <Navigate to="/login" replace />
+              )
+            } 
+          />
 
           {/* Protected Routes */}
           <Route 
