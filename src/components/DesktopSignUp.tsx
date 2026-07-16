@@ -103,7 +103,7 @@ export default function DesktopSignUp({
           {success && (
             <div className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-4 py-3 rounded-lg flex items-start gap-2 text-xs font-semibold mb-4">
               <CheckCircle2 size={15} className="shrink-0 mt-0.5 text-emerald-500" />
-              <span>{success}</span>
+              <span className="whitespace-pre-line flex-1">{success}</span>
             </div>
           )}
 

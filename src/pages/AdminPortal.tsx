@@ -39,26 +39,26 @@ interface AdminStatCardProps {
 function AdminStatCard({ title, value, icon, subtitle, trend, theme }: AdminStatCardProps) {
   return (
     <div className={cn(
-      "p-5 rounded-3xl border transition-all duration-300 font-sans shadow-sm hover:shadow-md",
+      "p-6 rounded-lg border transition-all duration-200 font-sans shadow-sm hover:border-zinc-300 dark:hover:border-zinc-700",
       theme === 'dark' 
-        ? "bg-zinc-950 border-zinc-900 shadow-black/40" 
-        : "bg-white border-slate-150 shadow-slate-100/50"
+        ? "bg-zinc-900 border-zinc-800 text-zinc-100" 
+        : "bg-white border-zinc-200 text-zinc-900"
     )}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-widest">{title}</span>
-        <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400">
+        <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{title}</span>
+        <div className="p-2 rounded-md bg-zinc-50 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-400 border border-zinc-200/50 dark:border-zinc-800/50">
           {icon}
         </div>
       </div>
       <div className="mt-4 flex items-baseline gap-2">
-        <span className="text-2xl font-black tracking-tight text-zinc-900 dark:text-white">{value}</span>
+        <span className="text-2xl font-bold tracking-tight">{value}</span>
         {trend && (
-          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/20 dark:text-emerald-400 px-2 py-0.5 rounded-full">
+          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200/50 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30 px-1.5 py-0.5 rounded">
             {trend}
           </span>
         )}
       </div>
-      <p className="text-[10px] text-slate-400 dark:text-zinc-500 mt-1 font-medium">{subtitle}</p>
+      <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1.5 font-normal">{subtitle}</p>
     </div>
   );
 }
@@ -298,47 +298,45 @@ export default function AdminPortal() {
 
   return (
     <div className={cn(
-      "min-h-screen transition-colors duration-300 flex flex-col font-sans selection:bg-indigo-500/20",
-      theme === 'dark' ? "bg-zinc-950 text-slate-200" : "bg-slate-50 text-slate-800"
+      "min-h-screen transition-colors duration-200 flex flex-col font-sans selection:bg-zinc-500/20",
+      theme === 'dark' ? "bg-zinc-950 text-zinc-200" : "bg-zinc-50 text-zinc-800"
     )}>
       {/* 1. LOGIN WALL VIEW */}
       <AnimatePresence mode="wait">
         {!isAuthenticated ? (
           <motion.div 
             key="login-wall"
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -12 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
             className="flex-1 flex items-center justify-center p-4 sm:p-8"
           >
             <div className={cn(
-              "w-full max-w-md rounded-[32px] p-6 sm:p-10 border shadow-2xl transition-all duration-300",
-              theme === 'dark' ? "bg-zinc-900 border-zinc-800 shadow-black/70" : "bg-white border-slate-100 shadow-slate-200/40"
+              "w-full max-w-md rounded-[10px] p-8 sm:p-10 border shadow-lg transition-all duration-200",
+              theme === 'dark' ? "bg-zinc-900 border-zinc-800 shadow-black/40" : "bg-white border-zinc-200 shadow-zinc-100/50"
             )}>
-              <div className="text-center space-y-4 mb-8">
-                <div className="w-14 h-14 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
-                  <ShieldAlert size={28} className="animate-pulse" />
+              <div className="text-center space-y-3.5 mb-8">
+                <div className="w-12 h-12 bg-zinc-50 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 rounded-md border border-zinc-200/60 dark:border-zinc-700/60 flex items-center justify-center mx-auto shadow-sm">
+                  <ShieldAlert size={24} />
                 </div>
                 <div>
-                  <h1 className={cn(
-                    "text-2xl font-black tracking-tight",
-                    theme === 'dark' ? "text-white" : "text-zinc-900 font-lora"
-                  )}>
-                    TrackBook <span className="text-indigo-600 font-sans font-black">Control Studio</span>
+                  <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+                    TrackBook <span className="text-zinc-500 dark:text-zinc-400 font-normal">Control Studio</span>
                   </h1>
-                  <p className="text-xs text-slate-400 dark:text-zinc-500 mt-1.5 font-mono">
-                    SECURED MANAGEMENT CONSOLE
+                  <p className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 mt-1 tracking-wider uppercase font-sans">
+                    Secure Management Access
                   </p>
                 </div>
               </div>
 
               <form onSubmit={handleLogin} className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
                     Administrator ID
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-2.5 text-slate-400 dark:text-zinc-600 font-mono text-xs">@</span>
+                    <span className="absolute left-3 top-2.5 text-zinc-400 dark:text-zinc-650 font-mono text-xs">@</span>
                     <input 
                       type="text"
                       required
@@ -346,19 +344,21 @@ export default function AdminPortal() {
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       className={cn(
-                        "w-full pl-8 pr-4 py-2.5 text-sm font-bold rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all font-mono",
-                        theme === 'dark' ? "border-zinc-850 bg-zinc-950 text-white" : "border-slate-200 bg-slate-50 text-zinc-900"
+                        "w-full pl-8 pr-4 py-2 text-sm rounded-md border focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 focus:outline-none transition-all font-sans",
+                        theme === 'dark' 
+                          ? "border-zinc-800 bg-zinc-950 text-white placeholder-zinc-700" 
+                          : "border-zinc-200 bg-white text-zinc-900 placeholder-zinc-400"
                       )}
                     />
                   </div>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
                     Master Security Key
                   </label>
                   <div className="relative">
-                    <Lock size={12} className="absolute left-3.5 top-3.5 text-slate-400 dark:text-zinc-600" />
+                    <Lock size={12} className="absolute left-3 top-3 text-zinc-400 dark:text-zinc-650" />
                     <input 
                       type="password"
                       required
@@ -366,15 +366,17 @@ export default function AdminPortal() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className={cn(
-                        "w-full pl-9 pr-4 py-2.5 text-sm font-bold rounded-xl border focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all font-mono",
-                        theme === 'dark' ? "border-zinc-850 bg-zinc-950 text-white" : "border-slate-200 bg-slate-50 text-zinc-900"
+                        "w-full pl-8 pr-4 py-2 text-sm rounded-md border focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 focus:outline-none transition-all font-sans",
+                        theme === 'dark' 
+                          ? "border-zinc-800 bg-zinc-950 text-white placeholder-zinc-700" 
+                          : "border-zinc-200 bg-white text-zinc-900 placeholder-zinc-400"
                       )}
                     />
                   </div>
                 </div>
 
                 {loginError && (
-                  <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 rounded-xl flex items-center gap-2 text-xs text-red-600 dark:text-red-400 font-medium">
+                  <div className="p-3 bg-rose-50 border border-rose-200 dark:bg-rose-950/20 dark:border-rose-900/30 rounded-md flex items-center gap-2 text-xs text-rose-600 dark:text-rose-400 font-medium">
                     <AlertCircle size={14} className="shrink-0" />
                     <span>{loginError}</span>
                   </div>
@@ -383,7 +385,7 @@ export default function AdminPortal() {
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold uppercase tracking-widest text-[10px] rounded-xl transition-all shadow-md active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200 text-xs font-semibold uppercase tracking-wider rounded-md transition-all shadow-sm active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {isSubmitting ? (
                     <>Verifying Access Signature...</>
@@ -395,16 +397,16 @@ export default function AdminPortal() {
                 </button>
               </form>
 
-              <div className="mt-8 pt-4 border-t border-dashed border-slate-150 dark:border-zinc-800 text-center flex justify-between items-center text-[10px] text-slate-400 dark:text-zinc-500">
+              <div className="mt-8 pt-4 border-t border-zinc-200 dark:border-zinc-800 text-center flex justify-between items-center text-[10px] text-zinc-400 dark:text-zinc-500">
                 <button 
                   onClick={() => navigate('/login')} 
-                  className="flex items-center gap-1 hover:text-indigo-600 font-bold transition-transform active:translate-x-[-2px] uppercase tracking-wider"
+                  className="flex items-center gap-1.5 hover:text-zinc-900 dark:hover:text-zinc-100 font-semibold transition-colors uppercase tracking-wider cursor-pointer"
                 >
                   <ArrowLeft size={10} /> Exit to App
                 </button>
                 <button 
                   onClick={toggleTheme}
-                  className="p-1 px-2.5 rounded-md border border-slate-200 dark:border-zinc-800 flex items-center gap-1.5 hover:bg-slate-100 dark:hover:bg-zinc-850"
+                  className="p-1 px-2.5 rounded-md border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 transition-colors font-medium cursor-pointer"
                 >
                   {theme === 'dark' ? <Sun size={10} /> : <Moon size={10} />}
                   Theme Mode
@@ -423,51 +425,51 @@ export default function AdminPortal() {
           >
             {/* Header Toolbar */}
             <div className={cn(
-              "p-4 rounded-3xl border flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm",
-              theme === 'dark' ? "bg-zinc-900 border-zinc-900" : "bg-white border-slate-150"
+              "p-5 rounded-lg border flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm",
+              theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"
             )}>
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-indigo-600 text-white rounded-2xl">
-                  <Activity size={20} className="animate-pulse" />
+                <div className="p-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-md border border-zinc-800 dark:border-zinc-200 flex items-center justify-center">
+                  <Activity size={18} className="animate-pulse" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-black tracking-tight uppercase">TrackBook Admin Panel</h2>
-                  <p className="text-[10px] text-slate-400 dark:text-zinc-500 mt-0.5 font-mono">
+                  <h2 className="text-sm font-bold tracking-tight text-zinc-900 dark:text-zinc-50 uppercase">TrackBook Admin Panel</h2>
+                  <p className="text-[9px] text-zinc-400 dark:text-zinc-500 mt-0.5 font-mono tracking-widest uppercase">
                     SYSTEM INSTANCE: LOCAL_CONTAINER_MAIN • v5.0.0
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2">
                 <button 
                   onClick={toggleTheme}
-                  className="p-2 rounded-xl border border-slate-150 dark:border-zinc-800 text-slate-500 dark:text-zinc-400 hover:bg-slate-50 dark:hover:bg-zinc-850 cursor-pointer"
+                  className="p-2 rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer"
                   title="Toggle Theme"
                 >
-                  {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                  {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
                 </button>
                 
                 <button 
                   onClick={fetchDatabaseInsights}
                   disabled={isRefreshing}
-                  className="p-2 rounded-xl border border-slate-150 dark:border-zinc-800 text-slate-500 dark:text-zinc-400 hover:bg-slate-50 dark:hover:bg-zinc-850 cursor-pointer disabled:opacity-50 flex items-center gap-1.5 text-xs font-bold font-mono"
+                  className="p-2 px-3 rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5 text-xs font-medium"
                 >
-                  <RefreshCw size={14} className={cn(isRefreshing && "animate-spin")} />
+                  <RefreshCw size={12} className={cn(isRefreshing && "animate-spin")} />
                   Sync Metrics
                 </button>
 
                 <button 
                   onClick={() => navigate('/')}
-                  className="p-2 px-3.5 rounded-xl border border-indigo-200 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+                  className="p-2 px-3.5 rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-medium"
                 >
-                  <ArrowLeft size={14} /> Go to Dashboard
+                  <ArrowLeft size={12} /> Go to Dashboard
                 </button>
 
                 <button 
                   onClick={handleLogout}
-                  className="p-2 px-3.5 rounded-xl bg-red-500 hover:bg-red-600 text-white cursor-pointer flex items-center gap-1.5 text-xs font-black uppercase tracking-wider shadow-sm"
+                  className="p-2 px-3.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 font-medium text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
-                  <LogOut size={14} /> Log Out
+                  <LogOut size={12} /> Log Out
                 </button>
               </div>
             </div>
@@ -510,19 +512,19 @@ export default function AdminPortal() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* SVG Charts Section */}
               <div className={cn(
-                "p-5 rounded-3xl border lg:col-span-2 space-y-4 shadow-sm",
-                theme === 'dark' ? "bg-zinc-900 border-zinc-900" : "bg-white border-slate-150"
+                "p-6 rounded-lg border space-y-4 shadow-sm lg:col-span-2",
+                theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"
               )}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500">
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                       System Volume Insights
                     </h3>
-                    <p className="text-xl font-bold text-zinc-900 dark:text-white mt-1">Platform Activity Trends</p>
+                    <p className="text-lg font-bold text-zinc-900 dark:text-zinc-50 mt-1">Platform Activity Trends</p>
                   </div>
-                  <div className="flex items-center gap-2 text-[10px] font-bold">
-                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-indigo-500 rounded-full inline-block" /> OCR Processing</span>
-                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-emerald-500 rounded-full inline-block" /> User Sign-ups</span>
+                  <div className="flex items-center gap-3 text-[10px] font-medium text-zinc-500 dark:text-zinc-400">
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 bg-zinc-900 dark:bg-zinc-300 rounded-sm inline-block" /> OCR Processing</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 bg-emerald-500 rounded-sm inline-block" /> User Sign-ups</span>
                   </div>
                 </div>
 
@@ -530,22 +532,22 @@ export default function AdminPortal() {
                 <div className="h-48 w-full relative flex items-end">
                   <svg className="w-full h-full overflow-visible" viewBox="0 0 500 200" preserveAspectRatio="none">
                     {/* Grid lines */}
-                    <line x1="0" y1="50" x2="500" y2="50" stroke={theme === 'dark' ? "#27272a" : "#f1f5f9"} strokeWidth="1" strokeDasharray="3,3" />
-                    <line x1="0" y1="100" x2="500" y2="100" stroke={theme === 'dark' ? "#27272a" : "#f1f5f9"} strokeWidth="1" strokeDasharray="3,3" />
-                    <line x1="0" y1="150" x2="500" y2="150" stroke={theme === 'dark' ? "#27272a" : "#f1f5f9"} strokeWidth="1" strokeDasharray="3,3" />
+                    <line x1="0" y1="50" x2="500" y2="50" stroke={theme === 'dark' ? "#27272a" : "#f4f4f5"} strokeWidth="1" strokeDasharray="3,3" />
+                    <line x1="0" y1="100" x2="500" y2="100" stroke={theme === 'dark' ? "#27272a" : "#f4f4f5"} strokeWidth="1" strokeDasharray="3,3" />
+                    <line x1="0" y1="150" x2="500" y2="150" stroke={theme === 'dark' ? "#27272a" : "#f4f4f5"} strokeWidth="1" strokeDasharray="3,3" />
                     
                     {/* Area path for OCR Processing volume */}
                     <path 
                       d="M 0 160 Q 100 120 180 80 T 360 110 T 500 40 L 500 200 L 0 200 Z" 
                       fill="url(#indigoGrad)" 
-                      opacity="0.15" 
+                      opacity="0.08" 
                     />
                     {/* Line path */}
                     <path 
                       d="M 0 160 Q 100 120 180 80 T 360 110 T 500 40" 
                       fill="none" 
-                      stroke="#6366f1" 
-                      strokeWidth="2.5" 
+                      stroke={theme === 'dark' ? "#ffffff" : "#09090b"} 
+                      strokeWidth="2" 
                       strokeLinecap="round"
                     />
 
@@ -553,13 +555,13 @@ export default function AdminPortal() {
                     <path 
                       d="M 0 180 Q 80 140 160 130 T 320 90 T 500 70 L 500 200 L 0 200 Z" 
                       fill="url(#emeraldGrad)" 
-                      opacity="0.1" 
+                      opacity="0.05" 
                     />
                     <path 
                       d="M 0 180 Q 80 140 160 130 T 320 90 T 500 70" 
                       fill="none" 
                       stroke="#10b981" 
-                      strokeWidth="2" 
+                      strokeWidth="1.5" 
                       strokeLinecap="round"
                       strokeDasharray="4,4"
                     />
@@ -567,8 +569,8 @@ export default function AdminPortal() {
                     {/* Gradients declaration */}
                     <defs>
                       <linearGradient id="indigoGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#6366f1" />
-                        <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
+                        <stop offset="0%" stopColor={theme === 'dark' ? "#ffffff" : "#09090b"} />
+                        <stop offset="100%" stopColor={theme === 'dark' ? "#ffffff" : "#09090b"} stopOpacity="0" />
                       </linearGradient>
                       <linearGradient id="emeraldGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#10b981" />
@@ -576,7 +578,7 @@ export default function AdminPortal() {
                       </linearGradient>
                     </defs>
                   </svg>
-                  <div className="absolute inset-0 flex justify-between pointer-events-none text-[8.5px] font-mono text-slate-400 dark:text-zinc-650 pt-2 px-1">
+                  <div className="absolute inset-0 flex justify-between pointer-events-none text-[9px] font-medium text-zinc-400 dark:text-zinc-600 pt-2 px-1">
                     <span>Mon</span>
                     <span>Tue</span>
                     <span>Wed</span>
@@ -590,21 +592,27 @@ export default function AdminPortal() {
 
               {/* Server Control Log / Terminal */}
               <div className={cn(
-                "p-5 rounded-3xl border flex flex-col h-full shadow-sm",
-                theme === 'dark' ? "bg-zinc-900 border-zinc-900" : "bg-white border-slate-150"
+                "p-6 rounded-lg border flex flex-col h-full shadow-sm",
+                theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"
               )}>
-                <div className="flex items-center gap-2 pb-3 border-b border-light border-slate-100 dark:border-zinc-800">
-                  <Terminal size={14} className="text-emerald-500 animate-pulse" />
-                  <h4 className="text-xs font-black uppercase tracking-widest text-[#111111] dark:text-white">
+                <div className="flex items-center gap-2 pb-3 border-b border-zinc-100 dark:border-zinc-800">
+                  <Terminal size={14} className="text-zinc-500" />
+                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-800 dark:text-zinc-200">
                     Live Diagnostics Stream
                   </h4>
                 </div>
                 
-                <div className="flex-1 mt-3 bg-zinc-950 p-3 rounded-2xl text-[10px] font-mono text-emerald-400 h-48 overflow-y-auto space-y-1.5 scrollbar-thin border border-zinc-900 shadow-inner text-left">
+                <div className="flex-1 mt-4 bg-zinc-950 p-4 rounded-md text-[10px] font-mono text-zinc-300 h-48 overflow-y-auto space-y-1.5 border border-zinc-900 shadow-inner text-left">
+                  <div className="flex items-center gap-1.5 pb-2.5 mb-2.5 border-b border-zinc-900/60 select-none">
+                    <div className="w-2 h-2 rounded-full bg-zinc-800" />
+                    <div className="w-2 h-2 rounded-full bg-zinc-800" />
+                    <div className="w-2 h-2 rounded-full bg-zinc-800" />
+                    <span className="text-[9px] text-zinc-500 ml-1.5">bash — diagnostics_stream</span>
+                  </div>
                   {diagnosticsLogs.map((log, idx) => (
                     <div key={idx} className="leading-normal">
                       <span className="text-zinc-650 select-none mr-2">❯</span>
-                      <span>{log}</span>
+                      <span className="text-emerald-500">{log}</span>
                     </div>
                   ))}
                 </div>
@@ -613,30 +621,30 @@ export default function AdminPortal() {
 
             {/* Dynamic Interactive Sandbox Toolkit */}
             <div className={cn(
-              "p-5 rounded-3xl border shadow-sm space-y-4",
-              theme === 'dark' ? "bg-zinc-900 border-zinc-900" : "bg-white border-slate-150"
+              "p-6 rounded-lg border shadow-sm space-y-4",
+              theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"
             )}>
               <div>
-                <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                   Admin Sandbox Diagnostics
                 </h3>
-                <p className="text-sm font-semibold mt-1">Simulate container pipelines and purge mock session footprints</p>
+                <p className="text-sm font-semibold mt-1 text-zinc-900 dark:text-zinc-50">Simulate container pipelines and purge mock session footprints</p>
               </div>
 
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-wrap gap-2.5">
                 <button 
                   onClick={generateMockEntry}
-                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-transform active:scale-[0.97] cursor-pointer"
+                  className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-50 dark:hover:bg-zinc-200 dark:text-zinc-900 text-xs font-semibold rounded-md flex items-center gap-2 transition-colors cursor-pointer shadow-sm active:scale-[0.99]"
                 >
-                  <Sparkles size={14} />
+                  <Sparkles size={13} />
                   Inject Random Mock Split Entry
                 </button>
 
                 <button 
                   onClick={wipeSandboxedStorage}
-                  className="px-4 py-2.5 bg-zinc-100 hover:bg-red-50 hover:text-red-600 dark:bg-zinc-850 dark:hover:bg-red-950/20 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-zinc-800 text-xs font-bold rounded-xl flex items-center gap-2 transition-transform active:scale-[0.97] cursor-pointer"
+                  className="px-4 py-2 bg-white hover:bg-zinc-50 dark:bg-zinc-900 dark:hover:bg-zinc-800/60 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800 text-xs font-semibold rounded-md flex items-center gap-2 transition-colors cursor-pointer shadow-sm active:scale-[0.99]"
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={13} />
                   Purge Sandbox Storage Cache
                 </button>
 
@@ -647,41 +655,43 @@ export default function AdminPortal() {
                     addLog(`WebSocket transport simulated state changed: ${status ? 'ON' : 'OFF'}`);
                   }}
                   className={cn(
-                    "px-4 py-2.5 border text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer",
+                    "px-4 py-2 border text-xs font-semibold rounded-md flex items-center gap-2 transition-all cursor-pointer shadow-sm active:scale-[0.99]",
                     realtimeConnected 
-                      ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 border-emerald-100 dark:border-emerald-900/10"
-                      : "bg-amber-50 dark:bg-amber-950/20 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-900/10"
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30"
+                      : "bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30"
                   )}
                 >
-                  <span className={cn("w-2 h-2 rounded-full", realtimeConnected ? "bg-emerald-500" : "bg-amber-500")} />
-                  Simulate Offline Client {realtimeConnected ? "(Transport: Connected)" : "(Transport: Silenced)"}
+                  <span className={cn("w-1.5 h-1.5 rounded-full", realtimeConnected ? "bg-emerald-500" : "bg-amber-500")} />
+                  Simulate Offline Client {realtimeConnected ? "(Connected)" : "(Silenced)"}
                 </button>
               </div>
             </div>
 
             {/* Core Database Inspector list viewer */}
             <div className={cn(
-              "p-5 rounded-3xl border shadow-sm flex-1 flex flex-col min-h-0",
-              theme === 'dark' ? "bg-zinc-900 border-zinc-900" : "bg-white border-slate-150"
+              "p-6 rounded-lg border shadow-sm flex-1 flex flex-col min-h-0",
+              theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"
             )}>
-              <div className="flex flex-col md:flex-row items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-zinc-800 shrink-0">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-4 pb-5 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
                 <div>
-                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                     Live Database Record Auditing
                   </h3>
-                  <p className="text-sm font-semibold mt-1">Platform table query audit trail (entries rows filtered via search)</p>
+                  <p className="text-sm font-semibold mt-1 text-zinc-900 dark:text-zinc-50 font-sans">Platform table query audit trail (entries rows filtered via search)</p>
                 </div>
 
                 <div className="w-full md:w-80 relative">
-                  <Search size={14} className="absolute left-3 top-3 text-slate-400 dark:text-zinc-650" />
+                  <Search size={13} className="absolute left-3 top-2.5 text-zinc-400 dark:text-zinc-650" />
                   <input 
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search by amount, descriptor text, category..."
                     className={cn(
-                      "w-full pl-9 pr-4 py-1.5 text-xs font-bold rounded-xl border focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-all",
-                      theme === 'dark' ? "border-zinc-800 bg-zinc-950 text-white" : "border-slate-200 bg-white text-zinc-900"
+                      "w-full pl-9 pr-4 py-2 text-xs rounded-md border focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 focus:outline-none transition-all font-sans",
+                      theme === 'dark' 
+                        ? "border-zinc-800 bg-zinc-950 text-white placeholder-zinc-700" 
+                        : "border-zinc-200 bg-white text-zinc-900 placeholder-zinc-400"
                     )}
                   />
                 </div>
@@ -690,56 +700,56 @@ export default function AdminPortal() {
               {/* Data Table */}
               <div className="flex-1 overflow-y-auto mt-4 pr-1 min-h-[200px]">
                 {filteredEntries.length === 0 ? (
-                  <div className="h-40 flex flex-col items-center justify-center text-center text-slate-400 dark:text-zinc-600">
-                    <Database size={28} className="stroke-[1.5]" />
-                    <span className="text-xs font-bold mt-2">No Matching Rows Logged</span>
-                    <span className="text-[10px] mt-1 px-4 leading-normal max-w-sm">
+                  <div className="h-40 flex flex-col items-center justify-center text-center text-zinc-400 dark:text-zinc-600">
+                    <Database size={24} className="stroke-[1.5]" />
+                    <span className="text-xs font-semibold mt-2 text-zinc-900 dark:text-zinc-100">No Matching Rows Logged</span>
+                    <span className="text-[11px] mt-1 px-4 leading-normal max-w-sm text-zinc-400 dark:text-zinc-500">
                       Check your active filters, or leverage security features by adding entries to your dashboard cashbooks list.
                     </span>
                   </div>
                 ) : (
-                  <table className="w-full text-left font-mono text-[10px] border-collapse">
+                  <table className="w-full text-left font-sans text-xs border-collapse">
                     <thead>
                       <tr className={cn(
-                        "border-b uppercase font-bold text-slate-400 dark:text-zinc-500 tracking-wider",
-                        theme === 'dark' ? "border-zinc-850" : "border-slate-100"
+                        "border-b uppercase font-semibold text-[10px] text-zinc-500 dark:text-zinc-400 tracking-wider",
+                        theme === 'dark' ? "border-zinc-800 bg-zinc-900/40" : "border-zinc-100 bg-zinc-50/40"
                       )}>
-                        <th className="py-2.5 px-3">Entry Unique identifier</th>
-                        <th className="py-2.5 px-3">Date</th>
-                        <th className="py-2.5 px-3">Category</th>
-                        <th className="py-2.5 px-3">Details / Notes</th>
-                        <th className="py-2.5 px-3 text-right">Volume amount</th>
+                        <th className="py-3 px-4 font-semibold">Entry ID</th>
+                        <th className="py-3 px-4 font-semibold">Date</th>
+                        <th className="py-3 px-4 font-semibold">Category</th>
+                        <th className="py-3 px-4 font-semibold">Details / Notes</th>
+                        <th className="py-3 px-4 text-right font-semibold">Volume amount</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-zinc-850">
+                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
                       {filteredEntries.map((row) => (
                         <tr 
                           key={row.id} 
-                          className="hover:bg-slate-50/50 dark:hover:bg-zinc-850/30 transition-colors group"
+                          className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/20 transition-colors duration-150 group"
                         >
-                          <td className="py-3 px-3 relative font-bold text-slate-400 dark:text-zinc-600">
+                          <td className="py-3.5 px-4 font-mono font-medium text-zinc-400 dark:text-zinc-500 relative">
                             {row.id?.slice(0, 8)}...
-                            <span className="absolute left-1 opacity-0 group-hover:opacity-100 text-[8px] text-indigo-500 dark:text-indigo-400 transition-opacity font-bold">●</span>
+                            <span className="absolute left-1 top-4.5 opacity-0 group-hover:opacity-100 text-[8px] text-zinc-800 dark:text-zinc-300 transition-opacity font-bold">●</span>
                           </td>
-                          <td className="py-3 px-3 text-slate-500 dark:text-zinc-400">
+                          <td className="py-3.5 px-4 text-zinc-400 dark:text-zinc-500">
                             {new Date(row.date).toLocaleDateString()}
                           </td>
-                          <td className="py-3 px-3">
+                          <td className="py-3.5 px-4">
                             <span className={cn(
-                              "px-2 py-0.5 rounded-full text-[9px] font-black",
+                              "inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium border",
                               row.type === 'in' 
-                                ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-400"
-                                : "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/20 dark:text-indigo-400"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200/40 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30"
+                                : "bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-850 dark:text-zinc-300 dark:border-zinc-800"
                             )}>
                               {row.category || 'General'}
                             </span>
                           </td>
-                          <td className="py-3 px-3 text-zinc-900 dark:text-white font-sans max-w-xs truncate" title={row.description}>
+                          <td className="py-3.5 px-4 text-zinc-900 dark:text-zinc-100 font-medium max-w-xs truncate" title={row.description}>
                             {row.description || 'No description provided'}
                           </td>
                           <td className={cn(
-                            "py-3 px-4 text-right font-bold text-xs",
-                            row.type === 'in' ? "text-emerald-600" : "text-zinc-900 dark:text-slate-100"
+                            "py-3.5 px-4 text-right font-mono font-semibold text-xs",
+                            row.type === 'in' ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-900 dark:text-zinc-100"
                           )}>
                             {row.type === 'in' ? '+' : '-'}₹{row.amount?.toLocaleString()}
                           </td>

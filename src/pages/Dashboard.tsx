@@ -27,6 +27,8 @@ import {
   List,
   Download,
   RotateCw,
+  RotateCcw,
+  RefreshCw,
   ZoomIn,
   ZoomOut,
   Check,
@@ -438,6 +440,27 @@ const OptimizedImage = React.memo(({
   const [progress, setProgress] = React.useState(0);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
 
+  const metadata = React.useMemo(() => {
+    const res = { rotate: 0, fit: 'original' };
+    if (!src) return res;
+    const hashIdx = src.indexOf('#');
+    if (hashIdx === -1) return res;
+    const hash = src.substring(hashIdx + 1);
+    const params = new URLSearchParams(hash);
+    res.rotate = parseInt(params.get('rotate') || '0', 10);
+    res.fit = (params.get('fit') || 'original') as 'width' | 'height' | 'original';
+    return res;
+  }, [src]);
+
+  const isRotated90or270 = metadata.rotate === 90 || metadata.rotate === 270;
+  
+  const contentStyle: React.CSSProperties = {
+    ...props.style,
+    transform: `rotate(${metadata.rotate}deg)${isRotated90or270 ? ' scale(0.72)' : ''}`,
+    transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), object-fit 0.2s ease',
+    objectFit: metadata.fit === 'width' ? 'contain' : metadata.fit === 'height' ? 'contain' : (props.style?.objectFit || 'cover')
+  };
+
   React.useEffect(() => {
     setIsLoaded(false);
     setProgress(0);
@@ -585,6 +608,7 @@ const OptimizedImage = React.memo(({
       onError={handleError}
       onLoad={handleLoad}
       onClick={onClick}
+      style={contentStyle}
       {...props}
     />
   );
@@ -1040,21 +1064,6 @@ const MobileTransactionRow = React.memo(({
           )}>
             {formatDateTime12h(t.date || t.created_at)}
           </span>
-          {t.user_name && (
-            <>
-              <span className={cn(
-                "transition-colors duration-300",
-                theme === 'dark' ? "text-zinc-800" : "text-slate-150"
-              )}>•</span>
-              <span className={cn(
-                "text-[10px] font-bold tracking-tight transition-colors duration-300 flex items-center gap-1",
-                theme === 'dark' ? "text-zinc-500" : "text-slate-400"
-              )}>
-                <User size={10} className="opacity-70 shrink-0" />
-                <span className="truncate max-w-[80px]">{t.user_name}</span>
-              </span>
-            </>
-          )}
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
@@ -1174,15 +1183,7 @@ const DesktopTransactionRow = React.memo(({
               "text-sm font-bold transition-colors duration-300",
               theme === 'dark' ? "text-slate-300" : "text-black"
             )}>{t.description || '--'}</p>
-            {t.user_name && (
-              <p className={cn(
-                "text-[10px] font-medium flex items-center gap-1 mt-0.5",
-                theme === 'dark' ? "text-slate-500" : "text-slate-400"
-              )}>
-                <User size={10} className="opacity-70 shrink-0" />
-                <span>By {t.user_name}</span>
-              </p>
-            )}
+            {/* User name display removed for privacy/clutter reduction */}
           </div>
           {getTransactionSource(t) === 'Imported' && (
             <span className={cn(
@@ -2888,6 +2889,57 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [transactionDate, setTransactionDate] = useState(safeToDateTimeLocal(new Date()));
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [imageLayout, setImageLayout] = useState<'split' | 'merge'>('split');
+  const [selectedFormatIndex, setSelectedFormatIndex] = useState<number>(0);
+
+  // Keep selectedFormatIndex in bounds
+  useEffect(() => {
+    if (selectedImages.length === 0) {
+      setSelectedFormatIndex(0);
+    } else if (selectedFormatIndex >= selectedImages.length) {
+      setSelectedFormatIndex(selectedImages.length - 1);
+    }
+  }, [selectedImages, selectedFormatIndex]);
+
+  const updateImageMetadata = (index: number, rotateOffset: number, fitMode?: 'width' | 'height' | 'original', reset?: boolean) => {
+    if (index < 0 || index >= selectedImages.length) return;
+    const currentUrl = selectedImages[index];
+    const hashIdx = currentUrl.indexOf('#');
+    const hash = hashIdx !== -1 ? currentUrl.substring(hashIdx + 1) : '';
+    const baseUrl = hashIdx !== -1 ? currentUrl.substring(0, hashIdx) : currentUrl;
+    
+    const params = new URLSearchParams(hash);
+    let currentRotate = parseInt(params.get('rotate') || '0', 10);
+    let currentFit = params.get('fit') || 'original';
+    
+    if (reset) {
+      currentRotate = 0;
+      currentFit = 'original';
+    } else {
+      if (rotateOffset !== 0) {
+        currentRotate = (currentRotate + rotateOffset + 360) % 360;
+      }
+      if (fitMode) {
+        currentFit = fitMode;
+      }
+    }
+    
+    const newParams = new URLSearchParams();
+    if (currentRotate !== 0) {
+      newParams.set('rotate', currentRotate.toString());
+    }
+    if (currentFit !== 'original') {
+      newParams.set('fit', currentFit);
+    }
+    
+    const newHash = newParams.toString();
+    const newUrl = baseUrl + (newHash ? '#' + newHash : '');
+    
+    setSelectedImages(prev => {
+      const copy = [...prev];
+      copy[index] = newUrl;
+      return copy;
+    });
+  };
 
   // Restrict merge layout - automatically fallback to split if there are less than 2 images and we aren't currently editing an existing transaction
   useEffect(() => {
@@ -3858,11 +3910,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         const finalImages: string[] = [];
         let index = 0;
-        const totalBlobImages = selectedImages.filter(img => img.startsWith('blob:')).length;
+        const totalBlobImages = selectedImages.filter(img => {
+          const clean = img.split('#')[0];
+          return clean.startsWith('blob:');
+        }).length;
 
         for (const img of selectedImages) {
-          if (img.startsWith('blob:')) {
-            const file = imageFilesRef.current[img];
+          const hashIdx = img.indexOf('#');
+          const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
+          const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
+
+          if (cleanImg.startsWith('blob:')) {
+            const file = imageFilesRef.current[cleanImg];
             if (file) {
               // Compressing step
               updateStepStatus('Updating attachment', 'loading', 30 + Math.floor((index / totalBlobImages) * 15), `Compressing image ${index + 1}/${totalBlobImages}...`);
@@ -3876,7 +3935,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               updateStepStatus('Updating attachment', 'loading', 45 + Math.floor((index / totalBlobImages) * 25), `Uploading attachment ${index + 1}/${totalBlobImages}...`);
               const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
               if (cloudUrl) {
-                finalImages.push(cloudUrl);
+                finalImages.push(cloudUrl + hash);
               }
               index++;
             }
@@ -4027,11 +4086,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             };
           });
 
-          const blobImages = selectedImages.filter(img => img.startsWith('blob:'));
+          const blobImages = selectedImages.filter(img => {
+            const clean = img.split('#')[0];
+            return clean.startsWith('blob:');
+          });
           let index = 0;
           for (const img of selectedImages) {
-            if (img.startsWith('blob:')) {
-              const file = imageFilesRef.current[img];
+            const hashIdx = img.indexOf('#');
+            const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
+            const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
+
+            if (cleanImg.startsWith('blob:')) {
+              const file = imageFilesRef.current[cleanImg];
               if (file) {
                 updateStepStatus('Compressing image', 'loading', 20 + Math.floor((index / blobImages.length) * 15), `Compressing image ${index + 1}/${blobImages.length}...`);
                 const isImage = file.type && file.type.startsWith('image/');
@@ -4054,7 +4120,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 updateStepStatus('Uploading to TrackBook Cloud', 'loading', 40 + Math.floor((index / blobImages.length) * 45), `Uploading attachment ${index + 1}/${blobImages.length}...`);
                 const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
                 if (cloudUrl) {
-                  finalImages.push(cloudUrl);
+                  finalImages.push(cloudUrl + hash);
                 }
                 index++;
               }
@@ -5308,6 +5374,64 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         pdfDoc.addImage(src, format as any, x, y, w, h, alias, 'FAST');
       };
 
+      const parseUrlMetadata = (url: string) => {
+        const hashIdx = url.indexOf('#');
+        const hash = hashIdx !== -1 ? url.substring(hashIdx + 1) : '';
+        const params = new URLSearchParams(hash);
+        const rotate = parseInt(params.get('rotate') || '0', 10);
+        const fit = (params.get('fit') || 'original') as 'width' | 'height' | 'original';
+        return { rotate, fit };
+      };
+
+      const getRotatedPdfImage = (srcOrImg: string | HTMLImageElement, rotate: number): Promise<{ src: string; width: number; height: number }> => {
+        return new Promise((resolve) => {
+          const src = typeof srcOrImg === 'string' ? srcOrImg : srcOrImg.src;
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            try {
+              const origWidth = img.naturalWidth || img.width;
+              const origHeight = img.naturalHeight || img.height;
+              
+              if (rotate === 0) {
+                resolve({ src, width: origWidth, height: origHeight });
+                return;
+              }
+
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                resolve({ src, width: origWidth, height: origHeight });
+                return;
+              }
+
+              const angleRad = (rotate * Math.PI) / 180;
+              const is90or270 = rotate === 90 || rotate === 270;
+
+              const targetWidth = is90or270 ? origHeight : origWidth;
+              const targetHeight = is90or270 ? origWidth : origHeight;
+
+              canvas.width = targetWidth;
+              canvas.height = targetHeight;
+
+              ctx.translate(targetWidth / 2, targetHeight / 2);
+              ctx.rotate(angleRad);
+              ctx.drawImage(img, -origWidth / 2, -origHeight / 2, origWidth, origHeight);
+
+              const rotatedSrc = canvas.toDataURL('image/jpeg', 0.85);
+              resolve({ src: rotatedSrc, width: targetWidth, height: targetHeight });
+            } catch (err) {
+              console.error('[PDF] Canvas rotation failed:', err);
+              resolve({ src, width: 300, height: 400 });
+            }
+          };
+          img.onerror = () => {
+            resolve({ src, width: 300, height: 400 });
+          };
+          img.src = src;
+        });
+      };
+
       if (transactionsWithImages.length > 0) {
         // Collect all distinct and unique image URLs to compress before PDF rendering begins (Feature 9)
         const allImageUrls: string[] = [];
@@ -5358,8 +5482,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 const gap = 5;
                 const availableWidth = pageWidth - (margin * 2) - gap;
                 const imgWidth = availableWidth / 2;
-                const imgHeight = pageHeight * 0.55; // leaves perfect space for footer (Requirement 6)
-                const y = 18; // Start below header
+                
+                const safeTop = 16;
+                const safeBottom = pageHeight - 25;
+                const availableHeight = safeBottom - safeTop;
+                const imgHeight = Math.min(pageHeight * 0.55, availableHeight);
+                const y = safeTop + (availableHeight - imgHeight) / 2;
 
                 // Add transaction header
                 doc.setFontSize(10);
@@ -5377,7 +5505,42 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   });
                   
                   const img1 = await getCachedOptimizedImage(rawImg1, isCompressed, isStrongCompression, () => {});
-                  addOptimizedImageToDoc(doc, img1, rawImg1, margin, y, imgWidth, imgHeight);
+                  
+                  const { rotate, fit } = parseUrlMetadata(rawImg1);
+                  const rotatedData = await getRotatedPdfImage(img1, rotate);
+                  
+                  const ar = rotatedData.width / rotatedData.height;
+                  let w = imgWidth;
+                  let h = imgWidth / ar;
+                  
+                  if (fit === 'width') {
+                    w = imgWidth;
+                    h = imgWidth / ar;
+                  } else if (fit === 'height') {
+                    h = imgHeight;
+                    w = imgHeight * ar;
+                  } else { // original contain
+                    w = imgWidth;
+                    h = imgWidth / ar;
+                    if (h > imgHeight) {
+                      h = imgHeight;
+                      w = imgHeight * ar;
+                    }
+                  }
+                  
+                  if (h > imgHeight) {
+                    h = imgHeight;
+                    w = imgHeight * ar;
+                  }
+                  if (w > imgWidth) {
+                    w = imgWidth;
+                    h = imgWidth / ar;
+                  }
+                  
+                  const drawX = margin + (imgWidth - w) / 2;
+                  const drawY = y + (imgHeight - h) / 2;
+                  
+                  addOptimizedImageToDoc(doc, rotatedData.src, rawImg1, drawX, drawY, w, h);
                 } catch (e) { console.error(e); }
                 processedImages++;
 
@@ -5395,7 +5558,42 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     });
                     
                     const img2 = await getCachedOptimizedImage(rawImg2, isCompressed, isStrongCompression, () => {});
-                    addOptimizedImageToDoc(doc, img2, rawImg2, margin + imgWidth + gap, y, imgWidth, imgHeight);
+                    
+                    const { rotate, fit } = parseUrlMetadata(rawImg2);
+                    const rotatedData = await getRotatedPdfImage(img2, rotate);
+                    
+                    const ar = rotatedData.width / rotatedData.height;
+                    let w = imgWidth;
+                    let h = imgWidth / ar;
+                    
+                    if (fit === 'width') {
+                      w = imgWidth;
+                      h = imgWidth / ar;
+                    } else if (fit === 'height') {
+                      h = imgHeight;
+                      w = imgHeight * ar;
+                    } else { // original contain
+                      w = imgWidth;
+                      h = imgWidth / ar;
+                      if (h > imgHeight) {
+                        h = imgHeight;
+                        w = imgHeight * ar;
+                      }
+                    }
+                    
+                    if (h > imgHeight) {
+                      h = imgHeight;
+                      w = imgHeight * ar;
+                    }
+                    if (w > imgWidth) {
+                      w = imgWidth;
+                      h = imgWidth / ar;
+                    }
+                    
+                    const drawX = margin + imgWidth + gap + (imgWidth - w) / 2;
+                    const drawY = y + (imgHeight - h) / 2;
+                    
+                    addOptimizedImageToDoc(doc, rotatedData.src, rawImg2, drawX, drawY, w, h);
                   } catch (e) { console.error(e); }
                   processedImages++;
                 }
@@ -5426,17 +5624,51 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   const safeBottom = pageHeight - 25;
                   const availableHeight = safeBottom - safeTop;
                   
-                  const imgWidth = pageWidth * 0.62;
-                  const imgHeight = Math.min(pageHeight * 0.70, availableHeight);
-                  const x = (pageWidth - imgWidth) / 2;
-                  const y = safeTop + (availableHeight - imgHeight) / 2;
+                  const maxWidth = pageWidth * 0.62;
+                  const maxHeight = Math.min(pageHeight * 0.70, availableHeight);
+                  const targetX = (pageWidth - maxWidth) / 2;
+                  const targetY = safeTop + (availableHeight - maxHeight) / 2;
 
                   // Add transaction header
                   doc.setFontSize(10);
                   doc.setTextColor(80);
                   doc.text(`Transaction: ${t.description} (${t.amount}) - ${safeFormatDate(t.date)}`, 10, 10);
 
-                  addOptimizedImageToDoc(doc, optimizedImg, img, x, y, imgWidth, imgHeight);
+                  const { rotate, fit } = parseUrlMetadata(img);
+                  const rotatedData = await getRotatedPdfImage(optimizedImg, rotate);
+                  
+                  const ar = rotatedData.width / rotatedData.height;
+                  let w = maxWidth;
+                  let h = maxWidth / ar;
+                  
+                  if (fit === 'width') {
+                    w = maxWidth;
+                    h = maxWidth / ar;
+                  } else if (fit === 'height') {
+                    h = maxHeight;
+                    w = maxHeight * ar;
+                  } else { // original contain
+                    w = maxWidth;
+                    h = maxWidth / ar;
+                    if (h > maxHeight) {
+                      h = maxHeight;
+                      w = maxHeight * ar;
+                    }
+                  }
+                  
+                  if (h > maxHeight) {
+                    h = maxHeight;
+                    w = maxHeight * ar;
+                  }
+                  if (w > maxWidth) {
+                    w = maxWidth;
+                    h = maxWidth / ar;
+                  }
+                  
+                  const drawX = targetX + (maxWidth - w) / 2;
+                  const drawY = targetY + (maxHeight - h) / 2;
+
+                  addOptimizedImageToDoc(doc, rotatedData.src, img, drawX, drawY, w, h);
                 } catch (e) { console.error(e); }
                 
                 processedImages++;
@@ -6472,7 +6704,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         </div>
                         <div className="min-w-0 flex-1">
                           <h4 className={cn(
-                            "font-bold text-xs sm:text-sm md:text-[14px] break-words whitespace-normal leading-snug line-clamp-2 transition-colors duration-300",
+                            "font-bold text-base sm:text-[17px] md:text-lg break-words whitespace-normal leading-snug line-clamp-2 transition-colors duration-300",
                             theme === 'dark' ? "text-slate-100" : "text-slate-800"
                           )}>{book.name}</h4>
                           <p className={cn(
@@ -10431,60 +10663,69 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             </div>
                           )}
 
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex flex-wrap gap-3">
                             {selectedImages.map((img, i) => (
                               <div key={i} className="relative group w-20 h-20 sm:w-24 sm:h-24">
-                                <OptimizedImage 
-                                  src={img} 
-                                  alt="preview" 
-                                  type="preview"
-                                  className="w-full h-full object-cover rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer" 
-                                  onClick={() => {
-                                    handleOpenPreview(selectedImages);
-                                    setPreviewIndex(i);
-                                    setPreviewRotation(0);
-                                    setPreviewZoom(1);
-                                  }}
-                                />
+                                <div 
+                                  onClick={() => setSelectedFormatIndex(i)}
+                                  className={cn(
+                                    "w-full h-full rounded-xl overflow-hidden border cursor-pointer transition-all duration-300 relative bg-slate-100 dark:bg-zinc-800",
+                                    selectedFormatIndex === i 
+                                      ? "border-emerald-500 ring-4 ring-emerald-500/20" 
+                                      : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                                  )}
+                                >
+                                  <OptimizedImage 
+                                    src={img} 
+                                    alt="preview" 
+                                    type="preview"
+                                    className="w-full h-full object-cover" 
+                                  />
+                                </div>
                                 
                                 {/* Reorder Controls - Always Visible on Hover, but semi-visible always */}
-                                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-between px-1 pointer-events-none">
+                                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-between px-0.5 pointer-events-none">
                                   <button 
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); moveImage(i, 'up'); }}
                                     disabled={i === 0}
                                     className={cn(
-                                      "p-1 bg-black/40 hover:bg-black/70 text-white rounded-full transition-all pointer-events-auto",
+                                      "p-0.5 bg-black/60 hover:bg-black/90 text-white rounded-full transition-all pointer-events-auto",
                                       i === 0 ? "opacity-0" : "opacity-60 group-hover:opacity-100"
                                     )}
                                   >
-                                    <ChevronLeft size={14} />
+                                    <ChevronLeft size={12} />
                                   </button>
                                   <button 
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); moveImage(i, 'down'); }}
                                     disabled={i === selectedImages.length - 1}
                                     className={cn(
-                                      "p-1 bg-black/40 hover:bg-black/70 text-white rounded-full transition-all pointer-events-auto",
+                                      "p-0.5 bg-black/60 hover:bg-black/90 text-white rounded-full transition-all pointer-events-auto",
                                       i === selectedImages.length - 1 ? "opacity-0" : "opacity-60 group-hover:opacity-100"
                                     )}
                                   >
-                                    <ChevronRight size={14} />
+                                    <ChevronRight size={12} />
                                   </button>
                                 </div>
 
                                 <button 
                                   type="button"
-                                  onClick={() => removeImage(i)}
+                                  onClick={() => {
+                                    removeImage(i);
+                                    if (selectedFormatIndex >= selectedImages.length - 1) {
+                                      setSelectedFormatIndex(Math.max(0, selectedImages.length - 2));
+                                    }
+                                  }}
                                   className={cn(
-                                    "absolute -top-2 -right-2 p-1.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-full transition-all z-20 shadow-md border-2 border-white dark:border-zinc-900 flex items-center justify-center cursor-pointer"
+                                    "absolute -top-1.5 -right-1.5 p-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-full transition-all z-20 shadow-md border border-white dark:border-zinc-900 flex items-center justify-center cursor-pointer"
                                   )}
                                   title="Remove image"
                                 >
-                                  <X size={12} className="stroke-[3]" />
+                                  <X size={10} className="stroke-[3]" />
                                 </button>
                                 
-                                <div className="absolute bottom-1 left-1/2 -translate-x-1/2 bg-black/50 text-[8px] text-white px-1.5 rounded-full">
+                                <div className="absolute bottom-1 right-1 bg-black/50 text-[8px] text-white px-1.5 rounded-full">
                                   {i + 1}
                                 </div>
                               </div>
@@ -10494,14 +10735,103 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                 type="button"
                                 onClick={() => triggerUploadSelector('transaction')}
                                 className={cn(
-                                  "w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center border-2 border-dashed rounded-xl text-slate-400 hover:border-indigo-500 hover:text-indigo-500 transition-all",
-                                  theme === 'dark' ? "border-slate-800" : "border-slate-200"
+                                  "w-20 h-20 sm:w-24 sm:h-24 flex flex-col items-center justify-center border-2 border-dashed rounded-xl text-slate-400 hover:border-emerald-500 hover:text-emerald-500 transition-all gap-1",
+                                  theme === 'dark' ? "border-slate-800 bg-zinc-900/40" : "border-slate-200 bg-slate-50/50"
                                 )}
                               >
-                                <Plus size={24} />
+                                <Plus size={20} />
+                                <span className="text-[8px] font-black uppercase tracking-wider">Add</span>
                               </button>
                             )}
                           </div>
+
+                          {/* Formatting Panel for Selected Image */}
+                          {selectedImages[selectedFormatIndex] && (
+                            (() => {
+                              const formatImg = selectedImages[selectedFormatIndex];
+                              const hashIdx = formatImg ? formatImg.indexOf('#') : -1;
+                              const hash = hashIdx !== -1 ? formatImg.substring(hashIdx + 1) : '';
+                              const params = new URLSearchParams(hash);
+                              const currentFit = params.get('fit') || 'original';
+
+                              return (
+                                <div className={cn(
+                                  "p-4 rounded-xl border border-slate-100 dark:border-zinc-800 space-y-3.5",
+                                  theme === 'dark' ? "bg-zinc-900/40" : "bg-slate-50/50"
+                                )}>
+                                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-2">
+                                    <div className="flex items-center gap-1.5">
+                                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                                        Format Attachment #{selectedFormatIndex + 1}
+                                      </span>
+                                    </div>
+                                    <span className="text-[9px] font-mono text-slate-400 dark:text-zinc-500 uppercase tracking-widest bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full font-bold">
+                                      {currentFit === 'width' ? 'Fit Width' : currentFit === 'height' ? 'Fit Height' : 'Original Size'}
+                                    </span>
+                                  </div>
+
+                                  <div className="space-y-1.5">
+                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500">Sizing / Fit Mode</span>
+                                    <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => updateImageMetadata(selectedFormatIndex, 0, 'width')}
+                                        className={cn(
+                                          "flex-1 py-1.5 px-2 text-[10px] font-bold rounded-lg border cursor-pointer transition-all duration-200 active:scale-95",
+                                          currentFit === 'width'
+                                            ? "bg-emerald-500 border-emerald-500 text-white"
+                                            : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 text-slate-700 dark:text-zinc-300"
+                                        )}
+                                      >
+                                        Fit Width
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateImageMetadata(selectedFormatIndex, 0, 'height')}
+                                        className={cn(
+                                          "flex-1 py-1.5 px-2 text-[10px] font-bold rounded-lg border cursor-pointer transition-all duration-200 active:scale-95",
+                                          currentFit === 'height'
+                                            ? "bg-emerald-500 border-emerald-500 text-white"
+                                            : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 text-slate-700 dark:text-zinc-300"
+                                        )}
+                                      >
+                                        Fit Height
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateImageMetadata(selectedFormatIndex, 0, 'original')}
+                                        className={cn(
+                                          "flex-1 py-1.5 px-2 text-[10px] font-bold rounded-lg border cursor-pointer transition-all duration-200 active:scale-95",
+                                          currentFit === 'original'
+                                            ? "bg-emerald-500 border-emerald-500 text-white"
+                                            : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 text-slate-700 dark:text-zinc-300"
+                                        )}
+                                      >
+                                        Original Size
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex justify-end pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        handleOpenPreview(selectedImages);
+                                        setPreviewIndex(selectedFormatIndex);
+                                        setPreviewRotation(0);
+                                        setPreviewZoom(1);
+                                      }}
+                                      className="py-1.5 px-3 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-400 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                                    >
+                                      <ZoomIn size={12} />
+                                      View Fullscreen
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })()
+                          )}
                         </div>
                       )}
                       
@@ -10860,12 +11190,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       if (!activeAttDetail) return null;
                       return (
                         <div className="flex flex-col gap-0.5 mt-1 border-t border-white/10 pt-1">
-                          {activeAttDetail.user_name && (
-                            <p className="flex items-center gap-1 text-slate-350">
-                              <User size={10} className="text-indigo-400 shrink-0" />
-                              <span>By: <strong>{activeAttDetail.user_name}</strong> {activeAttDetail.user_email ? `(${activeAttDetail.user_email})` : ''}</span>
-                            </p>
-                          )}
                           {(activeAttDetail.created_at || activePreviewTx?.created_at) && (
                             <p className="flex items-center gap-1 text-slate-350">
                               <Clock size={10} className="text-indigo-400 shrink-0" />
@@ -10895,14 +11219,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   disabled={previewValidationStatus[previewIndex] === false}
                 >
                   <ZoomIn size={20} />
-                </button>
-                <button 
-                  onClick={() => setPreviewRotation(prev => (prev + 90) % 360)}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
-                  title="Rotate"
-                  disabled={previewValidationStatus[previewIndex] === false}
-                >
-                  <RotateCw size={20} />
                 </button>
                 <button 
                   onClick={handleDownloadAttachment}

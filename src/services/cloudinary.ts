@@ -94,9 +94,14 @@ export function resolveAttachmentUrl(
 ): string {
   if (!url || typeof url !== 'string') return '';
   
+  // Extract hash parameter to append later
+  const hashIdx = url.indexOf('#');
+  const hash = hashIdx !== -1 ? url.substring(hashIdx) : '';
+  const cleanUrl = hashIdx !== -1 ? url.substring(0, hashIdx) : url;
+
   // 1. Direct pass-through for local references
-  if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('local-img-')) {
-    return url;
+  if (cleanUrl.startsWith('data:') || cleanUrl.startsWith('blob:') || cleanUrl.startsWith('local-img-')) {
+    return cleanUrl + hash;
   }
 
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'dd2kcpetc';
@@ -116,31 +121,24 @@ export function resolveAttachmentUrl(
   }
 
   // 2. If it's a non-Cloudinary external URL, proxy it through Cloudinary Fetch for egress protection
-  if (!url.includes('cloudinary.com')) {
-    return `https://res.cloudinary.com/${cloudName}/image/fetch/${transformation}/${encodeURIComponent(url)}`;
+  if (!cleanUrl.includes('cloudinary.com')) {
+    return `https://res.cloudinary.com/${cloudName}/image/fetch/${transformation}/${encodeURIComponent(cleanUrl)}${hash}`;
   }
 
   // 3. For Cloudinary URLs, normalize and optimize them dynamically
   // Find where the delivery/resource type ends and folder/public_id path begins.
-  // Standard splitters:
-  // - /image/upload/
-  // - /image/private/
-  // - /image/authenticated/
-  // - /raw/upload/
-  // - /video/upload/
-  // - /upload/
   let splitter = '/image/upload/';
-  if (url.includes('/image/upload/')) {
+  if (cleanUrl.includes('/image/upload/')) {
     splitter = '/image/upload/';
-  } else if (url.includes('/upload/')) {
+  } else if (cleanUrl.includes('/upload/')) {
     splitter = '/upload/';
-  } else if (url.includes('/image/private/')) {
+  } else if (cleanUrl.includes('/image/private/')) {
     splitter = '/image/private/';
-  } else if (url.includes('/image/authenticated/')) {
+  } else if (cleanUrl.includes('/image/authenticated/')) {
     splitter = '/image/authenticated/';
-  } else if (url.includes('/image/fetch/')) {
+  } else if (cleanUrl.includes('/image/fetch/')) {
     // If it's already a fetch url, extract the original URL and re-proxy or update transformations
-    const fetchParts = url.split('/image/fetch/');
+    const fetchParts = cleanUrl.split('/image/fetch/');
     const remaining = fetchParts[1];
     if (remaining) {
       const segments = remaining.split('/');
@@ -156,18 +154,18 @@ export function resolveAttachmentUrl(
       } catch (e) {
         // use as-is if decoding fails
       }
-      return `https://res.cloudinary.com/${cloudName}/image/fetch/${transformation}/${encodeURIComponent(originalUrl)}`;
+      return `https://res.cloudinary.com/${cloudName}/image/fetch/${transformation}/${encodeURIComponent(originalUrl)}${hash}`;
     }
     splitter = '/image/fetch/';
   }
 
-  const parts = url.split(splitter);
-  if (parts.length < 2) return url;
+  const parts = cleanUrl.split(splitter);
+  if (parts.length < 2) return cleanUrl + hash;
 
   const prefix = parts[0]; // e.g. "https://res.cloudinary.com/dd2kcpetc"
   const remaining = parts[1]; // e.g. "v1700000000/trackbook/test@example.com/receipt123.jpg"
 
-  if (!remaining) return url;
+  if (!remaining) return cleanUrl + hash;
 
   // Split and filter out older transformations and version numbers
   const segments = remaining.split('/');
@@ -183,7 +181,7 @@ export function resolveAttachmentUrl(
   });
 
   // Re-assemble the URL using the requested transformation
-  return `${prefix}${splitter}${transformation}/${cleanSegments.join('/')}`;
+  return `${prefix}${splitter}${transformation}/${cleanSegments.join('/')}${hash}`;
 }
 
 /**

@@ -392,7 +392,7 @@ export default function Auth({
           signUpError.message?.toLowerCase().includes('already exists') || 
           signUpError.status === 422
         ) {
-          setError('This email is already registered. Please sign in or use Forgot Password.');
+          setSuccess('✅ Check your inbox.\n\nWe\'ve sent an email to your registered email address.\n\nPlease follow the instructions in your email to continue.');
           return;
         }
         throw signUpError;
@@ -426,7 +426,7 @@ export default function Auth({
       }
 
       if (isExistingUser) {
-        setError('This email is already registered. Please sign in or use Forgot Password.');
+        setSuccess('✅ Check your inbox.\n\nWe\'ve sent an email to your registered email address.\n\nPlease follow the instructions in your email to continue.');
         return;
       }
       
@@ -521,7 +521,7 @@ export default function Auth({
             error.message?.toLowerCase().includes('already exists') || 
             error.status === 422
           ) {
-            setError('This email is already registered. Please sign in or use Forgot Password.');
+            setSuccess('✅ Check your inbox.\n\nWe\'ve sent an email to your registered email address.\n\nPlease follow the instructions in your email to continue.');
             return;
           }
           throw error;
@@ -556,7 +556,7 @@ export default function Auth({
         }
 
         if (isExistingUser) {
-          setError('This email is already registered. Please sign in or use Forgot Password.');
+          setSuccess('✅ Check your inbox.\n\nWe\'ve sent an email to your registered email address.\n\nPlease follow the instructions in your email to continue.');
           return;
         }
 
@@ -757,7 +757,7 @@ export default function Auth({
                   className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-4 py-3 rounded-2xl flex items-start gap-2 text-xs font-semibold overflow-hidden shadow-sm mb-4"
                 >
                   <CheckCircle2 size={15} className="shrink-0 mt-0.5 text-emerald-500" />
-                  <span>{success}</span>
+                  <span className="whitespace-pre-line flex-1">{success}</span>
                 </motion.div>
               )}
             </AnimatePresence>

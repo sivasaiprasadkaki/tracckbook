@@ -191,6 +191,87 @@ class ExportDB {
 
 // 2. Inline Web Worker Code
 const workerBlobCode = `
+  const resolveAttachmentUrl = (url, type, cloudName = 'dd2kcpetc') => {
+    if (!url || typeof url !== 'string') return '';
+    const hashIdx = url.indexOf('#');
+    const hash = hashIdx !== -1 ? url.substring(hashIdx) : '';
+    const cleanUrl = hashIdx !== -1 ? url.substring(0, hashIdx) : url;
+
+    if (cleanUrl.startsWith('data:') || cleanUrl.startsWith('blob:') || cleanUrl.startsWith('local-img-')) {
+      return cleanUrl + hash;
+    }
+
+    let transformation = '';
+    if (type === 'preview') {
+      transformation = 'f_auto,q_auto,w_300';
+    } else if (type === 'fullscreen') {
+      transformation = 'f_auto,q_auto,w_1200';
+    } else if (type === 'export_strong') {
+      transformation = 'f_jpg,q_35,w_800';
+    } else if (type === 'export_low') {
+      transformation = 'f_jpg,q_40,w_900';
+    } else if (type === 'export_high') {
+      transformation = 'f_jpg,q_82';
+    }
+
+    if (!cleanUrl.includes('cloudinary.com')) {
+      return 'https://res.cloudinary.com/' + cloudName + '/image/fetch/' + transformation + '/' + encodeURIComponent(cleanUrl) + hash;
+    }
+
+    let splitter = '/image/upload/';
+    if (cleanUrl.includes('/image/upload/')) {
+      splitter = '/image/upload/';
+    } else if (cleanUrl.includes('/upload/')) {
+      splitter = '/upload/';
+    } else if (cleanUrl.includes('/image/private/')) {
+      splitter = '/image/private/';
+    } else if (cleanUrl.includes('/image/authenticated/')) {
+      splitter = '/image/authenticated/';
+    } else if (cleanUrl.includes('/image/fetch/')) {
+      const fetchParts = cleanUrl.split('/image/fetch/');
+      const remaining = fetchParts[1];
+      if (remaining) {
+        const segments = remaining.split('/');
+        const cleanSegments = segments.filter(s => {
+          if (!s) return false;
+          const keys = ['w_', 'h_', 'q_', 'f_', 'c_', 'r_', 'dpr_', 'auto'];
+          return !keys.some(k => s.startsWith(k) || s.includes(',' + k));
+        });
+        const originalUrlSegment = cleanSegments.join('/');
+        let originalUrl = originalUrlSegment;
+        try {
+          originalUrl = decodeURIComponent(originalUrlSegment);
+        } catch (e) {}
+        return 'https://res.cloudinary.com/' + cloudName + '/image/fetch/' + transformation + '/' + encodeURIComponent(originalUrl) + hash;
+      }
+      splitter = '/image/fetch/';
+    }
+
+    const parts = cleanUrl.split(splitter);
+    if (parts.length < 2) return cleanUrl + hash;
+
+    const prefix = parts[0];
+    const remaining = parts[1];
+    if (!remaining) return cleanUrl + hash;
+
+    const segments = remaining.split('/');
+    const cleanSegments = segments.filter(s => {
+      if (!s) return false;
+      if (/^v\\d+$/.test(s)) return false;
+      const keys = ['w_', 'h_', 'q_', 'f_', 'c_', 'r_', 'dpr_', 'bo_', 'co_', 'e_', 'fl_', 'l_', 'p_', 'pg_', 'x_', 'y_', 'z_', 'auto'];
+      return !keys.some(k => s.startsWith(k) || s.includes(',' + k));
+    });
+
+    return prefix + splitter + transformation + '/' + cleanSegments.join('/') + hash;
+  };
+
+  const getExportOptimizedCloudinaryUrl = (url, isCompressed, isHuge, cloudName) => {
+    if (isCompressed) {
+      return resolveAttachmentUrl(url, isHuge ? 'export_strong' : 'export_low', cloudName);
+    }
+    return resolveAttachmentUrl(url, 'export_high', cloudName);
+  };
+
   self.onmessage = async (e) => {
     const { taskId, urls, isCompressed, isStrongCompression, cloudName } = e.data;
     const results = {};
@@ -209,7 +290,7 @@ const workerBlobCode = `
         try {
           if (!url) return;
           
-          let targetUrl = getExportOptimizedCloudinaryUrl(url, isCompressed, isStrongCompression);
+          let targetUrl = getExportOptimizedCloudinaryUrl(url, isCompressed, isStrongCompression, cloudName);
 
           if (targetUrl.startsWith('data:')) {
             results[url] = targetUrl;
@@ -232,6 +313,7 @@ const workerBlobCode = `
         type: 'progress',
         taskId,
         progress,
+        selectedUrlsCount: Math.min(total, i + chunk.length),
         message: 'Optimizing receipts (' + Math.min(total, i + chunk.length) + '/' + total + ')...'
       });
     }
@@ -1150,6 +1232,63 @@ export class BackgroundExportManager {
       pdfDoc.addImage(payload, format as any, x, y, w, h, alias, 'FAST');
     };
 
+    const parseUrlMetadata = (url: string) => {
+      const hashIdx = url.indexOf('#');
+      const hash = hashIdx !== -1 ? url.substring(hashIdx + 1) : '';
+      const params = new URLSearchParams(hash);
+      const rotate = parseInt(params.get('rotate') || '0', 10);
+      const fit = (params.get('fit') || 'original') as 'width' | 'height' | 'original';
+      return { rotate, fit };
+    };
+
+    const getRotatedPdfImage = (src: string, rotate: number): Promise<{ src: string; width: number; height: number }> => {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          try {
+            const origWidth = img.naturalWidth || img.width;
+            const origHeight = img.naturalHeight || img.height;
+            
+            if (rotate === 0) {
+              resolve({ src, width: origWidth, height: origHeight });
+              return;
+            }
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              resolve({ src, width: origWidth, height: origHeight });
+              return;
+            }
+
+            const angleRad = (rotate * Math.PI) / 180;
+            const is90or270 = rotate === 90 || rotate === 270;
+
+            const targetWidth = is90or270 ? origHeight : origWidth;
+            const targetHeight = is90or270 ? origWidth : origHeight;
+
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+
+            ctx.translate(targetWidth / 2, targetHeight / 2);
+            ctx.rotate(angleRad);
+            ctx.drawImage(img, -origWidth / 2, -origHeight / 2, origWidth, origHeight);
+
+            const rotatedSrc = canvas.toDataURL('image/jpeg', 0.85);
+            resolve({ src: rotatedSrc, width: targetWidth, height: targetHeight });
+          } catch (err) {
+            console.error('[ExportManager] Canvas rotation failed:', err);
+            resolve({ src, width: 300, height: 400 });
+          }
+        };
+        img.onerror = () => {
+          resolve({ src, width: 300, height: 400 });
+        };
+        img.src = src;
+      });
+    };
+
     if (transactionsWithImages.length > 0) {
       let processedImages = 0;
       let isFirstPage = true;
@@ -1190,7 +1329,42 @@ export class BackgroundExportManager {
               try {
                 const rawImg1 = t.images[i];
                 const resolvedSrc = imageMap[rawImg1] || rawImg1;
-                addOptimizedImageToDoc(doc, resolvedSrc, rawImg1, margin, y, imgWidth, imgHeight);
+                
+                const { rotate, fit } = parseUrlMetadata(rawImg1);
+                const rotatedData = await getRotatedPdfImage(resolvedSrc, rotate);
+                
+                const ar = rotatedData.width / rotatedData.height;
+                let w = imgWidth;
+                let h = imgWidth / ar;
+                
+                if (fit === 'width') {
+                  w = imgWidth;
+                  h = imgWidth / ar;
+                } else if (fit === 'height') {
+                  h = imgHeight;
+                  w = imgHeight * ar;
+                } else { // original contain
+                  w = imgWidth;
+                  h = imgWidth / ar;
+                  if (h > imgHeight) {
+                    h = imgHeight;
+                    w = imgHeight * ar;
+                  }
+                }
+                
+                if (h > imgHeight) {
+                  h = imgHeight;
+                  w = imgHeight * ar;
+                }
+                if (w > imgWidth) {
+                  w = imgWidth;
+                  h = imgWidth / ar;
+                }
+                
+                const drawX = margin + (imgWidth - w) / 2;
+                const drawY = y + (imgHeight - h) / 2;
+                
+                addOptimizedImageToDoc(doc, rotatedData.src, rawImg1, drawX, drawY, w, h);
               } catch (e) {
                 console.error('[ExportManager] jsPDF addImage error:', e);
               }
@@ -1206,7 +1380,42 @@ export class BackgroundExportManager {
                 try {
                   const rawImg2 = t.images[i + 1];
                   const resolvedSrc2 = imageMap[rawImg2] || rawImg2;
-                  addOptimizedImageToDoc(doc, resolvedSrc2, rawImg2, margin + imgWidth + gap, y, imgWidth, imgHeight);
+                  
+                  const { rotate, fit } = parseUrlMetadata(rawImg2);
+                  const rotatedData = await getRotatedPdfImage(resolvedSrc2, rotate);
+                  
+                  const ar = rotatedData.width / rotatedData.height;
+                  let w = imgWidth;
+                  let h = imgWidth / ar;
+                  
+                  if (fit === 'width') {
+                    w = imgWidth;
+                    h = imgWidth / ar;
+                  } else if (fit === 'height') {
+                    h = imgHeight;
+                    w = imgHeight * ar;
+                  } else { // original contain
+                    w = imgWidth;
+                    h = imgWidth / ar;
+                    if (h > imgHeight) {
+                      h = imgHeight;
+                      w = imgHeight * ar;
+                    }
+                  }
+                  
+                  if (h > imgHeight) {
+                    h = imgHeight;
+                    w = imgHeight * ar;
+                  }
+                  if (w > imgWidth) {
+                    w = imgWidth;
+                    h = imgWidth / ar;
+                  }
+                  
+                  const drawX = margin + imgWidth + gap + (imgWidth - w) / 2;
+                  const drawY = y + (imgHeight - h) / 2;
+                  
+                  addOptimizedImageToDoc(doc, rotatedData.src, rawImg2, drawX, drawY, w, h);
                 } catch (e) {
                   console.error('[ExportManager] jsPDF addImage error:', e);
                 }
@@ -1235,17 +1444,52 @@ export class BackgroundExportManager {
                 const safeBottom = pageHeight - 25;
                 const availableHeight = safeBottom - safeTop;
                 
-                const imgWidth = pageWidth * 0.62;
-                const imgHeight = Math.min(pageHeight * 0.70, availableHeight);
-                const x = (pageWidth - imgWidth) / 2;
-                const y = safeTop + (availableHeight - imgHeight) / 2;
+                const maxWidth = pageWidth * 0.62;
+                const maxHeight = Math.min(pageHeight * 0.70, availableHeight);
+                const targetX = (pageWidth - maxWidth) / 2;
+                const targetY = safeTop + (availableHeight - maxHeight) / 2;
 
                 doc.setFontSize(10);
                 doc.setTextColor(80);
                 doc.text(`Transaction: ${t.description} (${t.amount}) - ${safeFormatDate(t.date)}`, 10, 10);
 
                 const resolvedSrc = imageMap[img] || img;
-                addOptimizedImageToDoc(doc, resolvedSrc, img, x, y, imgWidth, imgHeight);
+                
+                const { rotate, fit } = parseUrlMetadata(img);
+                const rotatedData = await getRotatedPdfImage(resolvedSrc, rotate);
+                
+                const ar = rotatedData.width / rotatedData.height;
+                let w = maxWidth;
+                let h = maxWidth / ar;
+                
+                if (fit === 'width') {
+                  w = maxWidth;
+                  h = maxWidth / ar;
+                } else if (fit === 'height') {
+                  h = maxHeight;
+                  w = maxHeight * ar;
+                } else { // original contain
+                  w = maxWidth;
+                  h = maxWidth / ar;
+                  if (h > maxHeight) {
+                    h = maxHeight;
+                    w = maxHeight * ar;
+                  }
+                }
+                
+                if (h > maxHeight) {
+                  h = maxHeight;
+                  w = maxHeight * ar;
+                }
+                if (w > maxWidth) {
+                  w = maxWidth;
+                  h = maxWidth / ar;
+                }
+                
+                const drawX = targetX + (maxWidth - w) / 2;
+                const drawY = targetY + (maxHeight - h) / 2;
+
+                addOptimizedImageToDoc(doc, rotatedData.src, img, drawX, drawY, w, h);
               } catch (e) {
                 console.error('[ExportManager] jsPDF addImage error:', e);
               }

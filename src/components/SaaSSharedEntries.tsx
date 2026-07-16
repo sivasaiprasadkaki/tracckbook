@@ -71,11 +71,11 @@ export default function SaaSSharedEntries({
     <div className="space-y-6 sm:space-y-8 animate-fade-in">
       
       {/* Header section */}
-      <div className="border-b pb-4 border-slate-100 dark:border-zinc-900">
-        <h2 className={cn("text-lg font-extrabold tracking-tight", theme === 'dark' ? "text-slate-100" : "text-slate-900")}>
+      <div className="border-b pb-4 border-zinc-150 dark:border-zinc-800">
+        <h2 className={cn("text-lg font-semibold tracking-tight", theme === 'dark' ? "text-zinc-100" : "text-zinc-900")}>
           Secure Sharing & Synchronization Hub
         </h2>
-        <p className="text-xs text-slate-400 font-semibold mt-0.5">
+        <p className="text-xs text-zinc-400 dark:text-zinc-500 font-normal mt-0.5">
           Generate secure, read-only sync codes to collaborate with accountants, clients, or remote team members.
         </p>
       </div>
@@ -87,20 +87,20 @@ export default function SaaSSharedEntries({
           <form 
             onSubmit={handleCreateShareCode}
             className={cn(
-              "p-5 rounded-2xl border space-y-4 shadow-sm",
-              theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-150"
+              "p-5 rounded-sm border space-y-4 shadow-sm",
+              theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"
             )}
           >
-            <div className="flex items-center gap-2 mb-2 border-b pb-2 border-slate-100 dark:border-zinc-900">
-              <Share2 size={16} className="text-indigo-500" />
-              <h3 className={cn("text-xs font-bold uppercase tracking-wider", theme === 'dark' ? "text-slate-200" : "text-slate-800")}>
+            <div className="flex items-center gap-2 mb-2 border-b pb-2 border-zinc-150 dark:border-zinc-800">
+              <Share2 size={16} className="text-emerald-500" />
+              <h3 className={cn("text-xs font-semibold uppercase tracking-wider", theme === 'dark' ? "text-zinc-200" : "text-zinc-800")}>
                 Generate Sync Code
               </h3>
             </div>
 
             {/* Select Book */}
             <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 dark:text-zinc-500">
+              <label className="text-[10px] uppercase font-semibold tracking-wider text-zinc-400 dark:text-zinc-500">
                 Select Cashbook
               </label>
               <select
@@ -108,8 +108,8 @@ export default function SaaSSharedEntries({
                 value={selectedBookId}
                 onChange={(e) => setSelectedBookId(e.target.value)}
                 className={cn(
-                  "w-full px-3 py-2 text-xs rounded-xl border outline-none font-bold",
-                  theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-850"
+                  "w-full px-3 py-2 text-xs rounded-sm border outline-none font-semibold",
+                  theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-zinc-200 text-zinc-850"
                 )}
               >
                 <option value="">-- Select Cashbook --</option>
@@ -121,15 +121,15 @@ export default function SaaSSharedEntries({
 
             {/* Select Expiry */}
             <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold tracking-wider text-slate-400 dark:text-zinc-500">
+              <label className="text-[10px] uppercase font-semibold tracking-wider text-zinc-400 dark:text-zinc-500">
                 Code Expiry Duration
               </label>
               <select
                 value={expiryHours}
                 onChange={(e) => setExpiryHours(e.target.value)}
                 className={cn(
-                  "w-full px-3 py-2 text-xs rounded-xl border outline-none font-bold",
-                  theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-850"
+                  "w-full px-3 py-2 text-xs rounded-sm border outline-none font-semibold",
+                  theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-zinc-200 text-zinc-850"
                 )}
               >
                 <option value="2">2 Hours (Highly Secure)</option>
@@ -142,7 +142,7 @@ export default function SaaSSharedEntries({
             <button
               type="submit"
               disabled={!selectedBookId}
-              className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 active:scale-98 duration-100"
+              className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-sm text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 active:scale-[0.99] duration-100"
             >
               <Plus size={14} />
               Generate Sync Link
@@ -152,7 +152,7 @@ export default function SaaSSharedEntries({
 
         {/* Right Side: Shared Links & Code Sync logs (2 cols) */}
         <div className="md:col-span-2 space-y-4">
-          <h3 className={cn("text-xs font-black uppercase tracking-widest text-slate-400", theme === 'dark' ? "text-zinc-500" : "text-slate-400")}>
+          <h3 className={cn("text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500")}>
             Active Shared Channels & Codes ({sharedLinks.length})
           </h3>
 
@@ -163,46 +163,46 @@ export default function SaaSSharedEntries({
                 <div
                   key={item.id}
                   className={cn(
-                    "p-4 rounded-2xl border shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs font-semibold relative overflow-hidden transition-colors duration-200",
-                    theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-150"
+                    "p-4 rounded-sm border shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs font-semibold relative overflow-hidden transition-colors duration-200",
+                    theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"
                   )}
                 >
                   {/* Status indicator bar inside card */}
                   <span className={cn(
                     "absolute left-0 top-0 bottom-0 w-1",
-                    isActive ? "bg-indigo-600" : "bg-slate-300 dark:bg-zinc-800"
+                    isActive ? "bg-emerald-600" : "bg-zinc-300 dark:bg-zinc-800"
                   )} />
 
                   <div className="space-y-1.5 pl-2 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-black text-sm tracking-widest bg-slate-100 text-slate-800 dark:bg-zinc-900 dark:text-slate-200 px-2 py-0.5 rounded border border-slate-150 dark:border-zinc-800">
+                      <span className="font-semibold text-sm tracking-widest bg-zinc-100 text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 px-2 py-0.5 rounded-sm border border-zinc-200 dark:border-zinc-800">
                         {item.code}
                       </span>
                       <button
                         onClick={() => handleCopyCode(item.code)}
-                        className="text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer"
+                        className="text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer"
                         title="Copy Sync Code"
                       >
                         {copiedCode === item.code ? <Check size={13} strokeWidth={3} className="text-emerald-500" /> : <Copy size={13} />}
                       </button>
                     </div>
 
-                    <p className={cn("font-bold truncate", theme === 'dark' ? "text-slate-200" : "text-slate-800")}>
+                    <p className={cn("font-semibold truncate", theme === 'dark' ? "text-zinc-250" : "text-zinc-800")}>
                       Workspace: {item.bookName} • {item.entriesCount} entries
                     </p>
 
-                    <div className="flex items-center gap-1.5 text-[10.5px] text-slate-400 font-bold mt-1">
-                      <Clock size={12} className="text-slate-400 shrink-0" />
+                    <div className="flex items-center gap-1.5 text-[10.5px] text-zinc-400 dark:text-zinc-500 font-normal mt-1">
+                      <Clock size={12} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
                       {isActive ? (
-                        <span className="text-amber-600 dark:text-amber-400">
+                        <span className="text-amber-600 dark:text-amber-400 font-medium">
                           Expires: {item.expiresAt}
                         </span>
                       ) : (
-                        <span className="text-rose-500 font-extrabold uppercase tracking-wide">
+                        <span className="text-rose-500 font-bold uppercase tracking-wide">
                           Expired
                         </span>
                       )}
-                      <span className="text-slate-300 dark:text-zinc-800">•</span>
+                      <span className="text-zinc-300 dark:text-zinc-800">•</span>
                       <span>{item.visits} imports made</span>
                     </div>
                   </div>
@@ -214,8 +214,8 @@ export default function SaaSSharedEntries({
                       <button
                         onClick={() => { vibrate(10); setActiveQrCode(item.code); }}
                         className={cn(
-                          "p-2 rounded-xl border hover:bg-slate-100 dark:hover:bg-zinc-900 cursor-pointer",
-                          theme === 'dark' ? "border-zinc-800 text-slate-400" : "border-slate-150 text-slate-600"
+                          "p-2 rounded-sm border hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer",
+                          theme === 'dark' ? "border-zinc-800 text-zinc-450 hover:text-emerald-400 hover:border-emerald-500" : "border-zinc-200 text-zinc-600 hover:text-emerald-600 hover:border-emerald-500"
                         )}
                         title="Show QR Code"
                       >
@@ -229,8 +229,8 @@ export default function SaaSSharedEntries({
                         rel="noreferrer"
                         onClick={() => vibrate(10)}
                         className={cn(
-                          "p-2 rounded-xl border hover:bg-slate-100 dark:hover:bg-zinc-900 cursor-pointer",
-                          theme === 'dark' ? "border-zinc-800 text-slate-400" : "border-slate-150 text-slate-600"
+                          "p-2 rounded-sm border hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer",
+                          theme === 'dark' ? "border-zinc-800 text-zinc-450 hover:text-emerald-400 hover:border-emerald-500" : "border-zinc-200 text-zinc-600 hover:text-emerald-600 hover:border-emerald-500"
                         )}
                         title="Share on WhatsApp"
                       >
@@ -242,8 +242,8 @@ export default function SaaSSharedEntries({
                         href={`mailto:?subject=${encodeURIComponent(`TrackBook Ledger Sync Code`)}&body=${encodeURIComponent(`Verified Sync Code: ${item.code}`)}`}
                         onClick={() => vibrate(10)}
                         className={cn(
-                          "p-2 rounded-xl border hover:bg-slate-100 dark:hover:bg-zinc-900 cursor-pointer",
-                          theme === 'dark' ? "border-zinc-800 text-slate-400" : "border-slate-150 text-slate-600"
+                          "p-2 rounded-sm border hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer",
+                          theme === 'dark' ? "border-zinc-800 text-zinc-450 hover:text-emerald-400 hover:border-emerald-500" : "border-zinc-200 text-zinc-600 hover:text-emerald-600 hover:border-emerald-500"
                         )}
                         title="Send via Email"
                       >
@@ -266,44 +266,44 @@ export default function SaaSSharedEntries({
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setActiveQrCode(null)} />
             
             <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
+              initial={{ scale: 0.98, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
+              exit={{ scale: 0.98, opacity: 0 }}
               className={cn(
-                "p-6 rounded-2xl border max-w-sm w-full z-10 text-center space-y-4 shadow-2xl relative",
-                theme === 'dark' ? "bg-zinc-950 border-zinc-900 text-white" : "bg-white border-slate-200 text-slate-800"
+                "p-6 rounded-sm border max-w-sm w-full z-10 text-center space-y-4 shadow-2xl relative",
+                theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-200 text-zinc-800"
               )}
             >
-              <h4 className="text-sm font-extrabold">TrackBook Sync QR Code</h4>
-              <p className="text-xs text-slate-400">Scan this code using an employee or secondary mobile camera to pull live synchronized transaction histories instantly.</p>
+              <h4 className="text-sm font-semibold">TrackBook Sync QR Code</h4>
+              <p className="text-xs text-zinc-400 dark:text-zinc-500">Scan this code using an employee or secondary mobile camera to pull live synchronized transaction histories instantly.</p>
               
               {/* Premium Vector mock QR code visual */}
-              <div className="w-48 h-48 bg-white border border-slate-150 rounded-xl mx-auto flex items-center justify-center relative p-3">
+              <div className="w-48 h-48 bg-white border border-zinc-200 rounded-sm mx-auto flex items-center justify-center relative p-3">
                 <div className="grid grid-cols-5 gap-1.5 w-full h-full opacity-90">
                   {Array.from({ length: 25 }).map((_, i) => (
                     <div 
                       key={i} 
                       className={cn(
-                        "rounded",
-                        (i % 3 === 0 || i % 7 === 0 || i < 5 || i > 20) ? "bg-slate-900" : "bg-slate-100"
+                        "rounded-sm",
+                        (i % 3 === 0 || i % 7 === 0 || i < 5 || i > 20) ? "bg-zinc-900" : "bg-zinc-100"
                       )} 
                     />
                   ))}
                 </div>
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="bg-indigo-600 text-white w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs shadow">
+                  <div className="bg-emerald-600 text-white w-9 h-9 rounded-sm flex items-center justify-center font-bold text-xs shadow">
                     TB
                   </div>
                 </div>
               </div>
 
-              <span className="text-xs font-black tracking-widest block font-mono bg-slate-100 text-slate-800 dark:bg-zinc-900 dark:text-zinc-200 py-1.5 rounded-lg border">
+              <span className="text-xs font-semibold tracking-widest block font-mono bg-zinc-100 text-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 py-1.5 rounded-sm border border-zinc-200 dark:border-zinc-850">
                 {activeQrCode}
               </span>
 
               <button
                 onClick={() => { vibrate(10); setActiveQrCode(null); }}
-                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl cursor-pointer"
+                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-sm cursor-pointer"
               >
                 Close View
               </button>

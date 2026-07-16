@@ -96,11 +96,11 @@
 
 @layer components {
   .card {
-    @apply bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-900 rounded-3xl transition-all;
+    @apply bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-sm transition-all;
   }
   
   .input {
-    @apply w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-zinc-900 bg-white dark:bg-zinc-950 focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white;
+    @apply w-full px-4 py-2.5 rounded-sm border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 focus:ring-1 focus:ring-emerald-500 outline-none transition-all dark:text-white text-sm;
   }
 }
 
@@ -241,30 +241,31 @@
 }
 
 .input-field {
-  transition: all 0.3s ease;
+  transition: all 0.15s ease;
+  border-radius: 2px;
 }
 .input-field:focus {
-  border-color: #5b3df5;
-  box-shadow: 0 0 0 4px rgba(91, 61, 245, 0.1);
+  border-color: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.15);
   outline: none;
 }
 
 .btn-primary {
-  background: #5b3df5;
+  background: #10b981;
   color: white;
-  transition: all 0.3s ease;
+  transition: all 0.15s ease;
+  border-radius: 2px;
 }
 .btn-primary:hover {
-  background: linear-gradient(135deg, #5b3df5 0%, #7621ff 100%);
-  box-shadow: 0 4px 15px rgba(91, 61, 245, 0.3);
-  transform: translateY(-1px);
+  background: #059669;
+  transform: none;
 }
 
 .link-hover {
-  transition: color 0.2s ease;
+  transition: color 0.15s ease;
 }
 .link-hover:hover {
-  color: #5b3df5;
+  color: #10b981;
 }
 
 

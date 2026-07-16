@@ -132,23 +132,23 @@ export default function SaaSHomeDashboard({
     <div className="space-y-6 sm:space-y-8 animate-fade-in">
       
       {/* Top Banner section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-6 border-slate-100 dark:border-zinc-900">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-6 border-zinc-200 dark:border-zinc-800">
         <div>
-          <div className="flex items-center gap-2 mb-1.5 text-slate-500 dark:text-slate-400 font-medium">
-            <span className="text-xs uppercase tracking-wider font-bold">Workspace</span>
-            <ChevronRight size={14} />
-            <span className="text-xs bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wide border border-indigo-100 dark:border-indigo-900/20">
+          <div className="flex items-center gap-2 mb-1.5 text-zinc-500 dark:text-zinc-400 font-medium">
+            <span className="text-[10px] uppercase tracking-wider font-semibold">Workspace</span>
+            <ChevronRight size={12} />
+            <span className="text-[10px] bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-sm font-semibold uppercase tracking-wide border border-emerald-250/20 dark:border-emerald-900/30">
               Default Workspace
             </span>
           </div>
           <h1 className={cn(
-            "text-2xl sm:text-3xl font-black tracking-tight",
-            theme === 'dark' ? "text-slate-100" : "text-slate-900"
+            "text-2xl font-bold tracking-tight",
+            theme === 'dark' ? "text-zinc-100" : "text-zinc-900"
           )}>
-            Welcome back, <span className="text-indigo-600 dark:text-indigo-400">{userName || 'Siva'}</span>
+            Welcome back, <span className="text-emerald-600 dark:text-emerald-400">{userName || 'Siva'}</span>
           </h1>
-          <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5 font-medium">
-            <Calendar size={13} />
+          <p className="text-xs text-zinc-400 mt-1 flex items-center gap-1.5 font-normal">
+            <Calendar size={13} className="text-zinc-400" />
             {todayFormatted}
           </p>
         </div>
@@ -158,19 +158,19 @@ export default function SaaSHomeDashboard({
           <button
             onClick={() => onNavigateSection('ai-upload')}
             className={cn(
-              "py-2 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer active:scale-95 duration-150",
+              "py-2 px-3.5 rounded-sm text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer active:scale-[0.99] duration-150",
               theme === 'dark' 
-                ? "bg-zinc-900 border border-zinc-800 text-slate-200 hover:bg-zinc-800" 
-                : "bg-white border border-slate-150 text-slate-700 hover:bg-slate-50 shadow-sm"
+                ? "bg-zinc-900 border border-zinc-800 text-zinc-200 hover:bg-zinc-800" 
+                : "bg-white border border-zinc-200 text-zinc-700 hover:bg-zinc-50 shadow-sm"
             )}
           >
-            <Sparkles size={14} className="text-indigo-500" />
+            <Sparkles size={14} className="text-emerald-500" />
             AI Scan Receipt
           </button>
           
           <button
             onClick={onCreateBookClick}
-            className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-indigo-600/10 cursor-pointer active:scale-95 duration-150"
+            className="py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-sm text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer active:scale-[0.99] duration-150"
           >
             <Plus size={15} />
             New Cashbook
@@ -182,112 +182,108 @@ export default function SaaSHomeDashboard({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         
         {/* Card 1: Books & Entries count */}
-        <motion.div
-          whileHover={{ y: -3 }}
+        <div
           className={cn(
-            "p-5 rounded-2xl border transition-all duration-200 shadow-sm flex flex-col justify-between",
-            theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-150"
+            "p-5 rounded-sm border transition-all duration-200 shadow-sm flex flex-col justify-between",
+            theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
           )}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-zinc-500">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-550">
               Cashbooks
             </span>
-            <div className="w-8 h-8 rounded-lg bg-indigo-500/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-              <BookOpen size={16} />
+            <div className="w-8 h-8 rounded-sm bg-emerald-500/10 dark:bg-emerald-400/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/10">
+              <BookOpen size={15} />
             </div>
           </div>
           <div className="mt-4">
-            <h3 className="text-3xl font-black tracking-tight">{totalBooks}</h3>
-            <p className="text-[11px] text-slate-400 font-medium mt-1">
+            <h3 className="text-2xl font-bold tracking-tight">{totalBooks}</h3>
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-normal mt-1">
               Active ledgers tracking {totalEntries} total ledger entries.
             </p>
           </div>
-        </motion.div>
+        </div>
 
         {/* Card 2: Cash In */}
-        <motion.div
-          whileHover={{ y: -3 }}
+        <div
           className={cn(
-            "p-5 rounded-2xl border transition-all duration-200 shadow-sm flex flex-col justify-between",
-            theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-150"
+            "p-5 rounded-sm border transition-all duration-200 shadow-sm flex flex-col justify-between",
+            theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
           )}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-zinc-500">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-550">
               Total Cash In
             </span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 dark:bg-emerald-400/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <TrendingUp size={16} />
+            <div className="w-8 h-8 rounded-sm bg-emerald-500/10 dark:bg-emerald-400/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/10">
+              <TrendingUp size={15} />
             </div>
           </div>
           <div className="mt-4">
-            <h3 className="text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
+            <h3 className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 tracking-tight">
               {formatCurrency(cashIn)}
             </h3>
-            <p className="text-[11px] text-slate-400 font-medium mt-1">
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-normal mt-1">
               Total revenues and cash deposits synced across books.
             </p>
           </div>
-        </motion.div>
+        </div>
 
         {/* Card 3: Cash Out */}
-        <motion.div
-          whileHover={{ y: -3 }}
+        <div
           className={cn(
-            "p-5 rounded-2xl border transition-all duration-200 shadow-sm flex flex-col justify-between",
-            theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-150"
+            "p-5 rounded-sm border transition-all duration-200 shadow-sm flex flex-col justify-between",
+            theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
           )}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-zinc-500">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-550">
               Total Cash Out
             </span>
-            <div className="w-8 h-8 rounded-lg bg-rose-500/10 dark:bg-rose-400/10 text-rose-600 dark:text-rose-400 flex items-center justify-center">
-              <TrendingDown size={16} />
+            <div className="w-8 h-8 rounded-sm bg-rose-500/10 dark:bg-rose-400/10 text-rose-600 dark:text-rose-400 flex items-center justify-center border border-rose-500/10">
+              <TrendingDown size={15} />
             </div>
           </div>
           <div className="mt-4">
-            <h3 className="text-3xl font-black text-rose-600 dark:text-rose-400 tracking-tight">
+            <h3 className="text-2xl font-bold text-rose-600 dark:text-rose-400 tracking-tight">
               {formatCurrency(cashOut)}
             </h3>
-            <p className="text-[11px] text-slate-400 font-medium mt-1">
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-normal mt-1">
               Expenses, payments, and cost transactions recorded.
             </p>
           </div>
-        </motion.div>
+        </div>
 
         {/* Card 4: Net Balance */}
-        <motion.div
-          whileHover={{ y: -3 }}
+        <div
           className={cn(
-            "p-5 rounded-2xl border transition-all duration-200 shadow-sm flex flex-col justify-between",
-            theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-150"
+            "p-5 rounded-sm border transition-all duration-200 shadow-sm flex flex-col justify-between",
+            theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
           )}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-extrabold uppercase tracking-widest text-slate-400 dark:text-zinc-500">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-550">
               Net Balance
             </span>
-            <div className="w-8 h-8 rounded-lg bg-indigo-500/10 dark:bg-indigo-400/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
-              <Wallet size={16} />
+            <div className="w-8 h-8 rounded-sm bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center justify-center border border-zinc-200/50 dark:border-zinc-800/50">
+              <Wallet size={15} />
             </div>
           </div>
           <div className="mt-4">
             <h3 className={cn(
-              "text-3xl font-black tracking-tight",
-              balance >= 0 ? "text-slate-900 dark:text-white" : "text-rose-600"
+              "text-2xl font-bold tracking-tight",
+              balance >= 0 ? "text-zinc-900 dark:text-zinc-50" : "text-rose-600"
             )}>
               {formatCurrency(balance)}
             </h3>
             <div className="flex items-center gap-1.5 mt-1">
-              <Database size={12} className="text-indigo-500 shrink-0" />
-              <p className="text-[11px] text-slate-400 font-medium">
+              <Database size={11} className="text-emerald-500 shrink-0" />
+              <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-normal">
                 {storageUsedMB} MB of 500 MB cloud space used ({totalAttachments} attachments)
               </p>
             </div>
           </div>
-        </motion.div>
+        </div>
 
       </div>
 
@@ -297,44 +293,43 @@ export default function SaaSHomeDashboard({
         {/* Left Side: Recent Activity Logs & Audit Feed (2 cols) */}
         <div className="lg:col-span-2 space-y-6">
           <div className={cn(
-            "p-5 sm:p-6 rounded-2xl border shadow-sm transition-colors duration-300",
-            theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-150"
+            "p-5 sm:p-6 rounded-sm border shadow-sm transition-colors duration-300",
+            theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
           )}>
-            <div className="flex items-center justify-between mb-4 border-b pb-3 border-slate-100 dark:border-zinc-900">
+            <div className="flex items-center justify-between mb-4 border-b pb-3 border-zinc-100 dark:border-zinc-800">
               <div className="flex items-center gap-2">
-                <Clock size={16} className="text-indigo-500" />
-                <h3 className={cn("font-bold text-sm", theme === 'dark' ? "text-slate-100" : "text-slate-800")}>
+                <Clock size={15} className="text-emerald-500" />
+                <h3 className={cn("font-semibold text-sm", theme === 'dark' ? "text-zinc-100" : "text-zinc-800")}>
                   Recent Activity Audit Feed
                 </h3>
               </div>
-              <span className="text-[10px] uppercase font-bold tracking-widest bg-slate-100 text-slate-500 dark:bg-zinc-900 dark:text-zinc-400 px-2 py-0.5 rounded-md">
+              <span className="text-[10px] uppercase font-bold tracking-wider bg-zinc-150 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-2 py-0.5 rounded-sm border border-zinc-250/20 dark:border-zinc-700/20">
                 Live Feed
               </span>
             </div>
 
             {recentActivityFeed.length === 0 ? (
-              <div className="text-center py-10 text-slate-400 text-xs font-semibold">
+              <div className="text-center py-10 text-zinc-400 dark:text-zinc-500 text-xs font-semibold">
                 No activity logged in this session yet. Your actions will record automatically.
               </div>
             ) : (
-              <div className="relative border-l border-slate-150 dark:border-zinc-900 ml-4 pl-6 space-y-6 py-1">
+              <div className="relative border-l border-zinc-200 dark:border-zinc-800 ml-4 pl-6 space-y-6 py-1">
                 {recentActivityFeed.map((act, i) => {
-                  const Icon = act.icon;
                   return (
                     <div key={i} className="relative group">
                       {/* Left Dot Bullet */}
-                      <span className="absolute -left-[31px] top-0.5 flex items-center justify-center w-[11px] h-[11px] bg-indigo-600 border border-white dark:border-zinc-950 rounded-full ring-4 ring-indigo-50 dark:ring-indigo-950/20" />
+                      <span className="absolute -left-[31px] top-1.5 flex items-center justify-center w-[10px] h-[10px] bg-emerald-600 border border-white dark:border-zinc-900 rounded-sm shadow-sm" />
                       
                       <div className="flex items-start justify-between gap-4">
                         <div className="space-y-0.5 min-w-0">
-                          <p className={cn("text-xs font-bold leading-none", theme === 'dark' ? "text-slate-250" : "text-slate-850")}>
+                          <p className={cn("text-xs font-semibold leading-none", theme === 'dark' ? "text-zinc-200" : "text-zinc-800")}>
                             {act.title}
                           </p>
-                          <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+                          <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-normal leading-relaxed">
                             {act.detail}
                           </p>
                         </div>
-                        <span className="text-[9.5px] text-slate-400 font-medium shrink-0 whitespace-nowrap">
+                        <span className="text-[9.5px] text-zinc-400 dark:text-zinc-500 font-medium shrink-0 whitespace-nowrap">
                           {new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: 'numeric', hour12: true }).format(act.time)}
                         </span>
                       </div>
@@ -347,27 +342,27 @@ export default function SaaSHomeDashboard({
 
           {/* Quick Stats Summary Banner */}
           <div className={cn(
-            "p-5 rounded-2xl border flex items-center justify-between gap-4 transition-colors duration-200",
+            "p-5 rounded-sm border flex items-center justify-between gap-4 transition-colors duration-200",
             theme === 'dark' 
-              ? "bg-gradient-to-r from-zinc-950 to-zinc-900 border-zinc-900" 
-              : "bg-gradient-to-r from-indigo-50/40 to-indigo-50/10 border-indigo-100/50"
+              ? "bg-zinc-900 border-zinc-800" 
+              : "bg-emerald-50/20 border-emerald-250/30 text-zinc-850"
           )}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-600/10 shrink-0">
-                <Sparkles size={18} />
+              <div className="w-9 h-9 rounded-sm bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                <Sparkles size={16} />
               </div>
               <div className="min-w-0">
-                <h4 className={cn("text-xs font-bold leading-snug", theme === 'dark' ? "text-slate-200" : "text-slate-800")}>
+                <h4 className={cn("text-xs font-semibold leading-snug", theme === 'dark' ? "text-zinc-200" : "text-zinc-800")}>
                   TrackBook Intelligent OCR AI Engine Active
                 </h4>
-                <p className="text-[10px] text-slate-400 font-medium mt-0.5 truncate">
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-normal mt-0.5 leading-relaxed">
                   Import PDF reports or scan physical paper receipts. AI auto-detects vendor, amounts, taxes, and categorizes automatically.
                 </p>
               </div>
             </div>
             <button
               onClick={() => onNavigateSection('ai-upload')}
-              className="py-1.5 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-extrabold uppercase tracking-wide shrink-0 transition-colors cursor-pointer"
+              className="py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-sm text-[10px] font-bold uppercase tracking-wider shrink-0 transition-colors cursor-pointer"
             >
               Scan
             </button>
@@ -377,19 +372,19 @@ export default function SaaSHomeDashboard({
         {/* Right Side: Quick Cashbooks list shortcuts (1 col) */}
         <div className="space-y-6">
           <div className={cn(
-            "p-5 rounded-2xl border shadow-sm transition-colors duration-300",
-            theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-150"
+            "p-5 rounded-sm border shadow-sm transition-colors duration-300",
+            theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
           )}>
-            <div className="flex items-center justify-between mb-4 border-b pb-3 border-slate-100 dark:border-zinc-900">
+            <div className="flex items-center justify-between mb-4 border-b pb-3 border-zinc-100 dark:border-zinc-800">
               <div className="flex items-center gap-2">
-                <BookOpen size={16} className="text-indigo-500" />
-                <h3 className={cn("font-bold text-sm", theme === 'dark' ? "text-slate-100" : "text-slate-800")}>
+                <BookOpen size={15} className="text-emerald-500" />
+                <h3 className={cn("font-semibold text-sm", theme === 'dark' ? "text-zinc-100" : "text-zinc-850")}>
                   Active Ledgers ({books.length})
                 </h3>
               </div>
               <button
                 onClick={() => onNavigateSection('cashbooks')}
-                className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer flex items-center gap-0.5"
+                className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer flex items-center gap-0.5"
               >
                 View all
                 <ChevronRight size={13} />
@@ -398,10 +393,10 @@ export default function SaaSHomeDashboard({
 
             {books.length === 0 ? (
               <div className="text-center py-8">
-                <p className="text-xs text-slate-400 font-medium mb-3">No active cashbooks found.</p>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 font-normal mb-3">No active cashbooks found.</p>
                 <button
                   onClick={onCreateBookClick}
-                  className="py-1.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold rounded-lg cursor-pointer"
+                  className="py-1.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold rounded-sm cursor-pointer"
                 >
                   Create your first book
                 </button>
@@ -418,31 +413,31 @@ export default function SaaSHomeDashboard({
                       key={book.id}
                       onClick={() => onSelectBook(book.id)}
                       className={cn(
-                        "p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer hover:scale-[1.015] active:scale-99 transition-all group",
+                        "p-3 rounded-sm border flex items-center justify-between gap-3 cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors duration-150 group",
                         theme === 'dark' 
-                          ? "bg-zinc-900/40 border-zinc-900 hover:bg-zinc-900 hover:border-zinc-800" 
-                          : "bg-slate-50/30 border-slate-150 hover:bg-slate-50 hover:border-slate-200"
+                          ? "bg-zinc-950/40 border-zinc-800 hover:bg-zinc-900" 
+                          : "bg-zinc-50/50 border-zinc-200 hover:bg-zinc-100/50"
                       )}
                     >
                       <div className="min-w-0 flex-1">
-                        <h4 className={cn("text-xs font-bold truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400", theme === 'dark' ? "text-slate-200" : "text-slate-800")}>
+                        <h4 className={cn("text-xs font-semibold truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400", theme === 'dark' ? "text-zinc-200" : "text-zinc-800")}>
                           {book.name}
                         </h4>
-                        <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                        <p className="text-[10px] text-zinc-400 dark:text-zinc-550 font-normal mt-0.5">
                           {book.transactions?.length || 0} entries inside
                         </p>
                       </div>
 
                       <div className="text-right shrink-0">
                         <p className={cn(
-                          "text-xs font-extrabold tracking-tight",
+                          "text-xs font-semibold tracking-tight",
                           bookBalance >= 0 
-                            ? theme === 'dark' ? "text-slate-200" : "text-slate-800"
+                            ? theme === 'dark' ? "text-zinc-200" : "text-zinc-800"
                             : "text-rose-600"
                         )}>
                           {formatCurrency(bookBalance)}
                         </p>
-                        <span className="text-[9px] uppercase font-bold text-slate-400 flex items-center justify-end gap-0.5 mt-0.5">
+                        <span className="text-[9px] uppercase font-semibold text-zinc-400 dark:text-zinc-550 flex items-center justify-end gap-0.5 mt-0.5">
                           Open <ArrowRight size={10} className="transition-transform group-hover:translate-x-0.5" />
                         </span>
                       </div>

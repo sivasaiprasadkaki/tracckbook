@@ -86,20 +86,20 @@ export default function SaaSSidebar({
       {/* Brand Header */}
       <div className={cn(
         "flex items-center justify-between p-4 border-b h-14 shrink-0",
-        theme === 'dark' ? "border-zinc-900 bg-zinc-950" : "border-slate-150 bg-white"
+        theme === 'dark' ? "border-zinc-800 bg-zinc-950" : "border-zinc-200 bg-white"
       )}>
         <div className="flex items-center gap-2.5 overflow-hidden">
-          <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-sm shadow-md shadow-indigo-600/20 shrink-0">
+          <div className="w-8 h-8 rounded-sm bg-emerald-600 flex items-center justify-center text-white font-bold text-sm shrink-0">
             TB
           </div>
           {!isCollapsed && (
             <div className="flex items-center leading-none">
-              <span className="font-extrabold text-indigo-600 text-sm tracking-tight">Track</span>
+              <span className="font-bold text-emerald-600 text-sm tracking-tight">Track</span>
               <span className={cn(
-                "font-extrabold text-sm tracking-tight",
-                theme === 'dark' ? "text-slate-100" : "text-slate-800"
+                "font-bold text-sm tracking-tight",
+                theme === 'dark' ? "text-zinc-100" : "text-zinc-800"
               )}>Book</span>
-              <span className="ml-1.5 text-[9px] font-black tracking-widest px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/30">
+              <span className="ml-1.5 text-[9px] font-bold tracking-widest px-1.5 py-0.5 rounded-sm bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30">
                 PRO
               </span>
             </div>
@@ -110,8 +110,8 @@ export default function SaaSSidebar({
         <button
           onClick={() => { vibrate(10); setIsCollapsed(!isCollapsed); }}
           className={cn(
-            "hidden md:flex items-center justify-center w-6 h-6 rounded-lg border transition-colors hover:bg-slate-100 dark:hover:bg-zinc-900 cursor-pointer text-slate-400 hover:text-slate-600 dark:hover:text-slate-200",
-            theme === 'dark' ? "border-zinc-800 bg-zinc-950" : "border-slate-150 bg-white"
+            "hidden md:flex items-center justify-center w-6 h-6 rounded-sm border transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900 cursor-pointer text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200",
+            theme === 'dark' ? "border-zinc-800 bg-zinc-950" : "border-zinc-200 bg-white"
           )}
         >
           {isCollapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
@@ -121,22 +121,22 @@ export default function SaaSSidebar({
       {/* User Section (Top-Sidebar Profile card) */}
       {!isCollapsed && (
         <div className={cn(
-          "p-3 mx-3 mt-4 rounded-xl border flex items-center gap-3 transition-all",
-          theme === 'dark' ? "bg-zinc-950/40 border-zinc-900" : "bg-slate-50/50 border-slate-150"
+          "p-3 mx-3 mt-4 rounded-sm border flex items-center gap-3 transition-all",
+          theme === 'dark' ? "bg-zinc-900/40 border-zinc-800/80" : "bg-zinc-50 border-zinc-200"
         )}>
-          <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-black text-sm shrink-0">
+          <div className="w-8 h-8 rounded-sm bg-emerald-600 flex items-center justify-center text-white font-bold text-xs shrink-0">
             {userName ? userName[0].toUpperCase() : 'U'}
           </div>
           <div className="min-w-0 flex-1">
             <p className={cn(
               "text-xs font-bold truncate",
-              theme === 'dark' ? "text-slate-200" : "text-slate-800"
+              theme === 'dark' ? "text-zinc-200" : "text-zinc-800"
             )}>
               {userName || 'User'}
             </p>
             <div className="flex items-center gap-1 mt-0.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10px] text-slate-400 font-medium truncate">
+              <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-medium truncate">
                 Cloud Sync Active
               </span>
             </div>
@@ -146,7 +146,7 @@ export default function SaaSSidebar({
 
       {/* Navigation Items */}
       <nav className="flex-1 overflow-y-auto px-2.5 py-4 space-y-1 scrollbar-thin">
-        <div className="px-2.5 mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+        <div className="px-2.5 mb-2 text-[10px] font-bold uppercase tracking-wider text-zinc-450 dark:text-zinc-500">
           {!isCollapsed ? "Workspace" : "•"}
         </div>
         
@@ -158,15 +158,15 @@ export default function SaaSSidebar({
               key={item.id}
               onClick={() => handleNavClick(item.id)}
               className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left text-xs font-semibold transition-all relative group cursor-pointer",
+                "w-full flex items-center gap-3 px-3 py-2 text-left text-xs font-semibold transition-all relative group cursor-pointer border-l-[3px] rounded-none",
                 isActive
-                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10"
-                  : theme === 'dark'
-                    ? "text-slate-400 hover:text-slate-200 hover:bg-zinc-900/50"
-                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                  ? theme === 'dark'
+                    ? "bg-emerald-950/20 text-emerald-400 border-emerald-500 font-bold"
+                    : "bg-emerald-50 text-emerald-800 border-emerald-600 font-bold"
+                  : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100/60 dark:hover:bg-zinc-900/40"
               )}
             >
-              <Icon size={18} className={cn("shrink-0", isActive ? "text-white" : "text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-300")} />
+              <Icon size={16} className={cn("shrink-0", isActive ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400 group-hover:text-zinc-500 dark:group-hover:text-zinc-300")} />
               
               {!isCollapsed && (
                 <span className="flex-1 truncate">{item.label}</span>
@@ -175,12 +175,12 @@ export default function SaaSSidebar({
               {/* Badges */}
               {item.badge !== undefined && (
                 <span className={cn(
-                  "px-2 py-0.5 rounded-full text-[10px] font-bold tracking-tight shrink-0",
+                  "px-1.5 py-0.5 rounded-sm text-[9px] font-bold tracking-tight shrink-0",
                   isActive
-                    ? "bg-white/20 text-white"
+                    ? "bg-emerald-600/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
                     : theme === 'dark'
-                      ? "bg-indigo-950/50 text-indigo-400 border border-indigo-900/40"
-                      : "bg-indigo-50 text-indigo-600 border border-indigo-100"
+                      ? "bg-zinc-800 text-zinc-400"
+                      : "bg-zinc-100 text-zinc-600"
                 )}>
                   {item.badge}
                 </span>
@@ -188,7 +188,7 @@ export default function SaaSSidebar({
 
               {/* Tooltip for Collapsed Sidebar */}
               {isCollapsed && (
-                <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none z-50 whitespace-nowrap shadow-xl">
+                <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-zinc-900 text-white text-xs font-semibold rounded-sm opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none z-50 whitespace-nowrap shadow-md">
                   {item.label}
                   {item.badge !== undefined && ` (${item.badge})`}
                 </div>
@@ -199,8 +199,8 @@ export default function SaaSSidebar({
 
         {/* Shortcuts / Books Section */}
         {books.length > 0 && (
-          <div className="pt-4 mt-4 border-t border-slate-100 dark:border-zinc-900">
-            <div className="px-2.5 mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500 flex items-center justify-between">
+          <div className="pt-4 mt-4 border-t border-zinc-200 dark:border-zinc-800">
+            <div className="px-2.5 mb-2 text-[10px] font-bold uppercase tracking-wider text-zinc-450 dark:text-zinc-500 flex items-center justify-between">
               <span>{!isCollapsed ? "Quick Access" : "Books"}</span>
             </div>
             <div className="space-y-0.5">
@@ -215,20 +215,18 @@ export default function SaaSSidebar({
                       setIsOpenMobile(false);
                     }}
                     className={cn(
-                      "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-xs font-medium transition-all relative group cursor-pointer",
+                      "w-full flex items-center gap-3 px-3 py-2 text-left text-xs font-semibold transition-all relative group cursor-pointer border-l-[3px] rounded-none",
                       isBookActive
                         ? theme === 'dark'
-                          ? "bg-zinc-900 text-indigo-400 font-bold border-l-2 border-indigo-500"
-                          : "bg-indigo-50/70 text-indigo-700 font-bold border-l-2 border-indigo-600"
-                        : theme === 'dark'
-                          ? "text-slate-400 hover:text-slate-200 hover:bg-zinc-900/30"
-                          : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                          ? "bg-emerald-950/20 text-emerald-400 font-bold border-emerald-500"
+                          : "bg-emerald-50 text-emerald-800 font-bold border-emerald-600"
+                        : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100/60 dark:hover:bg-zinc-900/40"
                     )}
                   >
-                    <BookOpen size={14} className="shrink-0 text-slate-400 group-hover:text-slate-500" />
+                    <BookOpen size={14} className="shrink-0 text-zinc-400 group-hover:text-zinc-500" />
                     {!isCollapsed && <span className="truncate flex-1">{book.name}</span>}
                     {isCollapsed && (
-                      <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none z-50 whitespace-nowrap shadow-xl">
+                      <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-zinc-900 text-white text-xs font-semibold rounded-sm opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none z-50 whitespace-nowrap shadow-md">
                         {book.name}
                       </div>
                     )}
@@ -243,31 +241,31 @@ export default function SaaSSidebar({
       {/* Footer Settings and Action */}
       <div className={cn(
         "p-3 border-t shrink-0 space-y-1.5",
-        theme === 'dark' ? "border-zinc-900 bg-zinc-950" : "border-slate-150 bg-white"
+        theme === 'dark' ? "border-zinc-850 bg-zinc-950" : "border-zinc-200 bg-white"
       )}>
         {/* Toggle Theme inline */}
         {!isCollapsed ? (
           <button
             onClick={toggleTheme}
             className={cn(
-              "w-full flex items-center justify-between p-2 rounded-xl text-xs font-medium transition-all hover:bg-slate-50 dark:hover:bg-zinc-900/50 cursor-pointer",
-              theme === 'dark' ? "text-slate-350" : "text-slate-600"
+              "w-full flex items-center justify-between p-2 rounded-sm text-xs font-medium transition-all hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer",
+              theme === 'dark' ? "text-zinc-400" : "text-zinc-650"
             )}
           >
             <div className="flex items-center gap-2.5">
-              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
               <span>Appearance</span>
             </div>
-            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">
               {theme}
             </span>
           </button>
         ) : (
           <button
             onClick={toggleTheme}
-            className="w-full flex items-center justify-center p-2 rounded-xl transition-all hover:bg-slate-50 dark:hover:bg-zinc-900/50 cursor-pointer text-slate-400"
+            className="w-full flex items-center justify-center p-2 rounded-sm transition-all hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer text-zinc-400"
           >
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         )}
 
@@ -275,11 +273,11 @@ export default function SaaSSidebar({
         <button
           onClick={onSignOut}
           className={cn(
-            "w-full flex items-center gap-2.5 p-2 rounded-xl text-xs font-bold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-all cursor-pointer",
+            "w-full flex items-center gap-2.5 p-2 rounded-sm text-xs font-semibold text-rose-600 hover:bg-rose-50/50 dark:hover:bg-rose-950/20 transition-all cursor-pointer",
             isCollapsed && "justify-center"
           )}
         >
-          <LogOut size={16} className="shrink-0" />
+          <LogOut size={15} className="shrink-0" />
           {!isCollapsed && <span>Sign Out</span>}
         </button>
       </div>
