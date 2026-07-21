@@ -63,6 +63,7 @@ import {
   Users,
   Camera,
   Phone,
+  Crop,
   CheckCircle2,
   Mail,
   Lock,
@@ -84,6 +85,7 @@ import { backgroundExportManager } from '../services/exportManager';
 import { syncManager, offlineDb } from '../services/syncManager';
 import DownloadCenter, { DownloadCenterTrigger } from '../components/DownloadCenter';
 import MediaPickerSheet from '../components/MediaPickerSheet';
+import ImageEditorModal from '../components/ImageEditorModal';
 import { CountryCodePicker, COUNTRIES, Country } from '../components/CountryCodePicker';
 import { PhoneComingSoonModal } from '../components/PhoneComingSoonModal';
 import { addPdfBrandingFooter } from '../utils/pdfBranding';
@@ -100,7 +102,7 @@ const TIMELINE_STEPS: TimelineStep[] = [
   { id: 'merchant_detected', label: 'Extracting merchant' },
   { id: 'amount_extracted', label: 'Extracting amount' },
   { id: 'date_parsed', label: 'Detecting bill category' },
-  { id: 'ai_verification', label: 'Verifying with TrackBook AI' },
+  { id: 'ai_verification', label: 'Verifying with AI TrackBook' },
   { id: 'creating_transaction', label: 'Creating transaction' },
   { id: 'transaction_saved', label: 'Saving to ledger' },
 ];
@@ -1928,6 +1930,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [isMerging, setIsMerging] = useState(false);
   const [newBookName, setNewBookName] = useState('');
   const [editBookName, setEditBookName] = useState('');
+  const [createBookError, setCreateBookError] = useState<string | null>(null);
+  const [editBookError, setEditBookError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState<'in' | 'out' | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadingMessage, setUploadingMessage] = useState('Detecting bill...');
@@ -1940,7 +1944,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const cancelScanRef = useRef<boolean>(false);
   const [backgroundScanResult, setBackgroundScanResult] = useState<string | null>(null);
 
-  // Intelligent TrackBook AI Upload states
+  // Intelligent AI TrackBook Upload states
   const [aiWorkflowStep, setAiWorkflowStep] = useState<'group' | 'upload' | 'scanning' | 'confirmation' | 'completion'>('group');
   const [activeAiTaskId, setActiveAiTaskId] = useState<string | null>(null);
   const lastProcessedRef = useRef<number>(0);
@@ -2892,6 +2896,77 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [imageLayout, setImageLayout] = useState<'split' | 'merge'>('split');
   const [selectedFormatIndex, setSelectedFormatIndex] = useState<number>(0);
 
+  const [editorState, setEditorState] = useState<{
+    file: File;
+    onDone: (editedFile: File) => void;
+    onCancel: () => void;
+  } | null>(null);
+
+  const editImagesIfNeeded = async (files: File[]): Promise<File[]> => {
+    const editedFiles: File[] = [];
+    for (const file of files) {
+      if (file.type && file.type.startsWith('image/')) {
+        const edited = await new Promise<File | null>((resolve) => {
+          setEditorState({
+            file,
+            onDone: (newFile) => resolve(newFile),
+            onCancel: () => resolve(null),
+          });
+        });
+        if (edited) {
+          editedFiles.push(edited);
+        }
+      } else {
+        editedFiles.push(file);
+      }
+    }
+    return editedFiles;
+  };
+
+  const [isEditingLoading, setIsEditingLoading] = useState<boolean>(false);
+
+  const handleReeditImage = async () => {
+    if (selectedImages.length === 0 || selectedFormatIndex < 0 || selectedFormatIndex >= selectedImages.length) return;
+    const url = selectedImages[selectedFormatIndex];
+    let fileToEdit: File | null = null;
+    
+    const cleanUrl = url.includes('#') ? url.substring(0, url.indexOf('#')) : url;
+    
+    if (cleanUrl.startsWith('blob:') && imageFilesRef.current[cleanUrl]) {
+      fileToEdit = imageFilesRef.current[cleanUrl];
+    } else {
+      setIsEditingLoading(true);
+      try {
+        const resolvedUrl = resolveAttachmentUrl ? resolveAttachmentUrl(cleanUrl, 'fullscreen') : cleanUrl;
+        const response = await fetch(resolvedUrl);
+        const blob = await response.blob();
+        const filename = cleanUrl.substring(cleanUrl.lastIndexOf('/') + 1) || 'attachment.jpg';
+        fileToEdit = new File([blob], filename, { type: blob.type || 'image/jpeg' });
+      } catch (err) {
+        console.error("Error downloading image for editing:", err);
+      } finally {
+        setIsEditingLoading(false);
+      }
+    }
+
+    if (fileToEdit) {
+      setEditorState({
+        file: fileToEdit,
+        onDone: (editedFile) => {
+          const newUrl = URL.createObjectURL(editedFile);
+          imageFilesRef.current[newUrl] = editedFile;
+          
+          setSelectedImages(prev => {
+            const updated = [...prev];
+            updated[selectedFormatIndex] = newUrl;
+            return updated;
+          });
+        },
+        onCancel: () => {}
+      });
+    }
+  };
+
   // Keep selectedFormatIndex in bounds
   useEffect(() => {
     if (selectedImages.length === 0) {
@@ -3521,7 +3596,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   const handleCreateBook = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!newBookName.trim() || !session) return;
+    
+    // Prevent creating duplicate book names (case-insensitive, trimmed)
+    const normalizedNewName = newBookName.trim().toLowerCase();
+    const isDuplicate = books.some(b => b.name.trim().toLowerCase() === normalizedNewName);
+    if (isDuplicate) {
+      setCreateBookError("A book with this name already exists. Please choose a different name.");
+      return;
+    }
     
     // Optimization: Don't show submitting overlay for simple book creation if it's too slow
     // Or just make it very quick.
@@ -3530,7 +3614,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     
     const newBook: Cashbook = {
       id: safeUUID(),
-      name: newBookName,
+      name: newBookName.trim(),
       transactions: [],
       createdAt: new Date()
     };
@@ -3538,6 +3622,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     // Update local state immediately for perceived speed
     setBooks(prev => [...prev, newBook]);
     setNewBookName('');
+    setCreateBookError(null);
     setIsCreatingBook(false);
     setIsSubmitting(false);
 
@@ -3578,13 +3663,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     e.preventDefault();
     if (!editBookName.trim() || !isEditingBook || !session) return;
 
+    // Prevent renaming to a duplicate book name (case-insensitive, trimmed)
+    const normalizedEditName = editBookName.trim().toLowerCase();
+    const isDuplicate = books.some(b => b.id !== isEditingBook && b.name.trim().toLowerCase() === normalizedEditName);
+    if (isDuplicate) {
+      setEditBookError("A book with this name already exists. Please choose a different name.");
+      return;
+    }
+
     const savedId = isEditingBook;
 
     if (supabase) {
       try {
         const { error } = await supabase
           .from('cashbooks')
-          .update({ name: editBookName })
+          .update({ name: editBookName.trim() })
           .eq('id', isEditingBook)
           .eq('user_id', session.user.id);
         if (error) throw error;
@@ -3593,9 +3686,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       }
     }
 
-    setBooks(books.map(b => b.id === isEditingBook ? { ...b, name: editBookName } : b));
+    setBooks(books.map(b => b.id === isEditingBook ? { ...b, name: editBookName.trim() } : b));
     setIsEditingBook(null);
     setEditBookName('');
+    setEditBookError(null);
 
     setJustEditedBookId(savedId);
     setTimeout(() => {
@@ -5183,20 +5277,24 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setIsSubmitting(false);
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
 
-    const newImages: string[] = [...selectedImages];
     const filesArray = Array.from(files).slice(0, 5 - selectedImages.length) as File[];
+    if (filesArray.length === 0) return;
 
-    filesArray.forEach(file => {
+    const finalFiles = await editImagesIfNeeded(filesArray);
+
+    const newImages: string[] = [...selectedImages];
+    finalFiles.forEach(file => {
       const blobUrl = URL.createObjectURL(file);
       imageFilesRef.current[blobUrl] = file;
       newImages.push(blobUrl);
     });
 
     setSelectedImages(newImages);
+    if (e.target) e.target.value = '';
   };
 
   const exportToExcel = async () => {
@@ -5718,21 +5816,25 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const processFiles = async (files: FileList | File[]) => {
     if (!files || files.length === 0 || !activeBookId) return;
 
-    const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
-
     // Limit to 5 images as per user request
     const filesToProcess = Array.from(files).slice(0, 5) as File[];
 
+    // Edit images first
+    const finalFiles = await editImagesIfNeeded(filesToProcess);
+    if (finalFiles.length === 0) return; // Cancelled
+
+    const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
+
     setIsUploading(true);
-    setUploadingMessage('Detecting bills with TrackBook AI...');
+    setUploadingMessage('Detecting bills with AI TrackBook...');
     setError(null);
 
     try {
-      if (aiMode === 'merge' && filesToProcess.length > 1) {
+      if (aiMode === 'merge' && finalFiles.length > 1) {
         setUploadingMessage('Merging and detecting bills...');
         const imagesData: { base64: string, mimeType: string, raw: string | File }[] = [];
         
-        for (const file of filesToProcess) {
+        for (const file of finalFiles) {
           const isImage = file.type && file.type.startsWith('image/');
           let processedFile: File;
 
@@ -5861,9 +5963,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         }
       } else {
         let completed = 0;
-        const total = filesToProcess.length;
+        const total = finalFiles.length;
         
-        for (const file of filesToProcess) {
+        for (const file of finalFiles) {
           setUploadingMessage(`Detecting bill ${completed + 1}/${total}...`);
           
           const isImage = file.type && file.type.startsWith('image/');
@@ -6016,10 +6118,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     // Limit to 5 receipts as per BUG 2
     const filesToScan = files.slice(0, 5);
-    setSelectedFiles(filesToScan);
+
+    // Edit images first
+    const finalFilesToScan = await editImagesIfNeeded(filesToScan);
+    if (finalFilesToScan.length === 0) return; // Cancelled
+
+    setSelectedFiles(finalFilesToScan);
 
     // Auto-detect task name (BUG 3: Food vs Travel Receipts)
-    const isFood = filesToScan.some(f => 
+    const isFood = finalFilesToScan.some(f => 
       f.name.toLowerCase().includes('food') || 
       f.name.toLowerCase().includes('restaurant') || 
       f.name.toLowerCase().includes('meal') || 
@@ -6035,7 +6142,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setAiWorkflowStep('scanning');
 
     // Increment uploaded counts today
-    for (let i = 0; i < filesToScan.length; i++) {
+    for (let i = 0; i < finalFilesToScan.length; i++) {
       incrementUploadedCount();
     }
 
@@ -6043,7 +6150,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     const taskId = await backgroundExportManager.enqueueAiScanTask(
       activeBookId,
       activeBook?.name || 'Cashbook',
-      filesToScan,
+      finalFilesToScan,
       taskName,
       aiGroupSize,
       isHandwritten,
@@ -6365,14 +6472,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           <div className="w-full h-full flex items-center justify-between gap-2 sm:gap-4 px-6 md:px-8">
             
             {/* Left: Logo */}
-            <div className="flex items-center gap-2 shrink-0 font-outfit">
-              <div className="flex items-center gap-1 leading-none">
-                <span className="font-black text-indigo-600 dark:text-indigo-400 text-sm sm:text-base tracking-tight">Track</span>
-                <span className={cn(
-                  "font-black text-sm sm:text-base tracking-tight transition-colors duration-300",
-                  theme === 'dark' ? "text-slate-100" : "text-slate-800"
-                )}>Book</span>
-              </div>
+            <div className="flex items-center shrink-0 select-none">
+              <span className="font-sans text-xs sm:text-sm tracking-[0.08em] uppercase font-medium text-indigo-600 dark:text-indigo-400">
+                TRACKBOOK
+              </span>
             </div>
 
             {/* Center: Desktop Search (Centered) */}
@@ -6664,10 +6767,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
               ) : (
                 <div className={cn(
-                  "grid gap-6 w-full",
+                  "grid w-full",
                   viewMode === 'grid' 
-                    ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" 
-                    : "grid-cols-1"
+                    ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6" 
+                    : "grid-cols-1 gap-3"
                 )}>
                   {filteredBooks.map((book, index) => (
                     <motion.div
@@ -6689,7 +6792,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       onTouchEnd={onTouchEndBook}
                       onClick={() => handleBookPress(book.id)}
                       className={cn(
-                        "group p-4 sm:p-5 md:p-4 border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full md:h-[120px]",
+                        "group border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full",
+                        viewMode === 'list'
+                          ? "p-3 sm:p-3.5 md:p-3 md:h-[80px]"
+                          : "p-4 sm:p-5 md:p-4 md:h-[120px]",
                         justEditedBookId === book.id
                           ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
                           : theme === 'dark' ? "bg-zinc-950 border-zinc-800" : "bg-white border-slate-100",
@@ -6803,14 +6909,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   <button 
                     onClick={() => setShowBookMenu(!showBookMenu)}
                     className={cn(
-                      "flex items-center justify-center w-10 h-10 border rounded-xl transition-all cursor-pointer active:scale-95 duration-150 hover:bg-slate-100 dark:hover:bg-slate-800",
+                      "flex items-center justify-center w-10 h-10 rounded-xl transition-all cursor-pointer active:scale-95 duration-150 hover:bg-slate-100 dark:hover:bg-slate-800/60",
                       theme === 'dark' 
-                        ? "border-zinc-800 text-slate-200" 
-                        : "border-slate-200 text-slate-600 shadow-sm bg-white"
+                        ? "text-slate-200" 
+                        : "text-slate-600"
                     )}
                     aria-label="Book Options"
                   >
-                    <MoreVertical size={20} />
+                    <Menu size={20} />
                   </button>
                   <AnimatePresence>
                     {showBookMenu && (
@@ -7854,7 +7960,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </div>
 
                       <p className="text-xs text-slate-400 dark:text-slate-500 max-w-sm mx-auto">
-                        TrackBook AI is reading text, classifying merchants, and matching time structures.
+                        AI TrackBook is reading text, classifying merchants, and matching time structures.
                       </p>
                     </div>
 
@@ -8695,13 +8801,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               <div className="flex items-center gap-3 border-b border-slate-100 dark:border-zinc-900 pb-3">
                 <span className="text-xl">⚠️</span>
                 <h3 className="text-sm font-black tracking-tight font-sans uppercase">
-                  TrackBook AI (Testing Phase)
+                  AI TrackBook (Testing Phase)
                 </h3>
               </div>
 
               <div className="space-y-3 font-sans text-xs">
                 <p className="font-semibold text-slate-500 dark:text-zinc-400 leading-relaxed">
-                  TrackBook AI is currently under active testing.
+                  AI TrackBook is currently under active testing.
                 </p>
                 <p className="font-semibold text-slate-500 dark:text-zinc-400 leading-relaxed">
                   While most receipts are processed correctly, some receipts may occasionally produce incorrect:
@@ -9337,7 +9443,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <h3 className={cn(
                         "text-xl font-black tracking-tight",
                         theme === 'dark' ? "text-white" : "text-zinc-900"
-                      )}>TrackBook AI is scanning your bills...</h3>
+                      )}>AI TrackBook is scanning your bills...</h3>
                       <p className="text-indigo-600 dark:text-indigo-400 font-bold text-xs uppercase tracking-widest animate-pulse max-w-xs mx-auto">
                         {aiScanStatus}
                       </p>
@@ -9369,7 +9475,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
 
                     <div className="text-xs text-slate-400 dark:text-zinc-500 max-w-xs mx-auto leading-relaxed">
-                      TrackBook AI is extracting receipt data, mapping categories, and parsing your splits. Please do not close this window.
+                      AI TrackBook is extracting receipt data, mapping categories, and parsing your splits. Please do not close this window.
                     </div>
 
                     {/* Floating Network Status Badge */}
@@ -9851,11 +9957,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   "text-xl font-bold transition-colors duration-300",
                   theme === 'dark' ? "text-white" : "text-black"
                 )}>Create New Book</h3>
-                <button onClick={() => setIsCreatingBook(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                <button onClick={() => { setIsCreatingBook(false); setCreateBookError(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
                   <X size={20} className="text-slate-400" />
                 </button>
               </div>
               <form onSubmit={handleCreateBook} className="space-y-4">
+                {createBookError && (
+                  <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl flex items-start gap-2 text-xs font-semibold dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400 animate-shake">
+                    <AlertCircle size={15} className="shrink-0 text-rose-500 mt-0.5 dark:text-rose-400" />
+                    <span className="flex-1 leading-relaxed">{createBookError}</span>
+                  </div>
+                )}
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Book Name</label>
                   <input
@@ -9863,7 +9975,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     type="text"
                     placeholder="e.g., Personal, Business"
                     value={newBookName}
-                    onChange={(e) => setNewBookName(e.target.value)}
+                    onChange={(e) => {
+                      setNewBookName(e.target.value);
+                      if (createBookError) setCreateBookError(null);
+                    }}
                     className={cn(
                       "w-full px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
                       theme === 'dark' ? "bg-slate-800 border-slate-800 text-white" : "bg-slate-50 border-slate-200 text-black"
@@ -9918,18 +10033,27 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   "text-xl font-bold transition-colors duration-300",
                   theme === 'dark' ? "text-white" : "text-black"
                 )}>Edit Book Name</h3>
-                <button onClick={() => setIsEditingBook(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                <button onClick={() => { setIsEditingBook(null); setEditBookError(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
                   <X size={20} className="text-slate-400" />
                 </button>
               </div>
               <form onSubmit={handleUpdateBook} className="space-y-4">
+                {editBookError && (
+                  <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl flex items-start gap-2 text-xs font-semibold dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400 animate-shake">
+                    <AlertCircle size={15} className="shrink-0 text-rose-500 mt-0.5 dark:text-rose-400" />
+                    <span className="flex-1 leading-relaxed">{editBookError}</span>
+                  </div>
+                )}
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Book Name</label>
                   <input
                     autoFocus
                     type="text"
                     value={editBookName}
-                    onChange={(e) => setEditBookName(e.target.value)}
+                    onChange={(e) => {
+                      setEditBookName(e.target.value);
+                      if (editBookError) setEditBookError(null);
+                    }}
                     className={cn(
                       "w-full px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
                       theme === 'dark' ? "bg-slate-800 border-slate-800 text-white" : "bg-slate-50 border-slate-200 text-black"
@@ -10568,7 +10692,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         type="datetime-local"
                         value={transactionDate}
                         onChange={(e) => setTransactionDate(e.target.value)}
-                        tabIndex={5}
+                        tabIndex={1}
                         className={cn(
                           "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
                           theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
@@ -10603,7 +10727,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       onChange={(e) => setDescription(e.target.value)}
                       placeholder="Enter transaction details"
                       rows={2}
-                      tabIndex={1}
+                      tabIndex={3}
                       className={cn(
                         "w-full px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium resize-none transition-colors duration-300",
                         theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
@@ -10619,7 +10743,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           <select
                             value={category}
                             onChange={(e) => setCategory(e.target.value)}
-                            tabIndex={3}
+                            tabIndex={4}
                             className={cn(
                               "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium appearance-none transition-colors duration-300",
                               theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
@@ -10651,7 +10775,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           <select
                             value={mode}
                             onChange={(e) => setMode(e.target.value)}
-                            tabIndex={4}
+                            tabIndex={5}
                             className={cn(
                               "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium appearance-none transition-colors duration-300",
                               theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
@@ -10828,72 +10952,32 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           {/* Formatting Panel for Selected Image */}
                           {selectedImages[selectedFormatIndex] && (
                             (() => {
-                              const formatImg = selectedImages[selectedFormatIndex];
-                              const hashIdx = formatImg ? formatImg.indexOf('#') : -1;
-                              const hash = hashIdx !== -1 ? formatImg.substring(hashIdx + 1) : '';
-                              const params = new URLSearchParams(hash);
-                              const currentFit = params.get('fit') || 'original';
-
                               return (
                                 <div className={cn(
-                                  "p-4 rounded-xl border border-slate-100 dark:border-zinc-800 space-y-3.5",
+                                  "p-4 rounded-xl border border-slate-100 dark:border-zinc-800 flex items-center justify-between",
                                   theme === 'dark' ? "bg-zinc-900/40" : "bg-slate-50/50"
                                 )}>
-                                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-2">
-                                    <div className="flex items-center gap-1.5">
-                                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-zinc-300">
-                                        Format Attachment #{selectedFormatIndex + 1}
-                                      </span>
-                                    </div>
-                                    <span className="text-[9px] font-mono text-slate-400 dark:text-zinc-500 uppercase tracking-widest bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full font-bold">
-                                      {currentFit === 'width' ? 'Fit Width' : currentFit === 'height' ? 'Fit Height' : 'Original Size'}
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                                      Attachment #{selectedFormatIndex + 1} Selected
                                     </span>
                                   </div>
 
-                                  <div className="space-y-1.5">
-                                    <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500">Sizing / Fit Mode</span>
-                                    <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5">
-                                      <button
-                                        type="button"
-                                        onClick={() => updateImageMetadata(selectedFormatIndex, 0, 'width')}
-                                        className={cn(
-                                          "flex-1 py-1.5 px-2 text-[10px] font-bold rounded-lg border cursor-pointer transition-all duration-200 active:scale-95",
-                                          currentFit === 'width'
-                                            ? "bg-emerald-500 border-emerald-500 text-white"
-                                            : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 text-slate-700 dark:text-zinc-300"
-                                        )}
-                                      >
-                                        Fit Width
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => updateImageMetadata(selectedFormatIndex, 0, 'height')}
-                                        className={cn(
-                                          "flex-1 py-1.5 px-2 text-[10px] font-bold rounded-lg border cursor-pointer transition-all duration-200 active:scale-95",
-                                          currentFit === 'height'
-                                            ? "bg-emerald-500 border-emerald-500 text-white"
-                                            : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 text-slate-700 dark:text-zinc-300"
-                                        )}
-                                      >
-                                        Fit Height
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => updateImageMetadata(selectedFormatIndex, 0, 'original')}
-                                        className={cn(
-                                          "flex-1 py-1.5 px-2 text-[10px] font-bold rounded-lg border cursor-pointer transition-all duration-200 active:scale-95",
-                                          currentFit === 'original'
-                                            ? "bg-emerald-500 border-emerald-500 text-white"
-                                            : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 text-slate-700 dark:text-zinc-300"
-                                        )}
-                                      >
-                                        Original Size
-                                      </button>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex justify-end pt-1">
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={isEditingLoading}
+                                      onClick={handleReeditImage}
+                                      className="py-1.5 px-3 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-400 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
+                                    >
+                                      {isEditingLoading ? (
+                                        <Loader2 size={12} className="animate-spin" />
+                                      ) : (
+                                        <Crop size={12} />
+                                      )}
+                                      Edit Image
+                                    </button>
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -12601,6 +12685,21 @@ Open TrackBook → Import Shared Entries`)}`}
         }}
       />
 
+      {editorState && (
+        <ImageEditorModal
+          file={editorState.file}
+          onDone={(editedFile) => {
+            editorState.onDone(editedFile);
+            setEditorState(null);
+          }}
+          onCancel={() => {
+            editorState.onCancel();
+            setEditorState(null);
+          }}
+          theme={theme as 'light' | 'dark'}
+        />
+      )}
+
       {/* Premium Undo Toast Overlay */}
       <AnimatePresence>
         {showUndoToast && undoAction && (
@@ -12865,7 +12964,7 @@ Open TrackBook → Import Shared Entries`)}`}
                 </div>
                 <div className="space-y-0.5 text-left">
                   <p className="text-xs font-black tracking-wider uppercase text-emerald-600 dark:text-emerald-400">
-                    TrackBook AI
+                    AI TrackBook
                   </p>
                   <p className="text-sm font-bold">
                     {backgroundScanResult}

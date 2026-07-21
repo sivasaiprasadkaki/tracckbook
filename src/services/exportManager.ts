@@ -905,7 +905,7 @@ export class BackgroundExportManager {
               'merchant_detected': { message: 'Extracting merchant...', completed: ['receipt_uploaded', 'uploaded_cloud', 'ocr_completed'] },
               'amount_extracted': { message: 'Extracting amount...', completed: ['receipt_uploaded', 'uploaded_cloud', 'ocr_completed', 'merchant_detected'] },
               'date_parsed': { message: 'Detecting bill category...', completed: ['receipt_uploaded', 'uploaded_cloud', 'ocr_completed', 'merchant_detected', 'amount_extracted'] },
-              'ai_verification': { message: 'Verifying with TrackBook AI...', completed: ['receipt_uploaded', 'uploaded_cloud', 'ocr_completed', 'merchant_detected', 'amount_extracted', 'date_parsed'] },
+              'ai_verification': { message: 'Verifying with AI TrackBook...', completed: ['receipt_uploaded', 'uploaded_cloud', 'ocr_completed', 'merchant_detected', 'amount_extracted', 'date_parsed'] },
               'creating_transaction': { message: 'Creating transaction...', completed: ['receipt_uploaded', 'uploaded_cloud', 'ocr_completed', 'merchant_detected', 'amount_extracted', 'date_parsed', 'ai_verification'] },
               'transaction_saved': { message: 'Saving to ledger...', completed: ['receipt_uploaded', 'uploaded_cloud', 'ocr_completed', 'merchant_detected', 'amount_extracted', 'date_parsed', 'ai_verification', 'creating_transaction'] }
             };

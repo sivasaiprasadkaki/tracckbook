@@ -88,20 +88,14 @@ export default function SaaSSidebar({
         "flex items-center justify-between p-4 border-b h-14 shrink-0",
         theme === 'dark' ? "border-zinc-800 bg-zinc-950" : "border-zinc-200 bg-white"
       )}>
-        <div className="flex items-center gap-2.5 overflow-hidden">
-          <div className="w-8 h-8 rounded-sm bg-emerald-600 flex items-center justify-center text-white font-bold text-sm shrink-0">
-            TB
-          </div>
-          {!isCollapsed && (
-            <div className="flex items-center leading-none">
-              <span className="font-bold text-emerald-600 text-sm tracking-tight">Track</span>
-              <span className={cn(
-                "font-bold text-sm tracking-tight",
-                theme === 'dark' ? "text-zinc-100" : "text-zinc-800"
-              )}>Book</span>
-              <span className="ml-1.5 text-[9px] font-bold tracking-widest px-1.5 py-0.5 rounded-sm bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-900/30">
-                PRO
-              </span>
+        <div className="flex items-center gap-2.5 overflow-hidden select-none">
+          {!isCollapsed ? (
+            <span className="font-sans text-xs tracking-[0.08em] uppercase font-medium text-emerald-600 dark:text-emerald-400">
+              TRACKBOOK
+            </span>
+          ) : (
+            <div className="w-8 h-8 rounded-sm bg-emerald-600/10 dark:bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold text-xs shrink-0">
+              TB
             </div>
           )}
         </div>

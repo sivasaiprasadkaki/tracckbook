@@ -33,6 +33,56 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import XLSX from 'xlsx-js-style';
 import { addPdfBrandingFooter, TRACKBOOK_BRANDING } from '../utils/pdfBranding';
+import { backgroundExportManager } from '../services/exportManager';
+
+const GmailLogo = () => (
+  <svg className="w-6 h-6 flex-shrink-0" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M45 13.5V36C45 38.48 43 40.5 40.5 40.5H36V18L24 27L12 18V40.5H7.5C5 40.5 3 38.48 3 36V13.5C3 11.02 5 9 7.5 9H9L24 20.25L39 9H40.5C43 9 45 11.02 45 13.5Z" fill="#EA4335" />
+    <path d="M3 13.5V36C3 38.48 5 40.5 7.5 40.5H12V18L3 13.5Z" fill="#4285F4" />
+    <path d="M45 13.5V36C45 38.48 43 40.5 40.5 40.5H36V18L45 13.5Z" fill="#34A853" />
+    <path d="M24 20.25L9 9H7.5C5 9 3 11.02 3 13.5V18L12 24.75V18L24 27L36 18V24.75L45 18V13.5C45 11.02 43 9 40.5 9H39L24 20.25Z" fill="#FBBC05" />
+    <path d="M24 20.25L39 9H40.5C43 9 45 11.02 45 13.5V18L36 24.75L24 20.25Z" fill="#C5221F" />
+  </svg>
+);
+
+const OutlookLogo = () => (
+  <svg className="w-6 h-6 flex-shrink-0" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M41 12H19C17.34 12 16 13.34 16 15V33C16 34.66 17.34 36 19 36H41C42.66 36 44 34.66 44 33V15C44 13.34 42.66 12 41 12Z" fill="#0078D4" />
+    <path d="M16 16.5L30 25L44 16.5V15L30 23.5L16 15V16.5Z" fill="#50D9FF" />
+    <path d="M16 31.5L30 23L44 31.5V33L30 24.5L16 33V31.5Z" fill="#005A9E" />
+    <path d="M22 6H7C5.34 6 4 7.34 4 9V39C4 40.66 5.34 42 7 42H22C23.66 42 25 40.66 25 39V9C25 7.34 23.66 6 22 6Z" fill="#106EBE" />
+    <path d="M14.5 29C11.46 29 9 26.54 9 23.5C9 20.46 11.46 18 14.5 18C17.54 18 20 20.46 20 23.5C20 26.54 17.54 29 14.5 29ZM14.5 21C13.12 21 12 22.12 12 23.5C12 24.88 13.12 26 14.5 26C15.88 26 17 24.88 17 23.5C17 22.12 15.88 21 14.5 21Z" fill="#FFFFFF" />
+  </svg>
+);
+
+export interface EmailProvider {
+  id: string;
+  name: string;
+  icon: React.ReactNode;
+  getUrl: (to: string, cc: string, bcc: string, subject: string, body: string) => string;
+}
+
+export const EMAIL_PROVIDERS: EmailProvider[] = [
+  {
+    id: 'gmail',
+    name: 'Gmail',
+    icon: <GmailLogo />,
+    getUrl: (to, cc, bcc, subject, body) => {
+      return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&cc=${encodeURIComponent(cc)}&bcc=${encodeURIComponent(bcc)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    }
+  },
+  {
+    id: 'outlook',
+    name: 'Microsoft Outlook',
+    icon: <OutlookLogo />,
+    getUrl: (to, cc, bcc, subject, body) => {
+      // Standard Outlook live web compose URL with cc, bcc, subject, body
+      const ccParam = cc ? `&cc=${encodeURIComponent(cc)}` : '';
+      const bccParam = bcc ? `&bcc=${encodeURIComponent(bcc)}` : '';
+      return `https://outlook.live.com/mail/0/deeplink/compose?to=${encodeURIComponent(to)}${ccParam}${bccParam}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    }
+  }
+];
 
 interface Transaction {
   id: string;
@@ -113,6 +163,15 @@ export default function AutomationMail({ session, theme, setTheme }: AutomationM
   const [genProgress, setGenProgress] = useState<number>(0);
   const [genStatus, setGenStatus] = useState<string>('Idle');
   const [reportsGenerated, setReportsGenerated] = useState<boolean>(false);
+
+  // Selected email client ('gmail' or 'outlook')
+  const [selectedEmailClient, setSelectedEmailClient] = useState<string>(() => {
+    return localStorage.getItem('am_selected_email_client') || 'gmail';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('am_selected_email_client', selectedEmailClient);
+  }, [selectedEmailClient]);
 
   // Sync state to localStorage
   useEffect(() => {
@@ -250,196 +309,18 @@ export default function AutomationMail({ session, theme, setTheme }: AutomationM
   }, [currentStep, selectedBookId, reportsGenerated]);
 
   // Generators
-  const handleDownloadExcel = () => {
+  const handleDownloadExcel = async () => {
     if (!selectedBook) return;
     vibrate(10);
-    const transactions = selectedBook.transactions || [];
-    let totalIn = 0;
-    let totalOut = 0;
-    transactions.forEach((t) => {
-      if (t.type === 'in') totalIn += t.amount;
-      else totalOut += t.amount;
-    });
-
-    const rows = transactions.map((t) => ({
-      'Date': t.date ? t.date.toLocaleDateString() : 'N/A',
-      'Details/Description': t.description || 'No description',
-      'Category': t.category || 'General',
-      'Payment Mode': t.mode || 'N/A',
-      'Cash In (Received)': t.type === 'in' ? t.amount : 0,
-      'Cash Out (Spent)': t.type === 'out' ? t.amount : 0,
-    }));
-
-    rows.push({} as any);
-    rows.push({
-      'Date': 'TOTALS',
-      'Details/Description': '',
-      'Category': '',
-      'Payment Mode': '',
-      'Cash In (Received)': totalIn,
-      'Cash Out (Spent)': totalOut,
-    } as any);
-
-    rows.push({
-      'Date': 'NET REIMBURSEMENT',
-      'Details/Description': '',
-      'Category': '',
-      'Payment Mode': '',
-      'Cash In (Received)': totalIn - totalOut,
-      'Cash Out (Spent)': 0,
-    } as any);
-
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Expense Report");
-    XLSX.writeFile(wb, `Expense_Report_${selectedBook.name.replace(/\s+/g, '_')}.xlsx`);
+    // Delegate entirely to the existing reports module background generator
+    await backgroundExportManager.enqueueExcelTask(selectedBook.id, selectedBook.name, selectedBook.transactions || []);
   };
 
-  const handleDownloadPDF = () => {
+  const handleDownloadPDF = async () => {
     if (!selectedBook) return;
     vibrate(10);
-    const doc = new jsPDF({ compress: true });
-    const transactions = selectedBook.transactions || [];
-    
-    doc.setFont("Helvetica", "bold");
-    doc.setFontSize(22);
-    doc.setTextColor(79, 70, 229);
-    doc.text("TrackBook Expense Report", 14, 25);
-    
-    doc.setFont("Helvetica", "normal");
-    doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`Generated on ${new Date().toLocaleDateString()}`, 14, 32);
-
-    doc.setFillColor(248, 250, 252);
-    doc.rect(14, 38, 182, 32, "F");
-    
-    doc.setFont("Helvetica", "bold");
-    doc.setFontSize(11);
-    doc.setTextColor(15, 23, 42);
-    doc.text("CASHBOOK METADATA", 20, 46);
-    
-    doc.setFont("Helvetica", "normal");
-    doc.setFontSize(9.5);
-    doc.setTextColor(71, 85, 105);
-    doc.text(`Name: ${selectedBook.name}`, 20, 53);
-    doc.text(`Total Entries: ${transactions.length}`, 20, 59);
-    
-    let totalIn = 0;
-    let totalOut = 0;
-    transactions.forEach((t) => {
-      if (t.type === 'in') totalIn += t.amount;
-      else totalOut += t.amount;
-    });
-    
-    doc.text(`Cash In: Rs. ${totalIn.toLocaleString()}`, 110, 53);
-    doc.text(`Cash Out: Rs. ${totalOut.toLocaleString()}`, 110, 59);
-    doc.text(`Net Balance: Rs. ${(totalIn - totalOut).toLocaleString()}`, 110, 65);
-
-    const tableRows = transactions.map((t) => [
-      t.date ? t.date.toLocaleDateString() : 'N/A',
-      t.description || 'No description',
-      t.category || 'General',
-      t.mode || 'N/A',
-      t.type === 'in' ? `+Rs. ${t.amount.toLocaleString()}` : '',
-      t.type === 'out' ? `-Rs. ${t.amount.toLocaleString()}` : ''
-    ]);
-
-    autoTable(doc, {
-      startY: 76,
-      head: [['Date', 'Description', 'Category', 'Mode', 'Cash In', 'Cash Out']],
-      body: tableRows,
-      headStyles: { fillColor: [79, 70, 229] },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      margin: { left: 14, right: 14, bottom: 30 }, // extra bottom margin to avoid overlapping with footer
-      styles: { fontSize: 8.5 },
-    });
-
-    // Add page numbers and branding footer
-    const totalPages = doc.getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
-      doc.setPage(i);
-      addPdfBrandingFooter(doc, i, totalPages, selectedBook.name);
-    }
-
-    doc.save(`Expense_Report_${selectedBook.name.replace(/\s+/g, '_')}.pdf`);
-  };
-
-  const handleDownloadMergedBills = async () => {
-    if (!selectedBook) return;
-    vibrate(10);
-    const allAttachments: string[] = [];
-    selectedBook.transactions.forEach((t) => {
-      if (t.attachments && t.attachments.length > 0) {
-        t.attachments.forEach((att: any) => {
-          if (att.file_url) allAttachments.push(att.file_url);
-        });
-      } else if (t.images && t.images.length > 0) {
-        t.images.forEach((img: string) => {
-          allAttachments.push(img);
-        });
-      }
-    });
-
-    if (allAttachments.length === 0) {
-      const doc = new jsPDF();
-      doc.setFontSize(16);
-      doc.setTextColor(100, 116, 139);
-      doc.text("No attachments found in this cashbook.", 20, 40);
-      doc.save(`Bills_${selectedBook.name.replace(/\s+/g, '_')}.pdf`);
-      return;
-    }
-
-    const doc = new jsPDF({ compress: true });
-    
-    const loadImage = (url: string): Promise<HTMLImageElement> => {
-      return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error(`Failed to load image: ${url}`));
-        img.src = url;
-      });
-    };
-
-    let first = true;
-    for (const url of allAttachments) {
-      try {
-        const img = await loadImage(url);
-        if (!first) {
-          doc.addPage();
-        }
-        first = false;
-
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const margin = 10;
-        const maxW = pageWidth - margin * 2;
-        const maxH = pageHeight - margin * 2;
-
-        let w = img.width;
-        let h = img.height;
-        const ratio = w / h;
-
-        if (w > maxW) {
-          w = maxW;
-          h = w / ratio;
-        }
-        if (h > maxH) {
-          h = maxH;
-          w = h * ratio;
-        }
-
-        const x = (pageWidth - w) / 2;
-        const y = (pageHeight - h) / 2;
-
-        doc.addImage(img, "JPEG", x, y, w, h, undefined, "FAST");
-      } catch (err) {
-        console.warn("Could not add image to merged bills PDF:", err);
-      }
-    }
-
-    doc.save(`Bills_${selectedBook.name.replace(/\s+/g, '_')}.pdf`);
+    // Delegate entirely to the existing reports module background generator with compression
+    await backgroundExportManager.enqueueTask(selectedBook.id, selectedBook.name, selectedBook.transactions || [], true);
   };
 
   // Helper values for calculations
@@ -503,11 +384,52 @@ ${bankForm.upiId ? `\nUPI ID:\n${bankForm.upiId}` : ''}
 Regards,
 ${userName}`;
 
-  // Redirect / Open Gmail compose window
-  const handleOpenGmail = () => {
+  // Redirect / Open selected mail client compose window
+  const handleOpenMailClient = () => {
     vibrate(15);
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(emailForm.to)}&cc=${encodeURIComponent(emailForm.cc)}&bcc=${encodeURIComponent(emailForm.bcc)}&su=${encodeURIComponent(emailForm.subject)}&body=${encodeURIComponent(finalEmailBody)}`;
-    window.open(gmailUrl, '_blank');
+    const provider = EMAIL_PROVIDERS.find(p => p.id === selectedEmailClient) || EMAIL_PROVIDERS[0];
+    
+    if (selectedEmailClient === 'outlook') {
+      const ccParam = emailForm.cc ? `&cc=${encodeURIComponent(emailForm.cc)}` : '';
+      const bccParam = emailForm.bcc ? `&bcc=${encodeURIComponent(emailForm.bcc)}` : '';
+      
+      const appUrl = `mailto:${encodeURIComponent(emailForm.to)}?subject=${encodeURIComponent(emailForm.subject)}&body=${encodeURIComponent(finalEmailBody)}${ccParam}${bccParam}`;
+      const webUrl = provider.getUrl(
+        emailForm.to,
+        emailForm.cc,
+        emailForm.bcc,
+        emailForm.subject,
+        finalEmailBody
+      );
+
+      // Try opening the Microsoft Outlook App directly using its custom URI scheme
+      let didLoseFocus = false;
+      const onBlur = () => {
+        didLoseFocus = true;
+      };
+      
+      window.addEventListener('blur', onBlur);
+      window.location.href = appUrl;
+
+      // If the page doesn't lose focus within 1500ms, it means Outlook App is likely not installed,
+      // so we fallback to the Outlook Web client.
+      setTimeout(() => {
+        window.removeEventListener('blur', onBlur);
+        if (!didLoseFocus) {
+          console.log('[Outlook] Native app not detected, falling back to Web compose');
+          window.open(webUrl, '_blank');
+        }
+      }, 1500);
+    } else {
+      const composeUrl = provider.getUrl(
+        emailForm.to,
+        emailForm.cc,
+        emailForm.bcc,
+        emailForm.subject,
+        finalEmailBody
+      );
+      window.open(composeUrl, '_blank');
+    }
   };
 
   const toggleTheme = () => {
@@ -953,7 +875,7 @@ ${userName}`;
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {/* Excel Card */}
                     <div className={cn(
                       "p-4 rounded-2xl border transition-all hover:scale-[1.01] duration-200 flex flex-col justify-between",
@@ -990,27 +912,6 @@ ${userName}`;
                       <button
                         onClick={handleDownloadPDF}
                         className="w-full py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
-                      >
-                        <FileText size={12} />
-                        <span>Download</span>
-                      </button>
-                    </div>
-
-                    {/* Merged Receipts Card */}
-                    <div className={cn(
-                      "p-4 rounded-2xl border transition-all hover:scale-[1.01] duration-200 flex flex-col justify-between",
-                      theme === 'dark' ? "bg-[#12131a] border-zinc-800" : "bg-white border-slate-200 shadow-sm"
-                    )}>
-                      <div>
-                        <div className="w-9 h-9 bg-indigo-500/10 rounded-xl flex items-center justify-center text-indigo-500 mb-3">
-                          <FileText size={18} />
-                        </div>
-                        <h4 className={cn("font-bold text-xs uppercase tracking-wider mb-1", theme === 'dark' ? "text-slate-200" : "text-slate-800")}>Merged Receipts</h4>
-                        <p className="text-[10px] text-slate-400 leading-relaxed mb-4">Consolidated PDF containing all images, receipts, and invoices page-by-page.</p>
-                      </div>
-                      <button
-                        onClick={handleDownloadMergedBills}
-                        className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
                       >
                         <FileText size={12} />
                         <span>Download</span>
@@ -1358,7 +1259,42 @@ ${userName}`;
             >
               <div className="space-y-1">
                 <h2 className={cn("text-xl font-black uppercase tracking-tight", theme === 'dark' ? "text-slate-100" : "text-slate-900")}>Compose & Send</h2>
-                <p className="text-xs text-slate-400">Review final prefilled email content. Clicking "Open Gmail Compose" will initiate a secure transfer into Gmail.</p>
+                <p className="text-xs text-slate-400">Review final prefilled email content. Choose your email client to initiate a secure prefilled transfer.</p>
+              </div>
+
+              {/* Choose Email Client Selection */}
+              <div className="space-y-3">
+                <h4 className={cn("font-bold text-[10px] uppercase tracking-wider text-slate-400")}>Choose Email Client</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {EMAIL_PROVIDERS.map((provider) => {
+                    const isSelected = selectedEmailClient === provider.id;
+                    return (
+                      <button
+                        key={provider.id}
+                        type="button"
+                        onClick={() => { vibrate(5); setSelectedEmailClient(provider.id); }}
+                        className={cn(
+                          "p-4 rounded-2xl border-2 text-left transition-all duration-200 cursor-pointer flex items-center justify-between relative overflow-hidden",
+                          isSelected 
+                            ? "border-indigo-500 bg-indigo-500/5 text-indigo-500 dark:text-indigo-400" 
+                            : theme === 'dark' 
+                              ? "border-zinc-800 bg-[#12131a]/50 text-slate-400 hover:border-zinc-700 hover:text-slate-300" 
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-700"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-xl">{provider.icon}</span>
+                          <span className="font-extrabold text-xs uppercase tracking-wider">{provider.name}</span>
+                        </div>
+                        {isSelected && (
+                          <div className="w-5 h-5 rounded-full bg-indigo-500 flex items-center justify-center text-white text-[10px] font-black">
+                            ✓
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Final Email Output Preview */}
@@ -1391,7 +1327,7 @@ ${userName}`;
                 <div className="space-y-1">
                   <h4 className={cn("font-bold text-xs uppercase tracking-wide", theme === 'dark' ? "text-slate-200" : "text-slate-800")}>Attach Downloaded Reports</h4>
                   <p className="text-[11px] text-slate-400 leading-normal">
-                    Due to browser privacy bounds, downloaded files must be attached manually in the Gmail popup. Simply drag and drop the files from your local downloads folder.
+                    Due to browser privacy bounds, downloaded files must be attached manually in your email client. Simply drag and drop the files from your local downloads folder.
                   </p>
                   <div className="flex flex-wrap gap-2 mt-2">
                     <button 
@@ -1407,13 +1343,6 @@ ${userName}`;
                     >
                       <FileText size={10} />
                       Download PDF
-                    </button>
-                    <button 
-                      onClick={handleDownloadMergedBills}
-                      className="text-[9.5px] font-bold text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
-                    >
-                      <FileText size={10} />
-                      Download Bills
                     </button>
                   </div>
                 </div>
@@ -1431,36 +1360,17 @@ ${userName}`;
                   <span>Back</span>
                 </button>
                 <button
-                  onClick={handleOpenGmail}
+                  onClick={handleOpenMailClient}
                   className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-sm shadow-emerald-600/10"
                 >
                   <Mail size={14} />
-                  <span>Open Gmail Compose</span>
+                  <span>Open {selectedEmailClient === 'gmail' ? 'Gmail' : 'Outlook'} Compose</span>
                 </button>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
       </main>
-
-      {/* Centralized Configurable Professional Footer */}
-      <footer className={cn(
-        "py-6 text-center text-[11px] tracking-wide transition-colors duration-300 border-t",
-        theme === 'dark' ? "bg-[#0b0c10] border-zinc-900 text-zinc-500" : "bg-slate-50 border-slate-150 text-slate-500"
-      )}>
-        <div className="max-w-md mx-auto space-y-1">
-          <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">{TRACKBOOK_BRANDING.line1}</p>
-          <p className="font-extrabold uppercase tracking-widest text-indigo-500/80">{TRACKBOOK_BRANDING.line2}</p>
-          <a 
-            href={TRACKBOOK_BRANDING.url} 
-            target="_blank" 
-            rel="noopener noreferrer" 
-            className="text-xs text-indigo-400 hover:underline inline-block mt-0.5 font-mono tracking-normal"
-          >
-            {TRACKBOOK_BRANDING.url}
-          </a>
-        </div>
-      </footer>
     </div>
   );
 }
