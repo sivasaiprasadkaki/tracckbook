@@ -1629,7 +1629,7 @@ const getCachedOptimizedImage = (
   return promise;
 };
 
-const CATEGORIES = ['Food', 'Travel', 'Advance', 'Shopping', 'Custom'];
+const CATEGORIES = ['Food', 'Travel', 'Accommodation', 'Advance', 'Shopping', 'Custom'];
 const MODES = ['Card', 'UPI', 'Cash', 'Custom'];
 const DURATIONS = ['All', 'Today', 'Yesterday', 'Last Week', 'Custom'];
 
@@ -1883,6 +1883,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [submitAndAddNew, setSubmitAndAddNew] = useState(false);
   const [quickAddSuccess, setQuickAddSuccess] = useState(false);
   const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+  const amountInputRef = useRef<HTMLInputElement>(null);
   
   // UI State
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
@@ -3356,11 +3357,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     };
   }, [session, supabase]);
 
-  // Autofocus description when form is shown
+  // Autofocus amount when form is shown
   useEffect(() => {
     if (showForm) {
       setTimeout(() => {
-        descriptionInputRef.current?.focus();
+        amountInputRef.current?.focus();
       }, 120);
     }
   }, [showForm]);
@@ -3503,23 +3504,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setVisibleCount(20);
   }, [activeBookId, transactionSearchQuery, transactionTypeFilter, transactionCategoryFilter, transactionDurationFilter, customFilterDate]);
 
-  // Pre-calculate running balances for transaction list items with smart cached incremental logic
+  // Pre-calculate running balances chronologically for active cashbook
   const runningBalancesMap = useMemo(() => {
-    if (!activeBookId) return new Map<string, number>();
+    if (!activeBook || !activeBookId) return new Map<string, number>();
     
-    // Create a signature of the current list of filteredTransactions
-    // To see if we can instantly reuse the cached map!
-    const sig = filteredTransactions.map(t => `${t.id}_${t.amount}_${t.type}`).join('|');
+    const sig = activeBook.transactions.map(t => `${t.id}_${t.amount}_${t.type}_${t.date?.getTime()}`).join('|');
     const cachedSig = computedBalancesSignatureCache.get(activeBookId);
     if (cachedSig === sig && computedBalancesCache.has(activeBookId)) {
       return computedBalancesCache.get(activeBookId)!;
     }
     
+    // Sort all transactions in active book chronologically (oldest date first)
+    const chronological = [...activeBook.transactions].sort((a, b) => a.date.getTime() - b.date.getTime());
+    
     const map = new Map<string, number>();
-    // Calculate running balances incrementally starting from oldest (end of array) to newest (start of array, index 0)
     let current = 0;
-    for (let i = filteredTransactions.length - 1; i >= 0; i--) {
-      const t = filteredTransactions[i];
+    for (const t of chronological) {
       current += (t.type === 'in' ? t.amount : -t.amount);
       map.set(t.id, current);
     }
@@ -3527,7 +3527,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     computedBalancesCache.set(activeBookId, map);
     computedBalancesSignatureCache.set(activeBookId, sig);
     return map;
-  }, [filteredTransactions, activeBookId]);
+  }, [activeBook, activeBookId]);
 
   // Sliced set of transactions currently visible in the UI viewport
   const pagedTransactions = useMemo(() => {
@@ -3919,8 +3919,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return;
     }
 
-    // Only show loading animation if we are editing (and there are actual changes) or if we are creating and NOT choosing "Save & Add New".
-    const showLoadingAnimation = isEdit || !submitAndAddNew;
+    // Only show loading animation if new image attachments are being uploaded/processed
+    const showLoadingAnimation = hasAttachments;
 
     // Initialize progress modal state with appropriate steps
     let steps: Array<{ label: string; status: 'pending' | 'loading' | 'success' | 'error' }> = [];
@@ -4141,8 +4141,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           };
         });
 
-        // Hold for 700ms and close
-        await new Promise(resolve => setTimeout(resolve, 700));
+        // Hold for 700ms and close if animation was active
+        if (showLoadingAnimation) {
+          await new Promise(resolve => setTimeout(resolve, 700));
+        }
 
         // Close form and finish
         setShowForm(null);
@@ -4331,7 +4333,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           setIsSubmitting(false);
           setProgressModal(null);
           setTimeout(() => {
-            descriptionInputRef.current?.focus();
+            amountInputRef.current?.focus();
           }, 80);
         } else {
           updateStepStatus('Completed', 'success', 100, 'Saving complete!');
@@ -4345,9 +4347,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           });
 
           // Hold for 700ms and close
-          await new Promise(resolve => setTimeout(resolve, 700));
+          if (showLoadingAnimation) {
+            await new Promise(resolve => setTimeout(resolve, 700));
+          }
+        }
 
+        if (!submitAndAddNew) {
           setShowForm(null);
+          resetForm();
+          setIsSubmitting(false);
+          setProgressModal(null);
+        } else {
           resetForm();
           setIsSubmitting(false);
           setProgressModal(null);
@@ -10694,7 +10704,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         type="datetime-local"
                         value={transactionDate}
                         onChange={(e) => setTransactionDate(e.target.value)}
-                        tabIndex={1}
+                        tabIndex={2}
                         className={cn(
                           "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
                           theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
@@ -10705,6 +10715,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount (₹)</label>
                       <input
+                        ref={amountInputRef}
                         type="number"
                         step="any"
                         min="0"
@@ -10712,7 +10723,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         value={amount}
                         onChange={(e) => setAmount(e.target.value)}
                         placeholder="0.00"
-                        tabIndex={2}
+                        tabIndex={1}
                         className={cn(
                           "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
                           theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"

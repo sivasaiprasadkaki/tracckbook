@@ -19,7 +19,7 @@ export default function ImageEditorModal({
   const [rotation, setRotation] = useState<0 | 90 | 180 | 270>(0);
   const [zoom, setZoom] = useState<number>(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [crop, setCrop] = useState({ x: 10, y: 10, width: 80, height: 80 });
+  const [crop, setCrop] = useState({ x: 0, y: 0, width: 100, height: 100 });
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -109,7 +109,7 @@ export default function ImageEditorModal({
     setRotation(0);
     setZoom(1);
     setPan({ x: 0, y: 0 });
-    setCrop({ x: 10, y: 10, width: 80, height: 80 });
+    setCrop({ x: 0, y: 0, width: 100, height: 100 });
   };
 
   // Rotation triggers
@@ -468,8 +468,11 @@ export default function ImageEditorModal({
           </div>
 
           {/* Canvas Instructions Overlay */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-full text-[10px] font-medium text-slate-300 pointer-events-none select-none tracking-wide uppercase">
-            Drag to pan image • Resize the glowing box to crop
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-md px-3.5 py-1.5 rounded-xl text-[10px] font-medium text-slate-200 pointer-events-none select-none tracking-wider uppercase text-center max-w-[220px] sm:max-w-none leading-snug border border-white/10 shadow-lg">
+            <span>Drag to pan image</span>
+            <span className="hidden sm:inline"> • </span>
+            <br className="sm:hidden" />
+            <span>Resize glowing box to crop</span>
           </div>
         </div>
 
