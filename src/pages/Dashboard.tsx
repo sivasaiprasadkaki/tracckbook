@@ -6794,11 +6794,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       className={cn(
                         "group border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full",
                         viewMode === 'list'
-                          ? "p-3 sm:p-3.5 md:p-3 md:h-[80px]"
+                          ? "p-3 sm:p-3.5 md:p-3 md:h-[72px] border-b border-slate-100/80 dark:border-zinc-800/60"
                           : "p-4 sm:p-5 md:p-4 md:h-[120px]",
                         justEditedBookId === book.id
                           ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
-                          : theme === 'dark' ? "bg-zinc-950 border-zinc-800" : "bg-white border-slate-100",
+                          : theme === 'dark' 
+                            ? "border-transparent bg-transparent hover:bg-zinc-900/90 hover:border-zinc-800 hover:shadow-sm" 
+                            : "border-transparent bg-transparent hover:bg-slate-100 hover:border-slate-200 hover:shadow-sm",
                       )}
                     >
                       {selectedBooks.has(book.id) && (

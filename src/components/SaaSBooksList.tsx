@@ -187,16 +187,16 @@ export default function SaaSBooksList({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               className={cn(
-                "border rounded-sm overflow-hidden shadow-sm transition-colors duration-300",
-                theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
+                "rounded-md overflow-hidden transition-colors duration-300",
+                theme === 'dark' ? "bg-transparent text-zinc-100" : "bg-transparent text-zinc-900"
               )}
             >
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className={cn(
-                      "border-b text-[10px] uppercase font-semibold tracking-wider text-zinc-400 dark:text-zinc-500",
-                      theme === 'dark' ? "bg-zinc-950 border-zinc-800" : "bg-zinc-50/50 border-zinc-200"
+                      "text-[10px] uppercase font-semibold tracking-wider text-zinc-400 dark:text-zinc-500 border-b",
+                      theme === 'dark' ? "bg-zinc-950/50 border-zinc-800/60" : "bg-zinc-50/50 border-zinc-100"
                     )}>
                       <th className="py-3 px-4">Book Name</th>
                       <th className="py-3 px-4">Entries</th>
@@ -224,8 +224,8 @@ export default function SaaSBooksList({
                           key={book.id}
                           onClick={() => handleBookClick(book.id)}
                           className={cn(
-                            "group text-xs transition-colors duration-150 cursor-pointer",
-                            theme === 'dark' ? "hover:bg-zinc-900/40" : "hover:bg-slate-50/40"
+                            "group text-xs transition-all duration-150 cursor-pointer border-b border-slate-100/80 dark:border-zinc-800/50",
+                            theme === 'dark' ? "hover:bg-zinc-800/80 hover:border-zinc-700" : "hover:bg-slate-100/90 hover:border-slate-300"
                           )}
                         >
                           {/* Name & Icon */}
@@ -416,11 +416,13 @@ export default function SaaSBooksList({
                 return (
                   <motion.div
                     key={book.id}
-                    whileHover={{ y: -3 }}
+                    whileHover={{ y: -2 }}
                     onClick={() => handleBookClick(book.id)}
                     className={cn(
-                      "group p-5 rounded-sm border transition-colors duration-150 relative overflow-hidden flex flex-col justify-between cursor-pointer shadow-sm select-none",
-                      theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-white border-zinc-200"
+                      "group p-5 rounded-xl border transition-all duration-200 relative overflow-hidden flex flex-col justify-between cursor-pointer select-none",
+                      theme === 'dark' 
+                        ? "border-transparent bg-transparent hover:bg-zinc-900/90 hover:border-zinc-800 hover:shadow-sm" 
+                        : "border-transparent bg-transparent hover:bg-slate-100/90 hover:border-slate-200 hover:shadow-sm"
                     )}
                   >
                     <div>
