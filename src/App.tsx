@@ -119,6 +119,15 @@ export default function App() {
     root.classList.add(theme);
     root.style.colorScheme = theme;
     localStorage.setItem('theme', theme);
+
+    // Dynamic meta theme-color for mobile status bar / browser header
+    let metaThemeColor = document.querySelector('meta[name="theme-color"]');
+    if (!metaThemeColor) {
+      metaThemeColor = document.createElement('meta');
+      metaThemeColor.setAttribute('name', 'theme-color');
+      document.head.appendChild(metaThemeColor);
+    }
+    metaThemeColor.setAttribute('content', theme === 'dark' ? '#000000' : '#ffffff');
   }, [theme]);
 
   // PWA Install Prompt handling

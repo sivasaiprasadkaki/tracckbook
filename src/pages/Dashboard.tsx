@@ -2281,7 +2281,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             setGeneratedCode(savedSession.code);
             setShareExpiryTime(expiryNum);
             setRestoredMessage("Active share session restored");
-            const timer = setTimeout(() => setRestoredMessage(''), 4000);
+            const timer = setTimeout(() => setRestoredMessage(''), 20000);
             return () => clearTimeout(timer);
           } else {
             localStorage.removeItem(`trackbook_share_session_${activeBookId}`);
@@ -3097,12 +3097,42 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     try {
       console.log('[fetchData] Loading cashbooks and entries directly from Supabase...');
       // 1. Fetch cashbooks
-      const { data: cashbooks, error: cbErr } = await supabase
+      const { data: rawCashbooks, error: cbErr } = await supabase
         .from('cashbooks')
         .select('*')
         .eq('user_id', session.user.id);
 
       if (cbErr) throw cbErr;
+
+      // Extract pending undo deletion IDs to prevent deleted items from reappearing before commit
+      const pending = pendingActionRef.current;
+      const pendingBookIds = new Set<string>();
+      const pendingEntryIds = new Set<string>();
+
+      if (pending) {
+        if (pending.type === 'book') {
+          const id = pending.data?.book?.id || pending.data?.id;
+          if (id) pendingBookIds.add(id);
+        } else if (pending.type === 'bulk_books') {
+          if (Array.isArray(pending.data)) {
+            pending.data.forEach((item: any) => {
+              const id = item?.book?.id || item?.id;
+              if (id) pendingBookIds.add(id);
+            });
+          }
+        } else if (pending.type === 'transaction') {
+          const id = pending.data?.id;
+          if (id) pendingEntryIds.add(id);
+        } else if (pending.type === 'bulk_transactions') {
+          if (Array.isArray(pending.data)) {
+            pending.data.forEach((item: any) => {
+              if (item?.id) pendingEntryIds.add(item.id);
+            });
+          }
+        }
+      }
+
+      const cashbooks = (rawCashbooks || []).filter(cb => cb && cb.id && !pendingBookIds.has(cb.id));
 
       if (cashbooks && cashbooks.length > 0) {
         // Fetch all entries for these cashbooks in a single query
@@ -3119,6 +3149,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         const allEntryIds: string[] = [];
         if (entries) {
           for (const e of entries) {
+            if (e && e.id && pendingEntryIds.has(e.id)) continue;
             allEntryIds.push(e.id);
             if (!entriesMapByCashbook.has(e.cashbook_id)) {
               entriesMapByCashbook.set(e.cashbook_id, []);
@@ -3818,14 +3849,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const confirmDeleteBook = async () => {
-    if (deleteConfirmId && session) {
-      const bookToDeleteObj = books.find(b => b.id === deleteConfirmId);
-      const originalIndex = books.findIndex(b => b.id === deleteConfirmId);
+    const targetId = deleteConfirmId;
+    if (targetId && session) {
+      const bookToDeleteObj = books.find(b => b.id === targetId);
+      const originalIndex = books.findIndex(b => b.id === targetId);
+      const cached = entriesCache.get(targetId) || [];
 
       // Immediately remove from UI state
-      setBooks(prevBooks => prevBooks.filter(b => b.id !== deleteConfirmId));
+      setBooks(prevBooks => prevBooks.filter(b => b.id !== targetId));
       setDeleteConfirmId(null);
-      if (activeBookId === deleteConfirmId) {
+      if (activeBookId === targetId) {
         handleSelectBook(null);
       }
 
@@ -3834,7 +3867,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           type: 'book',
           data: {
             book: bookToDeleteObj,
-            cachedEntries: entriesCache.get(deleteConfirmId) || []
+            cachedEntries: cached
           },
           originalIndex
         }).catch(err => console.error('[confirmDeleteBook] Error starting undoable delete:', err));
@@ -4778,7 +4811,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         setShareExpiryTime(expiryTime);
         
         setRestoredMessage("Previous active share session restored");
-        setTimeout(() => setRestoredMessage(''), 4000);
+        setTimeout(() => setRestoredMessage(''), 20000);
 
         if (activeBookId) {
           localStorage.setItem(`trackbook_share_session_${activeBookId}`, JSON.stringify({
@@ -4857,7 +4890,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       setGeneratedCode(code);
       setShareExpiryTime(expiryTime);
       setRestoredMessage("New share session generated");
-      setTimeout(() => setRestoredMessage(''), 4000);
+      setTimeout(() => setRestoredMessage(''), 20000);
 
       // Save current active share session to localStorage
       if (activeBookId) {
@@ -6462,13 +6495,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       <AnimatePresence>
         {restoredMessage && (
           <motion.div
-            initial={{ height: 0, opacity: 0, y: -20 }}
-            animate={{ height: 'auto', opacity: 1, y: 0 }}
-            exit={{ height: 0, opacity: 0, y: -20 }}
-            className="fixed top-0 left-0 right-0 bg-emerald-600 dark:bg-emerald-700 text-white px-4 py-3 text-center text-xs font-bold flex items-center justify-center gap-2 z-[100] shadow-md tracking-wide"
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 bg-emerald-600 dark:bg-emerald-700 text-white px-5 py-2.5 rounded-full text-xs font-bold flex items-center gap-2.5 z-[100] shadow-xl border border-emerald-500/30 tracking-wide"
           >
             <CheckSquare size={16} />
             <span>{restoredMessage}</span>
+            <button
+              type="button"
+              onClick={() => setRestoredMessage('')}
+              className="ml-2 p-1 hover:bg-white/20 rounded-full transition-colors cursor-pointer outline-none border-none text-white/90 hover:text-white flex items-center justify-center"
+              title="Close"
+            >
+              <X size={14} />
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
