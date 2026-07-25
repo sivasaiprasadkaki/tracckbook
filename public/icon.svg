@@ -1,21 +1,63 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Rounded Base (Deep Navy) -->
-  <rect width="512" height="512" rx="128" fill="#1E293B"/>
+  <defs>
+    <!-- Background Gradient: Rich Indigo/Royal Blue -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#312E81"/>
+    </linearGradient>
+
+    <!-- T-Emblem Gradient: Vibrant Emerald Green (Cashbook inspired) -->
+    <linearGradient id="tGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34D399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+
+    <!-- Subtle Drop Shadow for 3D depth -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0F172A" flood-opacity="0.35"/>
+    </filter>
+
+    <filter id="tShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#064E3B" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Squircle Base Container -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+
+  <!-- Outer Glow Arc behind the Book -->
+  <circle cx="256" cy="270" r="180" fill="#6366F1" opacity="0.25"/>
+
+  <!-- Open Book Shadow -->
+  <path d="M 86,224 Q 256,186 426,224 L 426,396 Q 256,358 86,396 Z" fill="#0F172A" opacity="0.3"/>
+
+  <!-- Open Book Base / Pages -->
+  <!-- Left Page -->
+  <path d="M 94,214 Q 180,188 248,204 L 248,382 Q 180,366 94,392 Z" fill="#FFFFFF" filter="url(#shadow)"/>
   
-  <!-- Vertical Stem of the T / Spine of the Book (Emerald Green) -->
-  <rect x="216" y="90" width="80" height="342" rx="20" fill="#10B981"/>
-  
-  <!-- Left Page of the Ledger (White) -->
-  <path d="M 56,100 Q 131,75 206,100 L 206,190 Q 131,165 56,190 Z" fill="#FFFFFF"/>
-  
-  <!-- Right Page of the Ledger (White) -->
-  <path d="M 306,100 Q 381,75 456,100 L 456,190 Q 381,165 306,190 Z" fill="#FFFFFF"/>
-  
-  <!-- Ledger Lines on Left Page (Deep Navy) -->
-  <path d="M 86,125 Q 131,110 176,125" stroke="#1E293B" stroke-width="8" stroke-linecap="round" fill="none"/>
-  <path d="M 86,155 Q 131,140 176,155" stroke="#1E293B" stroke-width="8" stroke-linecap="round" fill="none"/>
-  
-  <!-- Ledger Lines on Right Page (Deep Navy) -->
-  <path d="M 336,125 Q 381,110 426,125" stroke="#1E293B" stroke-width="8" stroke-linecap="round" fill="none"/>
-  <path d="M 336,155 Q 381,140 426,155" stroke="#1E293B" stroke-width="8" stroke-linecap="round" fill="none"/>
+  <!-- Right Page -->
+  <path d="M 418,214 Q 332,188 264,204 L 264,382 Q 332,366 418,392 Z" fill="#F1F5F9" filter="url(#shadow)"/>
+
+  <!-- Book Spine / Fold Center -->
+  <path d="M 248,204 Q 256,208 264,204 L 264,382 Q 256,386 248,382 Z" fill="#CBD5E1"/>
+
+  <!-- Ledger Lines on Left Page -->
+  <line x1="124" y1="254" x2="218" y2="242" stroke="#94A3B8" stroke-width="7" stroke-linecap="round"/>
+  <line x1="124" y1="288" x2="218" y2="276" stroke="#94A3B8" stroke-width="7" stroke-linecap="round"/>
+  <line x1="124" y1="322" x2="218" y2="310" stroke="#94A3B8" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Ledger Lines on Right Page -->
+  <line x1="294" y1="242" x2="388" y2="254" stroke="#94A3B8" stroke-width="7" stroke-linecap="round"/>
+  <line x1="294" y1="276" x2="388" y2="288" stroke="#94A3B8" stroke-width="7" stroke-linecap="round"/>
+  <line x1="294" y1="310" x2="388" y2="322" stroke="#94A3B8" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Prominent "T" Emblem across the Book (Inspired by Cashbook) -->
+  <g filter="url(#tShadow)">
+    <!-- Top Bar of T -->
+    <rect x="136" y="104" width="240" height="58" rx="16" fill="url(#tGrad)"/>
+    <!-- Vertical Stem of T -->
+    <rect x="227" y="104" width="58" height="236" rx="16" fill="url(#tGrad)"/>
+    <!-- Inner T Accent Line -->
+    <rect x="148" y="114" width="216" height="8" rx="4" fill="#A7F3D0" opacity="0.6"/>
+  </g>
 </svg>
