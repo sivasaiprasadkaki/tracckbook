@@ -6,11 +6,29 @@ import { cn } from './lib/utils';
 import SmartUpdateManager from './components/SmartUpdateManager';
 import AutoLogoutManager from './components/AutoLogoutManager';
 
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Login = lazy(() => import('./pages/Login'));
-const ResetPassword = lazy(() => import('./pages/ResetPassword'));
-const AdminPortal = lazy(() => import('./pages/AdminPortal'));
-const AutomationMail = lazy(() => import('./pages/AutomationMail'));
+function lazyWithRetry(componentImport: () => Promise<any>) {
+  return lazy(() =>
+    componentImport().catch((error) => {
+      console.warn('[lazyWithRetry] Module import failed, retrying...', error);
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve(componentImport());
+        }, 1000);
+      }).catch(() => {
+        console.error('[lazyWithRetry] Retry failed. Reloading window to fetch current bundle.');
+        window.location.reload();
+        return { default: () => null as any };
+      });
+    })
+  );
+}
+
+const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'));
+const Login = lazyWithRetry(() => import('./pages/Login'));
+const ResetPassword = lazyWithRetry(() => import('./pages/ResetPassword'));
+const AdminPortal = lazyWithRetry(() => import('./pages/AdminPortal'));
+const AutomationMail = lazyWithRetry(() => import('./pages/AutomationMail'));
+const AcceptInvitePage = lazyWithRetry(() => import('./pages/AcceptInvitePage'));
 
 function NavigationHandler({ 
   session, 
@@ -37,6 +55,26 @@ function NavigationHandler({
       return;
     }
 
+    // Helper to check if current URL has password recovery parameters
+    const checkRecoveryContext = () => {
+      const hash = window.location.hash || '';
+      const search = window.location.search || '';
+      const path = locationRef.current.pathname;
+      const isResetPath = path === '/reset-password' || path === '/resetpassword';
+      const hasRecoveryHash = hash.includes('type=recovery') || (hash.includes('access_token=') && !hash.includes('type=signup'));
+      const hasRecoverySearch = search.includes('type=recovery') || search.includes('code=');
+      const hasRecoveryError = (hash.includes('error_code=otp_expired') || hash.includes('error=access_denied') || search.includes('error_code=otp_expired') || search.includes('error=access_denied'));
+      return { isResetPath, hasRecoveryHash, hasRecoverySearch, hasRecoveryError, isRecovery: isResetPath || hasRecoveryHash || hasRecoverySearch || hasRecoveryError };
+    };
+
+    // If initial load has recovery parameters in hash/query and not yet on /reset-password, route immediately
+    const initialRecovery = checkRecoveryContext();
+    if (initialRecovery.isRecovery && !initialRecovery.isResetPath) {
+      const currentHash = window.location.hash || '';
+      const currentSearch = window.location.search || '';
+      navigate('/reset-password' + currentSearch + currentHash, { replace: true });
+    }
+
     // Get initial session with timeout safety
     const sessionTimeout = setTimeout(() => {
       console.warn('Auth session lookup taking too long, forcing load completion...');
@@ -52,12 +90,12 @@ function NavigationHandler({
         console.log('[DEBUG] SESSION REFRESHED');
       }
       
-      // If we have a recovery token in the hash, ensure we are on the reset page
-      const hash = window.location.hash;
-      if (hash && (hash.includes('type=recovery') || hash.includes('access_token='))) {
-        if (locationRef.current.pathname !== '/resetpassword') {
-          navigate('/resetpassword' + hash, { replace: true });
-        }
+      // If we have recovery parameters in the hash or search, ensure we route to /reset-password
+      const recoveryState = checkRecoveryContext();
+      if (recoveryState.isRecovery && !recoveryState.isResetPath) {
+        const currentHash = window.location.hash || '';
+        const currentSearch = window.location.search || '';
+        navigate('/reset-password' + currentSearch + currentHash, { replace: true });
       }
     }).catch(err => {
       console.error('Auth session lookup failed:', err);
@@ -74,16 +112,30 @@ function NavigationHandler({
       }
       
       const currentPath = locationRef.current.pathname;
+      const isResetRoute = currentPath === '/reset-password' || currentPath === '/resetpassword';
+      const recoveryState = checkRecoveryContext();
+
       if (event === 'PASSWORD_RECOVERY') {
-        console.log('Password recovery event detected');
-        if (currentPath !== '/resetpassword') {
+        console.log('[DEBUG] Password recovery event detected');
+        if (!isResetRoute) {
           const currentHash = window.location.hash || '';
-          navigate('/resetpassword' + currentHash, { replace: true });
+          const currentSearch = window.location.search || '';
+          navigate('/reset-password' + currentSearch + currentHash, { replace: true });
         }
-      } else if (event === 'SIGNED_IN' && (currentPath === '/login' || currentPath === '/register' || currentPath === '/signup')) {
-        navigate('/cashbooks', { replace: true });
+      } else if (event === 'SIGNED_IN') {
+        // If we are currently in recovery flow or on reset password page, stay on reset password page!
+        if (isResetRoute || recoveryState.isRecovery) {
+          console.log('[DEBUG] SIGNED_IN during recovery flow - maintaining reset password route');
+          return;
+        }
+        if (currentPath === '/login' || currentPath === '/register' || currentPath === '/signup') {
+          navigate('/cashbooks', { replace: true });
+        }
       } else if (event === 'SIGNED_OUT') {
-        navigate('/login', { replace: true });
+        // Only redirect to login if not intentionally on reset password page
+        if (!isResetRoute) {
+          navigate('/login', { replace: true });
+        }
       }
     });
 
@@ -189,7 +241,24 @@ export default function App() {
           <Route path="/register" element={<Login theme={theme} initialMode="signup" />} />
           <Route path="/forgot" element={<Login theme={theme} initialMode="forgot" />} />
           <Route path="/signup" element={<Login theme={theme} initialMode="signup" />} />
-          <Route path="/resetpassword" element={<ResetPassword />} />
+          <Route path="/reset-password" element={<ResetPassword theme={theme} />} />
+          <Route path="/resetpassword" element={<ResetPassword theme={theme} />} />
+          <Route path="/accept-invite" element={
+            <AcceptInvitePage 
+              theme={theme} 
+              currentUserEmail={session?.user?.email || 'owner@trackbook.app'} 
+              currentUserId={session?.user?.id || 'u_owner'}
+              currentUserName={session?.user?.user_metadata?.full_name || 'Logged User'}
+            />
+          } />
+          <Route path="/invitations/:token" element={
+            <AcceptInvitePage 
+              theme={theme} 
+              currentUserEmail={session?.user?.email || 'owner@trackbook.app'} 
+              currentUserId={session?.user?.id || 'u_owner'}
+              currentUserName={session?.user?.user_metadata?.full_name || 'Logged User'}
+            />
+          } />
           <Route path="/admin" element={<AdminPortal />} />
 
           {/* Automation Mail Enterprise Module */}
@@ -219,7 +288,12 @@ export default function App() {
             path="/" 
             element={
               session ? (
-                <Navigate to="/cashbooks" replace />
+                // If there's an active recovery parameter in the URL, go to reset password
+                (typeof window !== 'undefined' && (window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery'))) ? (
+                  <Navigate to="/reset-password" replace />
+                ) : (
+                  <Navigate to="/cashbooks" replace />
+                )
               ) : (
                 // If we are still loading initial session, show a loader
                 loading ? (
@@ -230,7 +304,16 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <Navigate to="/login" replace />
+                  (typeof window !== 'undefined' && (
+                    window.location.hash.includes('type=recovery') || 
+                    window.location.search.includes('type=recovery') || 
+                    window.location.hash.includes('error_code=otp_expired') ||
+                    window.location.search.includes('error_code=otp_expired')
+                  )) ? (
+                    <Navigate to="/reset-password" replace />
+                  ) : (
+                    <Navigate to="/login" replace />
+                  )
                 )
               )
             } 

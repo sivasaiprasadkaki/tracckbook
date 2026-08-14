@@ -13,12 +13,15 @@ import {
   Smartphone,
   Info,
   Shield,
+  ShieldCheck,
   Trash2,
   RefreshCw,
   Key
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn, vibrate } from '../lib/utils';
+import { ALL_ROLES, ROLE_DEFINITIONS } from '../lib/rbac';
+import RolesPermissionsModal from './RolesPermissionsModal';
 
 interface SaaSSettingsProps {
   theme: 'light' | 'dark';
@@ -33,7 +36,7 @@ interface SaaSSettingsProps {
   clearAllAppData: () => void;
 }
 
-type TabType = 'profile' | 'appearance' | 'notifications' | 'storage' | 'ai' | 'security' | 'about';
+type TabType = 'profile' | 'rbac' | 'appearance' | 'notifications' | 'storage' | 'ai' | 'security' | 'about';
 
 export default function SaaSSettings({
   theme,
@@ -134,8 +137,11 @@ export default function SaaSSettings({
     setTimeout(() => setApiKeyFeedback(false), 2500);
   };
 
+  const [showRolesModal, setShowRolesModal] = useState(false);
+
   const tabs = [
     { id: 'profile', label: 'User Profile', icon: User },
+    { id: 'rbac', label: 'Roles & Permissions', icon: ShieldCheck },
     { id: 'appearance', label: 'Appearance', icon: Settings },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'storage', label: 'Storage & Backup', icon: Database },
@@ -304,6 +310,70 @@ export default function SaaSSettings({
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* TAB: RBAC ROLES & PERMISSIONS */}
+          {activeTab === 'rbac' && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4 border-zinc-150 dark:border-zinc-800">
+                <div>
+                  <h3 className={cn("text-sm font-semibold flex items-center gap-2", theme === 'dark' ? "text-zinc-200" : "text-zinc-800")}>
+                    <ShieldCheck size={18} className="text-emerald-500" />
+                    Role-Based Access Control (RBAC)
+                  </h3>
+                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-normal mt-0.5">
+                    TrackBook enforces per-cashbook security with 5 defined user roles.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => { vibrate(10); setShowRolesModal(true); }}
+                  className="py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-sm shrink-0"
+                >
+                  Open Full Interactive Role Matrix Modal
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3.5">
+                {ALL_ROLES.map((role) => {
+                  const def = ROLE_DEFINITIONS[role];
+                  return (
+                    <div 
+                      key={role}
+                      className={cn(
+                        "p-4 rounded-xl border space-y-2.5 transition-colors",
+                        theme === 'dark' ? "bg-zinc-950/60 border-zinc-800" : "bg-zinc-50/60 border-zinc-200"
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={cn("px-2.5 py-0.5 rounded text-xs font-extrabold border", def.badgeBg, def.badgeText, def.badgeBorder)}>
+                            {def.title}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-zinc-400 font-semibold">
+                          {def.permissions.length} Permissions • {def.restrictions.length} Restrictions
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-zinc-400 dark:text-zinc-400 font-medium">
+                        {def.description}
+                      </p>
+
+                      <div className="flex items-center gap-4 text-[11px] font-semibold text-zinc-400 pt-1">
+                        <span className="text-emerald-500 font-bold">✓ Permissions: {def.permissions.slice(0, 2).join(', ')}...</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <RolesPermissionsModal
+                isOpen={showRolesModal}
+                onClose={() => setShowRolesModal(false)}
+                theme={theme}
+              />
             </div>
           )}
 

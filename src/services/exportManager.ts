@@ -1135,7 +1135,11 @@ export class BackgroundExportManager {
       }
 
     } catch (err: any) {
-      console.error('[ExportManager] task failure:', err);
+      if (err.message !== 'No transactions found to export.') {
+        console.error('[ExportManager] task failure:', err);
+      } else {
+        console.warn('[ExportManager] task notice:', err.message);
+      }
       task.status = 'failed';
       task.error = err.message || 'Document architecture failed';
       task.message = 'Export failed: ' + (err.message || 'Process error');
@@ -1522,6 +1526,122 @@ export class BackgroundExportManager {
     this.notifyListeners();
 
     return doc.output('blob');
+  }
+
+  // Standalone Excel Generator reusing exact report pipeline
+  public async generateExcelReportData(cashbookName: string, transactions: any[]): Promise<{ blob: Blob; fileName: string; base64: string }> {
+    if (!transactions || transactions.length === 0) {
+      throw new Error('No transactions found to export.');
+    }
+
+    let currentPage = 1;
+    const transactionPageMap = new Map<string, string>();
+    const transactionsWithImages = transactions.filter(t => t.images && t.images.length > 0);
+    for (const t of transactionsWithImages) {
+      const layout = t.imageLayout || 'split';
+      const imageCount = t.images?.length || 0;
+      const pagesUsed = layout === 'merge' ? Math.ceil(imageCount / 2) : imageCount;
+      
+      if (pagesUsed === 1) {
+        transactionPageMap.set(t.id, `Refer Page Number ${currentPage}`);
+      } else {
+        transactionPageMap.set(t.id, `Refer Page Number ${currentPage} to ${currentPage + pagesUsed - 1}`);
+      }
+      
+      currentPage += pagesUsed;
+    }
+
+    const data = transactions.map(t => ({
+      Date: safeFormatDate(t.date),
+      Details: t.description,
+      Category: t.category,
+      Mode: t.mode,
+      'Cash In': t.type === 'in' ? t.amount : 0,
+      'Cash Out': t.type === 'out' ? t.amount : 0,
+      'Reference': transactionPageMap.get(t.id) || '-'
+    }));
+
+    const totalIn = transactions.filter(t => t.type === 'in').reduce((sum, t) => sum + (t.amount || 0), 0);
+    const totalOut = transactions.filter(t => t.type === 'out').reduce((sum, t) => sum + (t.amount || 0), 0);
+    const balance = totalIn - totalOut;
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    
+    // Add summary rows
+    XLSX.utils.sheet_add_aoa(ws, [
+      [],
+      ['', '', '', '', totalIn, totalOut],
+      ['', '', '', '', balance]
+    ], { origin: -1 });
+
+    // Update summary labels
+    const lastRow = XLSX.utils.decode_range(ws['!ref'] || 'A1').e.r;
+    ws[XLSX.utils.encode_cell({ r: lastRow - 1, c: 3 })] = { v: 'TOTAL', t: 's' };
+    ws[XLSX.utils.encode_cell({ r: lastRow, c: 3 })] = { v: 'BALANCE', t: 's' };
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Transactions");
+
+    const base64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+    const arrayBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([arrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const fileName = `${cashbookName.replace(/[^a-z0-9]/gi, '_')}.xlsx`;
+
+    return { blob, fileName, base64 };
+  }
+
+  // Standalone PDF Generator reusing exact report pipeline
+  public async generatePdfReportData(cashbookName: string, transactions: any[], isCompressed: boolean = true): Promise<{ blob: Blob; fileName: string; base64: string }> {
+    if (!transactions || transactions.length === 0) {
+      throw new Error('No transactions found to export.');
+    }
+
+    const taskId = 'tx_pdf_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+    const dummyTask: ExportTask = {
+      id: taskId,
+      type: 'pdf',
+      cashbookId: 'temp',
+      cashbookName,
+      isCompressed,
+      status: 'processing',
+      progress: 0,
+      message: 'Rendering PDF...',
+      createdAt: new Date().toISOString(),
+      transactionsCount: transactions.length,
+      attachmentsCount: transactions.filter(t => t.images && t.images.length > 0).length,
+      fileName: `${cashbookName.replace(/[^a-z0-9]/gi, '_')}.pdf`
+    };
+
+    const transactionsWithImages = transactions.filter(t => t.images && t.images.length > 0);
+    const allUrls: string[] = [];
+    transactionsWithImages.forEach(t => {
+      t.images.forEach((url: string) => {
+        if (url && !allUrls.includes(url)) {
+          allUrls.push(url);
+        }
+      });
+    });
+
+    let imageMap: { [url: string]: string } = {};
+    if (allUrls.length > 0) {
+      imageMap = await this.downloadImagesInWorker(dummyTask, allUrls);
+    }
+
+    const pdfBlob = await this.generatePdfBlob(dummyTask, transactions, imageMap);
+    const fileName = dummyTask.fileName;
+
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        const b64 = result.includes(',') ? result.split(',')[1] : result;
+        resolve(b64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(pdfBlob);
+    });
+
+    return { blob: pdfBlob, fileName, base64 };
   }
 
   // Load completed AI scan results

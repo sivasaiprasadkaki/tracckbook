@@ -5,6 +5,24 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 import parseReceiptHandler from "./api/gemini/parse-receipt.ts";
+import shareWhatsappHandler from "./api/reports/share-whatsapp.ts";
+import { 
+  handleCreateInvitation, 
+  handleVerifyInvitation, 
+  handleAcceptInvitation, 
+  handleDeclineInvitation,
+  handleGetNotifications,
+  handleMarkNotificationRead,
+  handleUpdateMemberRole, 
+  handleAcceptRoleChange,
+  handleDeclineRoleChange,
+  handleGetUserCashbooks,
+  handleRemoveMember, 
+  handleRevokeInvitation,
+  handleGetMembers,
+  handleGetCashbookEntries,
+  handleSaveCashbookEntry
+} from "./api/rbac.ts";
 
 const envConfig = dotenv.config();
 if (envConfig.parsed) {
@@ -47,6 +65,34 @@ app.post("/api/gemini/parse-receipt", async (req, res) => {
     res.status(500).json({ error: err.message || "An unexpected error occurred" });
   }
 });
+
+// Share Reports to WhatsApp Endpoint
+app.post("/api/reports/share-whatsapp", async (req, res) => {
+  try {
+    await shareWhatsappHandler(req as any, res as any);
+  } catch (err: any) {
+    console.error("[Local Server] Share WhatsApp error:", err);
+    res.status(500).json({ error: err.message || "An unexpected error occurred" });
+  }
+});
+
+// RBAC Phase 2 API Endpoints
+app.post("/api/rbac/invite", handleCreateInvitation);
+app.get("/api/rbac/verify-invitation", handleVerifyInvitation);
+app.post("/api/rbac/accept-invitation", handleAcceptInvitation);
+app.post("/api/rbac/decline-invitation", handleDeclineInvitation);
+app.get("/api/notifications", handleGetNotifications);
+app.post("/api/notifications/mark-read", handleMarkNotificationRead);
+app.put("/api/rbac/role", handleUpdateMemberRole);
+app.post("/api/rbac/accept-role-change", handleAcceptRoleChange);
+app.post("/api/rbac/decline-role-change", handleDeclineRoleChange);
+app.get("/api/rbac/user-cashbooks", handleGetUserCashbooks);
+app.get("/api/rbac/cashbook-entries", handleGetCashbookEntries);
+app.post("/api/rbac/cashbook-entries", handleGetCashbookEntries);
+app.post("/api/rbac/save-entry", handleSaveCashbookEntry);
+app.delete("/api/rbac/members", handleRemoveMember);
+app.get("/api/rbac/members", handleGetMembers);
+app.post("/api/rbac/revoke-invitation", handleRevokeInvitation);
 
 // AI Ask Endpoint
 app.post("/api/gemini/ask", async (req, res) => {

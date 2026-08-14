@@ -61,13 +61,16 @@ import {
   ArrowUpDown,
   MoreVertical,
   Users,
+  UserPlus,
+  ShieldCheck,
   Camera,
   Phone,
   Crop,
   CheckCircle2,
   Mail,
   Lock,
-  Merge
+  Merge,
+  Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -84,10 +87,15 @@ import html2canvas from 'html2canvas';
 import { backgroundExportManager } from '../services/exportManager';
 import { syncManager, offlineDb } from '../services/syncManager';
 import DownloadCenter, { DownloadCenterTrigger } from '../components/DownloadCenter';
+import NotificationBell from '../components/NotificationBell';
+import MembersAccessManagement from '../components/MembersAccessManagement';
+import RolesPermissionsModal from '../components/RolesPermissionsModal';
+import { canAddEntries, canEditEntries, canDeleteEntries, canDeleteBook, canManageMembers, canAccessBookSettings, ALL_ROLES, Role } from '../lib/rbac';
 import MediaPickerSheet from '../components/MediaPickerSheet';
 import ImageEditorModal from '../components/ImageEditorModal';
 import { CountryCodePicker, COUNTRIES, Country } from '../components/CountryCodePicker';
 import { PhoneComingSoonModal } from '../components/PhoneComingSoonModal';
+import { ShareWhatsAppModal } from '../components/ShareWhatsAppModal';
 import { addPdfBrandingFooter } from '../utils/pdfBranding';
 
 interface TimelineStep {
@@ -862,7 +870,10 @@ const MobileTransactionRow = React.memo(({
   handleDeleteTransaction,
   theme,
   index,
-  isJustEdited
+  isJustEdited,
+  canEdit = true,
+  canDelete = true,
+  canSelect = true
 }: {
   t: Transaction;
   runningBalance: number;
@@ -882,6 +893,9 @@ const MobileTransactionRow = React.memo(({
   theme: string;
   index: number;
   isJustEdited?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canSelect?: boolean;
 }) => {
   return (
     <motion.div
@@ -899,13 +913,14 @@ const MobileTransactionRow = React.memo(({
           ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
           : { duration: 0.4, ease: [0.16, 1, 0.3, 1], delay: Math.min(index * 0.03, 0.35) }
       }
-      onMouseDown={() => onTouchStart(t.id)}
-      onMouseUp={onTouchEnd}
-      onTouchStart={() => onTouchStart(t.id)}
-      onTouchEnd={onTouchEnd}
-      onClick={() => onClick(t.id)}
+      onMouseDown={() => canSelect && onTouchStart(t.id)}
+      onMouseUp={canSelect ? onTouchEnd : undefined}
+      onTouchStart={() => canSelect && onTouchStart(t.id)}
+      onTouchEnd={canSelect ? onTouchEnd : undefined}
+      onClick={() => canSelect && onClick(t.id)}
       className={cn(
-        "rounded-[20px] border shadow-sm relative transition-all select-none overflow-hidden hover:scale-[1.005] duration-200 cursor-pointer",
+        "rounded-[20px] border shadow-sm relative transition-all select-none overflow-hidden duration-200",
+        canSelect ? "hover:scale-[1.005] cursor-pointer" : "cursor-default",
         isCurrentlyDeleting ? "border-transparent bg-transparent" : "p-4.5 sm:p-5",
         isJustEdited
           ? (theme === 'dark' ? "border-indigo-500 ring-4 ring-indigo-500/40 bg-indigo-950/30 font-bold" : "border-indigo-500 ring-4 ring-indigo-500/30 bg-indigo-50/40 shadow-xl font-bold")
@@ -1068,28 +1083,34 @@ const MobileTransactionRow = React.memo(({
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button 
-            onClick={(e) => { e.stopPropagation(); handleEditTransaction(t); }}
-            className={cn(
-              "w-8 h-8 flex items-center justify-center rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-90 border shadow-sm",
-              theme === 'dark' ? "bg-zinc-900 border-zinc-850/60 text-slate-400 hover:text-indigo-400" : "bg-slate-50 border-slate-100 text-slate-500 hover:bg-slate-100 hover:text-indigo-650"
+        {(canEdit || canDelete) && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            {canEdit && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleEditTransaction(t); }}
+                className={cn(
+                  "w-8 h-8 flex items-center justify-center rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-90 border shadow-sm",
+                  theme === 'dark' ? "bg-zinc-900 border-zinc-850/60 text-slate-400 hover:text-indigo-400" : "bg-slate-50 border-slate-100 text-slate-500 hover:bg-slate-100 hover:text-indigo-650"
+                )}
+                aria-label="Edit Transaction"
+              >
+                <Pencil size={12.5} />
+              </button>
             )}
-            aria-label="Edit Transaction"
-          >
-            <Pencil size={12.5} />
-          </button>
-          <button 
-            onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }}
-            className={cn(
-              "w-8 h-8 flex items-center justify-center rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-90 border shadow-sm",
-              theme === 'dark' ? "bg-zinc-900 border-zinc-850/60 text-rose-400 hover:text-rose-500" : "bg-rose-50 border-rose-150 text-rose-500 hover:bg-rose-100 hover:text-rose-650"
+            {canDelete && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }}
+                className={cn(
+                  "w-8 h-8 flex items-center justify-center rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-90 border shadow-sm",
+                  theme === 'dark' ? "bg-zinc-900 border-zinc-850/60 text-rose-400 hover:text-rose-500" : "bg-rose-50 border-rose-150 text-rose-500 hover:bg-rose-100 hover:text-rose-650"
+                )}
+                aria-label="Delete Transaction"
+              >
+                <Trash2 size={12.5} />
+              </button>
             )}
-            aria-label="Delete Transaction"
-          >
-            <Trash2 size={12.5} />
-          </button>
-        </div>
+          </div>
+        )}
       </div>
     </motion.div>
   );
@@ -1112,7 +1133,10 @@ const DesktopTransactionRow = React.memo(({
   setPreviewZoom,
   theme,
   index,
-  isJustEdited
+  isJustEdited,
+  canEdit = true,
+  canDelete = true,
+  canSelect = true
 }: {
   t: Transaction;
   runningBalance: number;
@@ -1130,6 +1154,9 @@ const DesktopTransactionRow = React.memo(({
   theme: string;
   index: number;
   isJustEdited?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canSelect?: boolean;
 }) => {
   return (
     <motion.tr 
@@ -1156,20 +1183,22 @@ const DesktopTransactionRow = React.memo(({
         isCurrentlyDeleting && "pointer-events-none opacity-50"
       )}
     >
-      <td className="px-3 sm:px-6 py-4">
-        <button 
-          type="button"
-          onClick={() => toggleSelectTransaction(t.id)}
-          className={cn(
-            "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
-            selected
-              ? "bg-indigo-600 border-indigo-600 text-white"
-              : "border-slate-300 dark:border-slate-700 group-hover:border-indigo-500"
-          )}
-        >
-          {selected && <CheckSquare size={14} />}
-        </button>
-      </td>
+      {canSelect && (
+        <td className="px-3 sm:px-6 py-4">
+          <button 
+            type="button"
+            onClick={() => toggleSelectTransaction(t.id)}
+            className={cn(
+              "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
+              selected
+                ? "bg-indigo-600 border-indigo-600 text-white"
+                : "border-slate-300 dark:border-slate-700 group-hover:border-indigo-500"
+            )}
+          >
+            {selected && <CheckSquare size={14} />}
+          </button>
+        </td>
+      )}
       <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
         <p className={cn(
           "font-bold text-sm",
@@ -1256,28 +1285,38 @@ const DesktopTransactionRow = React.memo(({
         <span>{formatCurrency(runningBalance)}</span>
       </td>
       <td className="px-3 sm:px-6 py-4">
-        <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button 
-            type="button"
-            onClick={() => handleEditTransaction(t)}
-            className={cn(
-              "p-1.5 text-slate-400 rounded-lg transition-all cursor-pointer",
-              theme === 'dark' ? "hover:text-indigo-400 hover:bg-indigo-900/20" : "hover:text-indigo-600 hover:bg-indigo-50"
+        {(canEdit || canDelete) ? (
+          <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            {canEdit && (
+              <button 
+                type="button"
+                onClick={() => handleEditTransaction(t)}
+                className={cn(
+                  "p-1.5 text-slate-400 rounded-lg transition-all cursor-pointer",
+                  theme === 'dark' ? "hover:text-indigo-400 hover:bg-indigo-900/20" : "hover:text-indigo-600 hover:bg-indigo-50"
+                )}
+                aria-label="Edit Transaction"
+              >
+                <Pencil size={16} />
+              </button>
             )}
-          >
-            <Pencil size={16} />
-          </button>
-          <button 
-            type="button"
-            onClick={() => handleDeleteTransaction(t.id)}
-            className={cn(
-              "p-1.5 text-slate-400 rounded-lg transition-all cursor-pointer",
-              theme === 'dark' ? "hover:text-rose-400 hover:bg-rose-900/20" : "hover:text-rose-600 hover:bg-rose-50"
+            {canDelete && (
+              <button 
+                type="button"
+                onClick={() => handleDeleteTransaction(t.id)}
+                className={cn(
+                  "p-1.5 text-slate-400 rounded-lg transition-all cursor-pointer",
+                  theme === 'dark' ? "hover:text-rose-400 hover:bg-rose-900/20" : "hover:text-rose-600 hover:bg-rose-50"
+                )}
+                aria-label="Delete Transaction"
+              >
+                <Trash2 size={16} />
+              </button>
             )}
-          >
-            <Trash2 size={16} />
-          </button>
-        </div>
+          </div>
+        ) : (
+          <div className="text-center text-slate-300 dark:text-zinc-700 text-xs font-mono">-</div>
+        )}
       </td>
     </motion.tr>
   );
@@ -1728,6 +1767,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [isEntriesLoading, setIsEntriesLoading] = useState(false);
   const [showOfflineDialog, setShowOfflineDialog] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
 
   // Network state observer
   useEffect(() => {
@@ -1777,7 +1817,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     if (isLoading && books.length === 0) return;
 
     if (bookSlug && books.length > 0) {
-      const foundBook = books.find(b => getBookSlug(b.name, b.id) === bookSlug);
+      const foundBook = books.find(b => getBookSlug(b.name, b.id) === bookSlug || b.id === bookSlug);
       if (foundBook) {
         if (activeBookId !== foundBook.id) {
           setActiveBookId(foundBook.id);
@@ -2544,25 +2584,25 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           e.preventDefault();
           setIsCreatingBook(true);
           lastKey = '';
-        } else if (key === 'I' && activeBookId) {
+        } else if (key === 'I' && activeBookId && canAddEntries(currentUserRole)) {
           e.preventDefault();
           setShowForm('in');
           setTransactionDate(safeToDateTimeLocal(new Date()));
           lastKey = '';
-        } else if (key === 'O' && activeBookId) {
+        } else if (key === 'O' && activeBookId && canAddEntries(currentUserRole)) {
           e.preventDefault();
           setShowForm('out');
           setTransactionDate(safeToDateTimeLocal(new Date()));
           lastKey = '';
         }
       } else if (lastKey === 'A') {
-        if (key === 'U' && activeBookId) {
+        if (key === 'U' && activeBookId && canAddEntries(currentUserRole)) {
           e.preventDefault();
           setShowAiWarning(true);
           lastKey = '';
         }
       } else if (lastKey === 'I') {
-        if (key === 'M') {
+        if (key === 'M' && canAddEntries(currentUserRole)) {
           e.preventDefault();
           setShowImportModal(true);
           setImportCode('');
@@ -3095,14 +3135,68 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     setIsLoading(true);
     try {
-      console.log('[fetchData] Loading cashbooks and entries directly from Supabase...');
-      // 1. Fetch cashbooks
-      const { data: rawCashbooks, error: cbErr } = await supabase
-        .from('cashbooks')
-        .select('*')
-        .eq('user_id', session.user.id);
+      console.log('[fetchData] Loading cashbooks and entries...');
+      const userEmail = session.user.email ? session.user.email.toLowerCase() : '';
+      let rawCashbooksList: any[] = [];
 
-      if (cbErr) throw cbErr;
+      // 1. Fetch all user cashbooks (owned + member/joined) via RBAC Service Backend
+      try {
+        const rbacRes = await fetch(`/api/rbac/user-cashbooks?userId=${session.user.id}&userEmail=${encodeURIComponent(userEmail)}`);
+        if (rbacRes.ok) {
+          const rbacJson = await rbacRes.json();
+          if (rbacJson.success && Array.isArray(rbacJson.cashbooks)) {
+            rawCashbooksList = rbacJson.cashbooks;
+          }
+        }
+      } catch (rbacErr) {
+        console.warn('[Dashboard] Error calling rbac user-cashbooks:', rbacErr);
+      }
+
+      // 2. Direct Supabase fallback / merge for owned cashbooks
+      try {
+        const { data: rawOwnedCashbooks } = await supabase
+          .from('cashbooks')
+          .select('*')
+          .eq('user_id', session.user.id);
+
+        if (rawOwnedCashbooks && rawOwnedCashbooks.length > 0) {
+          const existingIds = new Set(rawCashbooksList.map(c => c.id));
+          for (const cb of rawOwnedCashbooks) {
+            if (!existingIds.has(cb.id)) {
+              rawCashbooksList.push(cb);
+            }
+          }
+        }
+      } catch (cbErr) {
+        console.warn('[Dashboard] Direct owned cashbooks query note:', cbErr);
+      }
+
+      // 3. Direct Supabase query for cashbook_members in case there are additional member cashbooks
+      try {
+        const { data: memberRows } = await supabase
+          .from('cashbook_members')
+          .select('cashbook_id')
+          .or(`user_id.eq.${session.user.id},email.ilike.${userEmail}`)
+          .in('status', ['Active', 'active', 'Accepted', 'accepted']);
+
+        if (memberRows && memberRows.length > 0) {
+          const existingIds = new Set(rawCashbooksList.map(c => c.id));
+          const missingIds = memberRows.map(m => m.cashbook_id).filter(id => id && !existingIds.has(id));
+
+          if (missingIds.length > 0) {
+            const { data: memberCashbooks } = await supabase
+              .from('cashbooks')
+              .select('*')
+              .in('id', missingIds);
+
+            if (memberCashbooks && memberCashbooks.length > 0) {
+              rawCashbooksList = [...rawCashbooksList, ...memberCashbooks];
+            }
+          }
+        }
+      } catch (memFetchErr) {
+        console.warn('[Dashboard] Direct cashbook_members query note:', memFetchErr);
+      }
 
       // Extract pending undo deletion IDs to prevent deleted items from reappearing before commit
       const pending = pendingActionRef.current;
@@ -3132,18 +3226,50 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         }
       }
 
-      const cashbooks = (rawCashbooks || []).filter(cb => cb && cb.id && !pendingBookIds.has(cb.id));
+      const cashbooks = (rawCashbooksList || []).filter(cb => cb && cb.id && !pendingBookIds.has(cb.id));
 
       if (cashbooks && cashbooks.length > 0) {
         // Fetch all entries for these cashbooks in a single query
         const cashbookIds = cashbooks.map(cb => cb.id);
-        const { data: entries, error: entErr } = await supabase
-          .from('entries')
-          .select('*')
-          .in('cashbook_id', cashbookIds)
-          .order('date', { ascending: false });
+        let entries: any[] = [];
+        try {
+          const { data: dbEntries, error: entErr } = await supabase
+            .from('entries')
+            .select('*')
+            .in('cashbook_id', cashbookIds)
+            .order('date', { ascending: false });
 
-        if (entErr) throw entErr;
+          if (!entErr && dbEntries) {
+            entries = dbEntries;
+          } else if (entErr) {
+            console.warn('[Dashboard] Direct entries select warning, will check RBAC endpoint:', entErr.message);
+          }
+        } catch (e: any) {
+          console.warn('[Dashboard] Direct entries select exception:', e.message);
+        }
+
+        // Secondary fallback / augmentation via RBAC Service Backend to ensure member entries are fully loaded
+        try {
+          const rbacEntRes = await fetch('/api/rbac/cashbook-entries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cashbookIds, cashbookId: cashbookIds })
+          });
+
+          if (rbacEntRes.ok) {
+            const rbacEntJson = await rbacEntRes.json();
+            if (rbacEntJson.success && Array.isArray(rbacEntJson.entries)) {
+              const existingEntryIds = new Set(entries.map(e => e.id));
+              for (const re of rbacEntJson.entries) {
+                if (re && re.id && !existingEntryIds.has(re.id)) {
+                  entries.push(re);
+                }
+              }
+            }
+          }
+        } catch (rbacEntErr) {
+          console.warn('[Dashboard] RBAC entries fallback note:', rbacEntErr);
+        }
 
         const entriesMapByCashbook = new Map<string, any[]>();
         const allEntryIds: string[] = [];
@@ -3233,7 +3359,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         // Solve loading delay by resolving activeBookId immediately if not set
         if (bookSlugRef.current) {
-          const foundBook = mappedBooks.find(b => getBookSlug(b.name, b.id) === bookSlugRef.current);
+          const foundBook = mappedBooks.find(b => getBookSlug(b.name, b.id) === bookSlugRef.current || b.id === bookSlugRef.current);
           if (foundBook) {
             setActiveBookIdState(foundBook.id);
           }
@@ -3249,9 +3375,37 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
   }, [session]);
 
-  // Fetch data from Supabase init
+  // Fetch data from Supabase init, on invitation accepted, and periodic background refresh
   useEffect(() => {
     fetchData();
+
+    const handleCashbookRefresh = () => {
+      fetchData(true);
+    };
+
+    window.addEventListener('trackbook_refresh_cashbooks', handleCashbookRefresh);
+    window.addEventListener('cashbook_updated', handleCashbookRefresh);
+
+    // Periodic sync check every 12 seconds so entries added by other members sync live
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchData(true);
+      }
+    }, 12000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('trackbook_refresh_cashbooks', handleCashbookRefresh);
+      window.removeEventListener('cashbook_updated', handleCashbookRefresh);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [session, fetchData]);
 
   // Automatic migration utility for legacy base64 images in database tables
@@ -3446,6 +3600,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       transactions: Array.from(uniques.values())
     };
   }, [books, activeBookId]);
+
+  const currentUserRole: Role = useMemo(() => {
+    if (!activeBook) return 'Primary Admin';
+    if ((activeBook as any).user_id === session?.user?.id || (activeBook as any).userId === session?.user?.id || (activeBook as any).isOwner === true) {
+      return 'Primary Admin';
+    }
+    const r = (activeBook as any).userRole || (activeBook as any).role || (activeBook as any).member_role;
+    if (r && ALL_ROLES.includes(r as Role)) {
+      return r as Role;
+    }
+    return 'Viewer';
+  }, [activeBook, session]);
 
   const filteredBooks = useMemo(() => {
     const uniques = new Map<string, typeof books[0]>();
@@ -4098,8 +4264,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         const firstUpdate = await supabase
           .from('entries')
           .update({ ...payload, image_layout: imageLayout })
-          .eq('id', editingTransaction.id)
-          .eq('user_id', session.user.id);
+          .eq('id', editingTransaction.id);
         entryError = firstUpdate.error;
         
         if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
@@ -4107,8 +4272,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           const secondUpdate = await supabase
             .from('entries')
             .update(payload)
-            .eq('id', editingTransaction.id)
-            .eq('user_id', session.user.id);
+            .eq('id', editingTransaction.id);
           entryError = secondUpdate.error;
 
           if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
@@ -4119,20 +4283,40 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             const thirdUpdate = await supabase
               .from('entries')
               .update({ ...payloadNoUser, image_layout: imageLayout })
-              .eq('id', editingTransaction.id)
-              .eq('user_id', session.user.id);
+              .eq('id', editingTransaction.id);
             entryError = thirdUpdate.error;
 
             if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
               const fourthUpdate = await supabase
                 .from('entries')
                 .update(payloadNoUser)
-                .eq('id', editingTransaction.id)
-                .eq('user_id', session.user.id);
+                .eq('id', editingTransaction.id);
               entryError = fourthUpdate.error;
             }
           }
         }
+
+        // RBAC Service fallback if direct Supabase update fails
+        if (entryError) {
+          try {
+            const rbacSaveRes = await fetch('/api/rbac/save-entry', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                entry: { id: editingTransaction.id, cashbook_id: activeBookId, ...payload, image_layout: imageLayout },
+                userId: session.user.id,
+                userEmail: session.user.email
+              })
+            });
+            if (rbacSaveRes.ok) {
+              const rbacSaveJson = await rbacSaveRes.json();
+              if (rbacSaveJson.success) {
+                entryError = null;
+              }
+            }
+          } catch (_) {}
+        }
+
         if (entryError) throw entryError;
 
         // Synchronize attachment links
@@ -4339,6 +4523,27 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               }
             }
           }
+        }
+
+        // RBAC Service fallback for insert
+        if (entryError) {
+          try {
+            const rbacSaveRes = await fetch('/api/rbac/save-entry', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                entry: { id: tempId, cashbook_id: activeBookId, ...payload, image_layout: imageLayout },
+                userId: session.user.id,
+                userEmail: session.user.email
+              })
+            });
+            if (rbacSaveRes.ok) {
+              const rbacSaveJson = await rbacSaveRes.json();
+              if (rbacSaveJson.success) {
+                entryError = null;
+              }
+            }
+          } catch (_) {}
         }
 
         if (entryError) throw entryError;
@@ -6556,6 +6761,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <Search size={20} />
               </button>
 
+              {/* Notification Bell */}
+              <NotificationBell session={session} theme={theme} onInviteAccepted={fetchData} />
+
               {/* Inline Download Center Trigger */}
               <DownloadCenterTrigger theme={theme} isOpen={showDownloadCenter} setIsOpen={setShowDownloadCenter} />
 
@@ -6945,24 +7153,76 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   >
                     <ArrowLeft size={22} className="sm:w-[24px] sm:h-[24px]" />
                   </button>
-                  <div className="flex items-center font-sans font-bold text-base sm:text-lg tracking-tight select-none leading-none">
+                  <div className="flex items-center gap-2 font-sans font-bold text-base sm:text-lg tracking-tight select-none leading-none min-w-0">
                     <h2 className={cn(
-                      "font-black truncate max-w-[160px] sm:max-w-[280px] md:max-w-none lg:text-[clamp(1.125rem,2.2vw,1.5rem)] transition-colors duration-300 text-slate-900 dark:text-slate-100",
+                      "font-black truncate max-w-[140px] xs:max-w-[180px] sm:max-w-[280px] md:max-w-none lg:text-[clamp(1.125rem,2.2vw,1.5rem)] transition-colors duration-300 text-slate-900 dark:text-slate-100",
                     )}>{activeBook?.name}</h2>
+                    {currentUserRole && (
+                      <span className={cn(
+                        "text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md border tracking-wider shrink-0 select-none shadow-2xs",
+                        (currentUserRole === 'Primary Admin' || currentUserRole === 'Admin')
+                          ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/25"
+                          : currentUserRole === 'Book Admin'
+                          ? "bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/25"
+                          : currentUserRole === 'Data Operator'
+                          ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/25"
+                          : "bg-slate-500/10 text-slate-600 dark:text-zinc-400 border-slate-500/25"
+                      )}>
+                        {currentUserRole === 'Primary Admin' ? 'Admin' : currentUserRole}
+                      </span>
+                    )}
                   </div>
                 </div>
                 </div>
                 
-                {/* Right actions: Download Center Trigger + 3-Dots Menu */}
-                <div className="flex items-center gap-2 sm:gap-3">
-                  <DownloadCenterTrigger theme={theme} isOpen={showDownloadCenter} setIsOpen={setShowDownloadCenter} />
+                {/* Right actions: Import Entries + Add Member Icon (Admin Blue) + 3-Lines Menu */}
+                <div className="flex items-center gap-1 sm:gap-1.5">
+                  {canAddEntries(currentUserRole) && (
+                    <button
+                      onClick={() => {
+                        vibrate();
+                        setShowImportModal(true);
+                      }}
+                      title="Import Entries"
+                      className={cn(
+                        "hidden md:flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 duration-150 whitespace-nowrap",
+                        theme === 'dark'
+                          ? "bg-amber-950/30 border-amber-900/50 text-amber-400 hover:bg-amber-950/50"
+                          : "bg-amber-50/80 border-amber-200/80 text-amber-800 hover:bg-amber-100/80"
+                      )}
+                    >
+                      <DownloadCloud size={15} className="text-amber-500 shrink-0" />
+                      <span className="font-bold">Import Entries</span>
+                    </button>
+                  )}
 
-                  {/* 3-Dots Overflow/Book Actions Menu */}
+                  {/* Add Member Icon (Admin Blue, No Border, positioned right next to 3-lines menu) */}
+                  {canManageMembers(currentUserRole) && (
+                    <button
+                      onClick={() => {
+                        vibrate();
+                        const slug = getBookSlug(activeBook?.name || '', activeBook?.id || '');
+                        navigate(`/cashbooks/${slug}/members`);
+                      }}
+                      title="Add Member / Members & Access"
+                      aria-label="Add Member"
+                      className={cn(
+                        "flex items-center justify-center w-10 h-10 rounded-xl transition-all cursor-pointer active:scale-95 duration-150 shrink-0 border-0 outline-none",
+                        currentTabName === 'members'
+                          ? "bg-blue-600 text-white shadow-blue-500/20"
+                          : "text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                      )}
+                    >
+                      <UserPlus size={20} />
+                    </button>
+                  )}
+
+                  {/* 3-Lines Overflow/Book Actions Menu */}
                   <div className="relative" ref={bookMenuRef}>
                   <button 
                     onClick={() => setShowBookMenu(!showBookMenu)}
                     className={cn(
-                      "flex items-center justify-center w-10 h-10 rounded-xl transition-all cursor-pointer active:scale-95 duration-150 hover:bg-slate-100 dark:hover:bg-slate-800/60",
+                      "flex items-center justify-center w-10 h-10 rounded-xl transition-all cursor-pointer active:scale-95 duration-150 hover:bg-slate-100 dark:hover:bg-slate-800/60 border-0 outline-none",
                       theme === 'dark' 
                         ? "text-slate-200" 
                         : "text-slate-600"
@@ -7020,16 +7280,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           );
                         })}
 
-                        <div className="border-t border-slate-100 dark:border-zinc-900/60 my-1.5" />
+                        <div className="border-t border-slate-100 dark:border-zinc-900/60 my-1.5 md:hidden" />
 
-                        {/* Actions Section */}
-                        <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500 mb-1">
+                        {/* Actions Section - Mobile View */}
+                        <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500 mb-1 md:hidden">
                           Book Actions
                         </div>
                         <button 
                           onClick={() => { setShowBookMenu(false); setShowImportModal(true); }}
                           className={cn(
-                            "w-full flex items-center gap-3 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs",
+                            "w-full flex md:hidden items-center gap-3 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs",
                             theme === 'dark' 
                               ? "bg-amber-950/20 border-amber-900/40 text-amber-400 hover:bg-amber-950/45" 
                               : "bg-amber-50/50 border-amber-100/70 text-amber-800 hover:bg-amber-50"
@@ -7097,56 +7357,63 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
 
               {/* Action Buttons Row (Desktop Only) */}
-              <div className="hidden lg:flex items-center gap-3">
-                <button
-                  onClick={() => { vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
-                  className={cn(
-                    "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
-                    theme === 'dark' 
-                      ? "bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/40" 
-                      : "bg-emerald-50/50 border border-emerald-150 text-emerald-800 hover:bg-emerald-100/70 shadow-sm shadow-emerald-50/20"
-                  )}
-                >
-                  <Plus size={20} />
-                  Cash In
-                  <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
-                    Press <kbd className="bg-slate-700 px-1 rounded">C</kbd> + <kbd className="bg-slate-700 px-1 rounded">I</kbd>
-                  </span>
-                </button>
-                <button
-                  onClick={() => { vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
-                  className={cn(
-                    "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
-                    theme === 'dark' 
-                      ? "bg-rose-900/20 text-rose-400 hover:bg-rose-900/40" 
-                      : "bg-rose-50/50 border border-rose-150 text-rose-800 hover:bg-rose-100/70 shadow-sm shadow-rose-50/20"
-                  )}
-                >
-                  <Minus size={20} />
-                  Cash Out
-                  <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
-                    Press <kbd className="bg-slate-700 px-1 rounded">C</kbd> + <kbd className="bg-slate-700 px-1 rounded">O</kbd>
-                  </span>
-                </button>
-                <button
-                  onClick={() => { 
-                    vibrate(); 
-                    setShowAiWarning(true);
-                  }}
-                  className={cn(
-                    "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
-                    theme === 'dark' 
-                      ? "bg-indigo-900/20 text-indigo-400 hover:bg-indigo-900/40" 
-                      : "bg-indigo-50/40 border border-indigo-150 text-indigo-750 hover:bg-indigo-100 shadow-sm shadow-indigo-100/20"
-                  )}
-                >
-                  <Upload size={20} className="text-indigo-650 dark:text-indigo-400 shrink-0" />
-                  AI Upload
-                  <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
-                    Press <kbd className="bg-slate-700 px-1 rounded">A</kbd> + <kbd className="bg-slate-700 px-1 rounded">U</kbd>
-                  </span>
-                </button>
-              </div>
+              {canAddEntries(currentUserRole) ? (
+                <div className="hidden lg:flex items-center gap-3">
+                  <button
+                    onClick={() => { vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
+                    className={cn(
+                      "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
+                      theme === 'dark' 
+                        ? "bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/40" 
+                        : "bg-emerald-50/50 border border-emerald-150 text-emerald-800 hover:bg-emerald-100/70 shadow-sm shadow-emerald-50/20"
+                    )}
+                  >
+                    <Plus size={20} />
+                    Cash In
+                    <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
+                      Press <kbd className="bg-slate-700 px-1 rounded">C</kbd> + <kbd className="bg-slate-700 px-1 rounded">I</kbd>
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => { vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
+                    className={cn(
+                      "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
+                      theme === 'dark' 
+                        ? "bg-rose-900/20 text-rose-400 hover:bg-rose-900/40" 
+                        : "bg-rose-50/50 border border-rose-150 text-rose-800 hover:bg-rose-100/70 shadow-sm shadow-rose-50/20"
+                    )}
+                  >
+                    <Minus size={20} />
+                    Cash Out
+                    <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
+                      Press <kbd className="bg-slate-700 px-1 rounded">C</kbd> + <kbd className="bg-slate-700 px-1 rounded">O</kbd>
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => { 
+                      vibrate(); 
+                      setShowAiWarning(true);
+                    }}
+                    className={cn(
+                      "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
+                      theme === 'dark' 
+                        ? "bg-indigo-900/20 text-indigo-400 hover:bg-indigo-900/40" 
+                        : "bg-indigo-50/40 border border-indigo-150 text-indigo-750 hover:bg-indigo-100 shadow-sm shadow-indigo-100/20"
+                    )}
+                  >
+                    <Upload size={20} className="text-indigo-650 dark:text-indigo-400 shrink-0" />
+                    AI Upload
+                    <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
+                      Press <kbd className="bg-slate-700 px-1 rounded">A</kbd> + <kbd className="bg-slate-700 px-1 rounded">U</kbd>
+                    </span>
+                  </button>
+                </div>
+              ) : (
+                <div className="hidden lg:flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-xs font-semibold text-slate-600 dark:text-zinc-400">
+                  <Eye size={16} className="text-indigo-500 shrink-0" />
+                  <span>Viewing as <strong>{currentUserRole}</strong> (Read-only). New entries, edits, and deletions are restricted.</span>
+                </div>
+              )}
 
               {/* Filters & Search Row */}
               <div className="flex flex-col lg:flex-row items-center gap-3 sm:gap-4">
@@ -7164,49 +7431,55 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   />
                 </div>                {/* Desktop Action & Filter Row */}
                 <div className="hidden lg:flex items-center gap-2 pb-1 sm:pb-0">
-                  {selectedTransactions.size === 0 ? (
-                    <button
-                      onClick={toggleSelectAll}
-                      className={cn(
-                        "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200",
-                        theme === 'dark' ? "bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm"
-                      )}
-                    >
-                      <Square size={16} />
-                      Select All
-                    </button>
-                  ) : (
+                  {currentUserRole !== 'Viewer' && (
                     <>
-                      <button
-                        onClick={() => setSelectedTransactions(new Set())}
-                        className={cn(
-                          "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm",
-                          theme === 'dark' && "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800"
-                        )}
-                      >
-                        <X size={16} />
-                        <span>Deselect All</span>
-                      </button>
-                      <button
-                        onClick={() => setShowShareModal(true)}
-                        className={cn(
-                          "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
-                          theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
-                        )}
-                      >
-                        <Share size={16} />
-                        Share Entries
-                      </button>
-                      <button
-                        onClick={() => { setShowBulkTransactionDeleteConfirm(true); setDeleteConfirmed(false); }}
-                        className={cn(
-                          "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
-                          theme === 'dark' ? "shadow-none" : "shadow-lg shadow-rose-100"
-                        )}
-                      >
-                        <Trash size={16} />
-                        Delete ({selectedTransactions.size})
-                      </button>
+                      {selectedTransactions.size === 0 ? (
+                        <button
+                          onClick={toggleSelectAll}
+                          className={cn(
+                            "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200",
+                            theme === 'dark' ? "bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm"
+                          )}
+                        >
+                          <Square size={16} />
+                          Select All
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => setSelectedTransactions(new Set())}
+                            className={cn(
+                              "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm",
+                              theme === 'dark' && "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800"
+                            )}
+                          >
+                            <X size={16} />
+                            <span>Deselect All</span>
+                          </button>
+                          <button
+                            onClick={() => setShowShareModal(true)}
+                            className={cn(
+                              "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
+                              theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
+                            )}
+                          >
+                            <Share size={16} />
+                            Share Entries
+                          </button>
+                          {canDeleteEntries(currentUserRole) && (
+                            <button
+                              onClick={() => { setShowBulkTransactionDeleteConfirm(true); setDeleteConfirmed(false); }}
+                              className={cn(
+                                "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
+                                theme === 'dark' ? "shadow-none" : "shadow-lg shadow-rose-100"
+                              )}
+                            >
+                              <Trash size={16} />
+                              Delete ({selectedTransactions.size})
+                            </button>
+                          )}
+                        </>
+                      )}
                     </>
                   )}
                   <div className="relative min-w-[120px]">
@@ -7449,8 +7722,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                   theme === 'dark' ? "text-slate-500" : "text-slate-600"
                                 )}>{date}</h4>
                               </div>
-                              
-                              {transactions.map((t) => (
+                                                        {transactions.map((t) => (
                                 <MobileTransactionRow
                                   key={t.id}
                                   t={t}
@@ -7471,6 +7743,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                   theme={theme}
                                   index={visibleSlice.indexOf(t)}
                                   isJustEdited={justEditedTransactionId === t.id}
+                                  canEdit={canEditEntries(currentUserRole)}
+                                  canDelete={canDeleteEntries(currentUserRole)}
+                                  canSelect={currentUserRole !== 'Viewer'}
                                 />
                               ))}
                             </div>
@@ -7503,24 +7778,26 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             "text-xs font-bold uppercase tracking-wider transition-colors duration-300",
                             theme === 'dark' ? "bg-slate-800/50 text-slate-300" : "bg-slate-50 text-slate-400"
                           )}>
-                            <th className="px-3 sm:px-6 py-4 w-12">
-                              <button 
-                                onClick={toggleSelectAll}
-                                className={cn(
-                                  "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
-                                  selectedTransactions.size === filteredTransactions.length && filteredTransactions.length > 0
-                                    ? "bg-indigo-600 border-indigo-600 text-white"
-                                    : "border-slate-300 dark:border-slate-700"
-                                )}
-                              >
-                                {selectedTransactions.size === filteredTransactions.length && filteredTransactions.length > 0 && <CheckSquare size={14} />}
-                              </button>
-                            </th>
+                            {currentUserRole !== 'Viewer' && (
+                              <th className="px-3 sm:px-6 py-4 w-12">
+                                <button 
+                                  onClick={toggleSelectAll}
+                                  className={cn(
+                                    "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
+                                    selectedTransactions.size === filteredTransactions.length && filteredTransactions.length > 0
+                                      ? "bg-indigo-600 border-indigo-600 text-white"
+                                      : "border-slate-300 dark:border-slate-700"
+                                  )}
+                                >
+                                  {selectedTransactions.size === filteredTransactions.length && filteredTransactions.length > 0 && <CheckSquare size={14} />}
+                                </button>
+                              </th>
+                            )}
                              <th className="px-3 sm:px-6 py-4">
-                               <div className="flex items-center gap-2">
-                                 Date & Time
-                               </div>
-                             </th>
+                                <div className="flex items-center gap-2">
+                                  Date & Time
+                                </div>
+                              </th>
                             <th className="px-3 sm:px-6 py-4">Details</th>
                             <th 
                               className="px-3 sm:px-6 py-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
@@ -7550,7 +7827,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           )}
                         >{(isEntriesLoading || (activeBookId !== null && !entriesCache.has(activeBookId))) && filteredTransactions.length === 0 ? (
                             <tr>
-                              <td colSpan={9} className="px-6 py-20">
+                              <td colSpan={currentUserRole !== 'Viewer' ? 9 : 8} className="px-6 py-20">
                                 <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
                                   <div className="relative flex items-center justify-center">
                                     <div className="w-12 h-12 rounded-full border-2 border-indigo-500/20 animate-ping absolute" />
@@ -7567,7 +7844,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             </tr>
                           ) : filteredTransactions.length === 0 ? (
                             <tr>
-                              <td colSpan={9} className="px-6 py-20 text-center">
+                              <td colSpan={currentUserRole !== 'Viewer' ? 9 : 8} className="px-6 py-20 text-center">
                                 <div className="flex flex-col items-center justify-center space-y-3 max-w-md mx-auto">
                                   {isOffline ? (
                                     <>
@@ -7600,7 +7877,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             <>
                               {desktopPaddingTop > 0 && (
                                 <tr style={{ height: `${desktopPaddingTop}px` }}>
-                                  <td colSpan={9} style={{ padding: 0, height: `${desktopPaddingTop}px` }} />
+                                  <td colSpan={currentUserRole !== 'Viewer' ? 9 : 8} style={{ padding: 0, height: `${desktopPaddingTop}px` }} />
                                 </tr>
                               )}
                               {pagedTransactions.slice(desktopStart, desktopEnd + 1).map((t, index) => (
@@ -7622,11 +7899,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                   theme={theme}
                                   index={index}
                                   isJustEdited={justEditedTransactionId === t.id}
+                                  canEdit={canEditEntries(currentUserRole)}
+                                  canDelete={canDeleteEntries(currentUserRole)}
+                                  canSelect={currentUserRole !== 'Viewer'}
                                 />
                               ))}
                               {desktopPaddingBottom > 0 && (
                                 <tr style={{ height: `${desktopPaddingBottom}px` }}>
-                                  <td colSpan={9} style={{ padding: 0, height: `${desktopPaddingBottom}px` }} />
+                                  <td colSpan={currentUserRole !== 'Viewer' ? 9 : 8} style={{ padding: 0, height: `${desktopPaddingBottom}px` }} />
                                 </tr>
                               )}
                             </>
@@ -7656,59 +7936,61 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
 
               {/* Mobile Sticky Bottom Buttons */}
-              <div className={cn(
-                "lg:hidden fixed bottom-0 left-0 right-0 p-4 pb-6 backdrop-blur-lg border-t z-40 transition-colors duration-300",
-                theme === 'dark' ? "bg-slate-900/80 border-slate-800" : "bg-white/80 border-slate-100"
-              )}>
-                <div className="w-full font-sans">
-                  <div className="flex flex-col gap-3 w-full">
-                    {/* Row 1: AI UPLOAD */}
-                    <button
-                      onClick={() => { 
-                        vibrate(); 
-                        setShowAiWarning(true);
-                      }}
-                      className={cn(
-                        "w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
-                        theme === 'dark' 
-                          ? "bg-indigo-950/25 text-indigo-400 border-indigo-900/50 hover:bg-indigo-950/40" 
-                          : "bg-white border-indigo-200 text-indigo-650 shadow-sm shadow-indigo-100/30 hover:bg-indigo-50"
-                      )}
-                    >
-                      <Upload size={18} className="shrink-0" />
-                      AI UPLOAD
-                    </button>
+              {canAddEntries(currentUserRole) && (
+                <div className={cn(
+                  "lg:hidden fixed bottom-0 left-0 right-0 p-4 pb-6 backdrop-blur-lg border-t z-40 transition-colors duration-300",
+                  theme === 'dark' ? "bg-slate-900/80 border-slate-800" : "bg-white/80 border-slate-100"
+                )}>
+                  <div className="w-full font-sans">
+                    <div className="flex flex-col gap-3 w-full">
+                      {/* Row 1: AI UPLOAD */}
+                      <button
+                        onClick={() => { 
+                          vibrate(); 
+                          setShowAiWarning(true);
+                        }}
+                        className={cn(
+                          "w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
+                          theme === 'dark' 
+                            ? "bg-indigo-950/25 text-indigo-400 border-indigo-900/50 hover:bg-indigo-950/40" 
+                            : "bg-white border-indigo-200 text-indigo-650 shadow-sm shadow-indigo-100/30 hover:bg-indigo-50"
+                        )}
+                      >
+                        <Upload size={18} className="shrink-0" />
+                        AI UPLOAD
+                      </button>
 
-                    {/* Row 2: CASH IN & CASH OUT */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={() => { vibrate(); vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
-                        className={cn(
-                          "flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
-                          theme === 'dark' 
-                            ? "bg-emerald-950/20 text-emerald-400 border-emerald-900/40 shadow-none hover:bg-emerald-950/35" 
-                            : "bg-white border-emerald-200 text-emerald-700 shadow-sm shadow-emerald-100/30 hover:bg-emerald-50"
-                        )}
-                      >
-                        <Plus size={16} />
-                        CASH IN
-                      </button>
-                      <button
-                        onClick={() => { vibrate(); vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
-                        className={cn(
-                          "flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
-                          theme === 'dark' 
-                            ? "bg-rose-950/20 text-rose-400 border-rose-900/40 shadow-none hover:bg-rose-950/35" 
-                            : "bg-white border-rose-200 text-rose-700 shadow-sm shadow-rose-100/30 hover:bg-rose-50"
-                        )}
-                      >
-                        <Minus size={16} />
-                        CASH OUT
-                      </button>
+                      {/* Row 2: CASH IN & CASH OUT */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          onClick={() => { vibrate(); vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
+                          className={cn(
+                            "flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
+                            theme === 'dark' 
+                              ? "bg-emerald-950/20 text-emerald-400 border-emerald-900/40 shadow-none hover:bg-emerald-950/35" 
+                              : "bg-white border-emerald-200 text-emerald-700 shadow-sm shadow-emerald-100/30 hover:bg-emerald-50"
+                          )}
+                        >
+                          <Plus size={16} />
+                          CASH IN
+                        </button>
+                        <button
+                          onClick={() => { vibrate(); vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
+                          className={cn(
+                            "flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
+                            theme === 'dark' 
+                              ? "bg-rose-950/20 text-rose-400 border-rose-900/40 shadow-none hover:bg-rose-950/35" 
+                              : "bg-white border-rose-200 text-rose-700 shadow-sm shadow-rose-100/30 hover:bg-rose-50"
+                          )}
+                        >
+                          <Minus size={16} />
+                          CASH OUT
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              )}
               </>
             )}
 
@@ -8494,11 +8776,39 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   )}
                 </div>
 
-                {/* Quick Export Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Quick Export & Share Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* WhatsApp Share Card */}
                   <div 
                     onClick={() => {
                       if (activeBook) {
+                        setShowWhatsAppModal(true);
+                      }
+                    }}
+                    className={cn(
+                      "p-6 rounded-3xl border transition-all cursor-pointer shadow-sm hover:scale-[1.01] active:scale-[0.99] duration-150 flex items-center gap-4 group col-span-1 sm:col-span-3 lg:col-span-1",
+                      theme === 'dark' ? "bg-zinc-950 hover:bg-emerald-950/20 border-emerald-900/40" : "bg-emerald-50/40 hover:bg-emerald-50/80 border-emerald-200/80"
+                    )}
+                  >
+                    <div className="p-3 bg-emerald-600 text-white rounded-xl shadow-xs shrink-0">
+                      <MessageSquare size={24} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-sm text-slate-800 dark:text-slate-100">Share Reports to WhatsApp</h4>
+                        <span className="px-1.5 py-0.5 text-[9px] font-black uppercase bg-emerald-600 text-white rounded-md tracking-wider shrink-0">NEW</span>
+                      </div>
+                      <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">Send Excel and PDF reports directly to any WhatsApp number.</p>
+                    </div>
+                  </div>
+
+                  <div 
+                    onClick={() => {
+                      if (activeBook) {
+                        if (!filteredTransactions || filteredTransactions.length === 0) {
+                          alert('No transactions found to export in this cashbook.');
+                          return;
+                        }
                         backgroundExportManager.enqueueExcelTask(activeBook.id, activeBook.name, filteredTransactions);
                         setShowDownloadCenter(true);
                       }
@@ -8520,6 +8830,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   <div 
                     onClick={() => {
                       if (activeBook) {
+                        if (!filteredTransactions || filteredTransactions.length === 0) {
+                          alert('No transactions found to export in this cashbook.');
+                          return;
+                        }
                         backgroundExportManager.enqueueTask(activeBook.id, activeBook.name, filteredTransactions, true);
                         setShowDownloadCenter(true);
                       }
@@ -8538,6 +8852,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {currentTabName === 'members' && activeBook && (
+              <div className="max-w-6xl mx-auto py-4 px-2 sm:px-4 pb-20">
+                <MembersAccessManagement
+                  cashbookId={activeBook.id}
+                  cashbookName={activeBook.name}
+                  theme={theme}
+                  currentUserRole={currentUserRole}
+                  currentUserId={session?.user?.id || 'u1'}
+                  currentUserName={userName || 'Siva'}
+                  currentUserEmail={session?.user?.email || 'siva@gmail.com'}
+                />
               </div>
             )}
 
@@ -13038,6 +13366,16 @@ Open TrackBook → Import Shared Entries`)}`}
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* WhatsApp Share Modal */}
+      <ShareWhatsAppModal
+        isOpen={showWhatsAppModal}
+        onClose={() => setShowWhatsAppModal(false)}
+        cashbookId={activeBook?.id || ''}
+        cashbookName={activeBook?.name || ''}
+        filteredTransactions={filteredTransactions}
+        theme={theme}
+      />
     </div>
   );
 }

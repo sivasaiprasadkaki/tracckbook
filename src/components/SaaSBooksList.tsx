@@ -16,6 +16,8 @@ import {
   Eye, 
   Plus, 
   Search,
+  Users,
+  UserPlus,
   CheckCircle2,
   AlertCircle
 } from 'lucide-react';
@@ -294,6 +296,24 @@ export default function SaaSBooksList({
                           {/* Actions overflow */}
                           <td className="py-3.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-1.5">
+                              {/* Give Access CTA */}
+                              <button
+                                onClick={() => {
+                                  vibrate();
+                                  onSelectBook(book.id);
+                                }}
+                                className={cn(
+                                  "px-2 py-1 rounded text-[11px] font-bold flex items-center gap-1 border transition-all cursor-pointer active:scale-95 duration-100",
+                                  theme === 'dark' 
+                                    ? "border-emerald-800/60 text-emerald-400 bg-emerald-950/30 hover:bg-emerald-900/50" 
+                                    : "border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                                )}
+                                title="Give Access & Manage Members (RBAC)"
+                              >
+                                <UserPlus size={12} className="text-emerald-500" />
+                                <span>Give Access</span>
+                              </button>
+
                               {/* Quick primary CTA */}
                               <button
                                 onClick={() => handleBookClick(book.id)}
@@ -351,6 +371,17 @@ export default function SaaSBooksList({
                                       >
                                         <Share2 size={12} className="text-emerald-500" />
                                         Share / Sync Code
+                                      </button>
+
+                                      <button 
+                                        onClick={() => { 
+                                          setActiveMenuId(null); 
+                                          onSelectBook(book.id);
+                                        }}
+                                        className="w-full flex items-center gap-2 p-2 rounded-sm text-[11px] font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer text-indigo-600 dark:text-indigo-400"
+                                      >
+                                        <Users size={12} className="text-indigo-500" />
+                                        Members & Access (RBAC)
                                       </button>
 
                                       <div className="h-px bg-slate-100 dark:bg-zinc-900 my-1" />
@@ -492,6 +523,17 @@ export default function SaaSBooksList({
                                     Share / Sync Code
                                   </button>
 
+                                  <button 
+                                    onClick={() => { 
+                                      setActiveMenuId(null); 
+                                      onSelectBook(book.id);
+                                    }}
+                                    className="w-full flex items-center gap-2 p-2 rounded-sm text-[11px] font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-850 cursor-pointer text-indigo-600 dark:text-indigo-400"
+                                  >
+                                    <Users size={12} className="text-indigo-500" />
+                                    Members & Access (RBAC)
+                                  </button>
+
                                   <div className="h-px bg-zinc-150 dark:bg-zinc-800 my-1" />
 
                                   <button 
@@ -533,9 +575,29 @@ export default function SaaSBooksList({
                         </h4>
                       </div>
 
-                      <span className="text-[10px] font-semibold uppercase text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 group-hover:underline">
-                        Open <ArrowRight size={12} className="transition-transform group-hover:translate-x-0.5" />
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            vibrate();
+                            onSelectBook(book.id);
+                          }}
+                          className={cn(
+                            "px-2.5 py-1 rounded text-[10px] font-bold flex items-center gap-1 border transition-all cursor-pointer active:scale-95 duration-100",
+                            theme === 'dark'
+                              ? "border-emerald-800/60 text-emerald-400 bg-emerald-950/30 hover:bg-emerald-900/50"
+                              : "border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                          )}
+                          title="Give Access & Manage Members (RBAC)"
+                        >
+                          <UserPlus size={11} className="text-emerald-500" />
+                          <span>Give Access</span>
+                        </button>
+
+                        <span className="text-[10px] font-semibold uppercase text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 group-hover:underline">
+                          Open <ArrowRight size={12} className="transition-transform group-hover:translate-x-0.5" />
+                        </span>
+                      </div>
                     </div>
 
                   </motion.div>

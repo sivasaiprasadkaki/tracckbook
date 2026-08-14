@@ -116,14 +116,19 @@ export default function Auth({
       sessionStorage.removeItem('logout_reason');
     }
 
-    // Handle redirect modes
-    const hash = window.location.hash;
-    const params = new URLSearchParams(window.location.search);
-    
-    if (hash.includes('type=signup') || hash.includes('error_code=otp_expired')) {
+    // Check if user just completed password reset
+    const resetSuccessMsg = sessionStorage.getItem('password_reset_success');
+    if (resetSuccessMsg) {
+      setSuccess(resetSuccessMsg);
+      sessionStorage.removeItem('password_reset_success');
+    }
+
+    // Handle signup confirmation redirect modes
+    const hash = window.location.hash || '';
+    if (hash.includes('type=signup')) {
       setMode('signin');
-      if (hash.includes('error_code=otp_expired')) {
-        setError('Link expired. Please try signing up again or contact support.');
+      if (hash.includes('error_code=otp_expired') || hash.includes('error=access_denied')) {
+        setError('Verification link expired. Please try signing up again or contact support.');
       } else {
         setSuccess('Email confirmed! You can now login.');
       }

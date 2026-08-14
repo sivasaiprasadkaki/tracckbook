@@ -125,11 +125,23 @@ export default function DesktopSignUp({
 
           <div className="flex items-center gap-3 bg-primary-container/20 border border-primary-container/30 rounded-full px-4 py-2 w-fit transition-all hover:bg-primary-container/30">
             <div className="flex -space-x-2">
-              <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center shadow-sm">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" className="w-4 h-4" alt="Gmail" />
+              <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center shadow-sm p-1">
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M20 18V7.2L12 13.2L4 7.2V18C4 18.5523 4.44772 19 5 19H19C19.5523 19 20 18.5523 20 18Z" fill="#E2E8F0"/>
+                  <path d="M20 6C20 5.44772 19.5523 5 19 5H5C4.44772 5 4 5.44772 4 6V7.2L12 13.2L20 7.2V6Z" fill="#EA4335"/>
+                  <path d="M4 6V18C4 18.5523 4.44772 19 5 19H7V9.6L4 7.25V6Z" fill="#4285F4"/>
+                  <path d="M20 6V18C20 18.5523 19.5523 19 19 19H17V9.6L20 7.25V6Z" fill="#34A853"/>
+                  <path d="M7 19H17V9.6L12 13.35L7 9.6V19Z" fill="#FBBC04"/>
+                </svg>
               </div>
-              <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center shadow-sm">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" className="w-4 h-4" alt="Outlook" />
+              <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center shadow-sm p-1">
+                <svg className="w-4 h-4" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M41 12H19C17.34 12 16 13.34 16 15V33C16 34.66 17.34 36 19 36H41C42.66 36 44 34.66 44 33V15C44 13.34 42.66 12 41 12Z" fill="#0078D4" />
+                  <path d="M16 16.5L30 25L44 16.5V15L30 23.5L16 15V16.5Z" fill="#50D9FF" />
+                  <path d="M16 31.5L30 23L44 31.5V33L30 24.5L16 33V31.5Z" fill="#005A9E" />
+                  <path d="M22 6H7C5.34 6 4 7.34 4 9V39C4 40.66 5.34 42 7 42H22C23.66 42 25 40.66 25 39V9C25 7.34 23.66 6 22 6Z" fill="#106EBE" />
+                  <path d="M14.5 29C11.46 29 9 26.54 9 23.5C9 20.46 11.46 18 14.5 18C17.54 18 20 20.46 20 23.5C20 26.54 17.54 29 14.5 29ZM14.5 21C13.12 21 12 22.12 12 23.5C12 24.88 13.12 26 14.5 26C15.88 26 17 24.88 17 23.5C17 22.12 15.88 21 14.5 21Z" fill="#FFFFFF" />
+                </svg>
               </div>
             </div>
             <span className="font-label-md text-label-md text-white font-medium">Gmail &amp; Outlook Sync</span>
