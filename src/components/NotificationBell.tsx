@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Bell, CheckCircle2, XCircle, Loader2, ShieldCheck, Mail, Check, X, ShieldAlert, AlertTriangle, Eye, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
-import { cn } from '../lib/utils';
+import { cn, safeParseResponse } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 
 interface NotificationBellProps {
@@ -32,15 +32,13 @@ export default function NotificationBell({ session, theme, onInviteAccepted }: N
     let fetchedFromApi = false;
     try {
       const res = await fetch(`/api/notifications?userId=${encodeURIComponent(userId)}&userEmail=${encodeURIComponent(userEmail)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.success) {
-          setNotifications(data.notifications || []);
-          setPendingInvitations(data.pendingInvitations || []);
-          setUnreadCount(data.unreadCount || 0);
-          fetchedFromApi = true;
-          return;
-        }
+      const parsed = await safeParseResponse(res);
+      if (parsed.ok && parsed.data && parsed.data.success) {
+        setNotifications(parsed.data.notifications || []);
+        setPendingInvitations(parsed.data.pendingInvitations || []);
+        setUnreadCount(parsed.data.unreadCount || 0);
+        fetchedFromApi = true;
+        return;
       }
     } catch (apiErr: any) {
       console.warn('[NotificationBell] Backend notifications API unavailable, switching to Supabase fallback:', apiErr?.message || apiErr);
@@ -184,11 +182,13 @@ export default function NotificationBell({ session, theme, onInviteAccepted }: N
         })
       });
 
-      const data = await res.json();
+      const parsed = await safeParseResponse(res);
+      const data = parsed.data || {};
 
-      if (!res.ok && !data.success) {
+      if (!parsed.ok || !data.success) {
         // If already accepted, treat as success and route user
-        if (data.error && data.error.toLowerCase().includes('already been accepted')) {
+        const errMsg = parsed.error || data.error || '';
+        if (errMsg && errMsg.toLowerCase().includes('already been accepted')) {
           setStatusMessage({
             type: 'success',
             text: `You have already joined ${invitation.cashbookName || 'this Cashbook'}!`
@@ -203,7 +203,7 @@ export default function NotificationBell({ session, theme, onInviteAccepted }: N
           }
           return;
         }
-        throw new Error(data.error || 'Failed to accept invitation');
+        throw new Error(errMsg || 'Failed to accept invitation');
       }
 
       setStatusMessage({
@@ -262,10 +262,11 @@ export default function NotificationBell({ session, theme, onInviteAccepted }: N
         })
       });
 
-      const data = await res.json();
+      const parsed = await safeParseResponse(res);
+      const data = parsed.data || {};
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to reject invitation');
+      if (!parsed.ok || !data.success) {
+        throw new Error(parsed.error || data.error || 'Failed to reject invitation');
       }
 
       setStatusMessage({
@@ -459,49 +460,72 @@ export default function NotificationBell({ session, theme, onInviteAccepted }: N
         )}
       </button>
 
-      {/* Notifications Dropdown Panel */}
+      {/* Notifications Dropdown / Dialog Panel */}
       <AnimatePresence>
         {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            className={cn(
-              "absolute right-0 mt-2 w-80 sm:w-96 max-w-[calc(100vw-24px)] rounded-2xl shadow-2xl border z-50 overflow-hidden transition-colors duration-300",
-              theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
-            )}
-          >
-            {/* Panel Header */}
-            <div className={cn(
-              "px-4 py-3 border-b flex items-center justify-between",
-              theme === 'dark' ? "border-zinc-900 bg-zinc-900/50" : "border-slate-100 bg-slate-50/80"
-            )}>
-              <div className="flex items-center gap-2">
-                <Bell size={16} className="text-emerald-600 dark:text-emerald-400" />
-                <h4 className="text-xs font-black uppercase tracking-wider">Notifications</h4>
-              </div>
-              {unreadCount > 0 && (
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300/30">
-                  {unreadCount} New
-                </span>
+          <>
+            {/* Click-away backdrop overlay */}
+            <div 
+              className="fixed inset-0 z-[140] bg-black/20 dark:bg-black/40 backdrop-blur-xs"
+              onClick={() => setIsOpen(false)}
+            />
+
+            <motion.div
+              id="notifications-panel"
+              initial={{ opacity: 0, y: 15, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 15, scale: 0.96 }}
+              className={cn(
+                "fixed top-[70px] right-4 left-4 sm:left-auto sm:right-4 z-[150] w-auto sm:w-[420px] max-w-lg rounded-3xl p-4 sm:p-5 border shadow-2xl overflow-hidden flex flex-col max-h-[85vh] transition-all",
+                theme === 'dark' 
+                  ? "bg-zinc-950/95 border-zinc-900 text-white backdrop-blur-xl" 
+                  : "bg-white/95 border-slate-100 text-slate-900 backdrop-blur-xl"
               )}
-            </div>
+            >
+              {/* Panel Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-zinc-900 shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                    <Bell size={18} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black tracking-tight font-sans">Notifications</h4>
+                    <p className="text-[10px] uppercase font-bold text-slate-400 font-mono">Invitations & Alerts</p>
+                  </div>
+                </div>
 
-            {/* Status Alert Banner inside panel */}
-            {statusMessage && (
-              <div className={cn(
-                "p-3 text-xs font-bold flex items-center gap-2 border-b animate-fadeIn",
-                statusMessage.type === 'success'
-                  ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border-emerald-200/50"
-                  : "bg-rose-50 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300 border-rose-200/50"
-              )}>
-                {statusMessage.type === 'success' ? <CheckCircle2 size={16} className="shrink-0" /> : <XCircle size={16} className="shrink-0" />}
-                <span>{statusMessage.text}</span>
+                <div className="flex items-center gap-2">
+                  {unreadCount > 0 && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300/30">
+                      {unreadCount} New
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsOpen(false)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-zinc-900 transition-all cursor-pointer"
+                    title="Close notifications"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
-            )}
 
-            {/* Notification List */}
-            <div className="max-h-80 overflow-y-auto p-2 space-y-2">
+              {/* Status Alert Banner inside panel */}
+              {statusMessage && (
+                <div className={cn(
+                  "p-3 my-2 rounded-xl text-xs font-bold flex items-center gap-2 border shrink-0 animate-fadeIn",
+                  statusMessage.type === 'success'
+                    ? "bg-emerald-50 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800"
+                    : "bg-rose-50 text-rose-900 dark:bg-rose-950/60 dark:text-rose-200 border-rose-200 dark:border-rose-800"
+                )}>
+                  {statusMessage.type === 'success' ? <CheckCircle2 size={16} className="shrink-0 text-emerald-600 dark:text-emerald-400" /> : <XCircle size={16} className="shrink-0 text-rose-600 dark:text-rose-400" />}
+                  <span className="flex-1">{statusMessage.text}</span>
+                </div>
+              )}
+
+              {/* Notification List */}
+              <div className="flex-1 overflow-y-auto pt-3 space-y-3 pr-0.5">
               {pendingInvitations.length === 0 && notifications.length === 0 ? (
                 <div className="p-8 text-center text-xs text-slate-400 dark:text-zinc-500 space-y-2">
                   <Mail size={28} className="mx-auto opacity-40 mb-1" />
@@ -685,13 +709,14 @@ export default function NotificationBell({ session, theme, onInviteAccepted }: N
               )}
             </div>
           </motion.div>
-        )}
-      </AnimatePresence>
+        </>
+      )}
+    </AnimatePresence>
 
       {/* VIEW INVITATION MODAL */}
       <AnimatePresence>
         {selectedInvite && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -735,7 +760,7 @@ export default function NotificationBell({ session, theme, onInviteAccepted }: N
                   theme === 'dark' ? "bg-zinc-900/80 border-zinc-800" : "bg-slate-50 border-slate-200/80"
                 )}>
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">Cashbook</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">Cashbook</span>
                     <span className="px-2.5 py-0.5 rounded-md text-xs font-black bg-emerald-600 text-white shadow-sm">
                       {selectedInvite.role}
                     </span>
@@ -744,22 +769,22 @@ export default function NotificationBell({ session, theme, onInviteAccepted }: N
                     {selectedInvite.cashbookName}
                   </p>
                   {selectedInvite.inviter_email && (
-                    <p className="text-xs text-slate-500 dark:text-zinc-400">
-                      Invited by: <span className="font-bold text-slate-700 dark:text-zinc-200">{selectedInvite.inviter_email}</span>
+                    <p className="text-xs text-slate-600 dark:text-zinc-400">
+                      Invited by: <span className="font-bold text-slate-900 dark:text-zinc-200">{selectedInvite.inviter_email}</span>
                     </p>
                   )}
                 </div>
 
                 {/* Role & Permissions Breakdown */}
                 <div className="space-y-3">
-                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-zinc-300">
                     Role Permissions ({selectedInvite.role})
                   </h4>
 
                   {/* Allowed Permissions Checklist */}
                   <div className="space-y-2">
                     {getRolePermissions(selectedInvite.role).allowed.map((perm, idx) => (
-                      <div key={idx} className="flex items-start gap-2.5 text-xs text-slate-700 dark:text-zinc-300">
+                      <div key={idx} className="flex items-start gap-2.5 text-xs text-slate-800 dark:text-zinc-200 font-medium">
                         <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                         <span>{perm}</span>
                       </div>
@@ -769,8 +794,8 @@ export default function NotificationBell({ session, theme, onInviteAccepted }: N
                   {/* Restricted Actions */}
                   <div className="pt-2 space-y-2 border-t border-slate-100 dark:border-zinc-900">
                     {getRolePermissions(selectedInvite.role).restricted.map((rest, idx) => (
-                      <div key={idx} className="flex items-start gap-2.5 text-xs text-slate-400 dark:text-zinc-500">
-                        <XCircle size={16} className="text-slate-400 dark:text-zinc-600 shrink-0 mt-0.5" />
+                      <div key={idx} className="flex items-start gap-2.5 text-xs text-slate-500 dark:text-zinc-400 font-medium">
+                        <XCircle size={16} className="text-slate-400 dark:text-zinc-500 shrink-0 mt-0.5" />
                         <span>{rest}</span>
                       </div>
                     ))}

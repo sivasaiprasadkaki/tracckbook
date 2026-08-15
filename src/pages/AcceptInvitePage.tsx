@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { ShieldCheck, Mail, CheckCircle2, AlertTriangle, ArrowRight, Lock, UserCheck, RefreshCw, Layers } from 'lucide-react';
 import { motion } from 'motion/react';
-import { cn, vibrate } from '../lib/utils';
+import { cn, vibrate, safeParseResponse } from '../lib/utils';
 import { ROLE_DEFINITIONS, Role } from '../lib/rbac';
 
 interface AcceptInvitePageProps {
@@ -51,11 +51,12 @@ export default function AcceptInvitePage({
         setLoading(true);
         setError(null);
 
-        const res = await fetch(`/api/rbac/verify-invitation?token=${encodeURIComponent(token)}`);
-        const data = await res.json();
+        const res = await fetch(`/api/rbac/verify-invitation?token=${encodeURIComponent(token!)}`);
+        const parsed = await safeParseResponse(res);
+        const data = parsed.data;
 
-        if (!data.valid) {
-          setError(data.error || 'Invalid or expired invitation token.');
+        if (!data || !data.valid) {
+          setError(data?.error || parsed.error || 'Invalid or expired invitation token.');
         } else {
           setInviteDetails({
             cashbookId: data.cashbookId,
@@ -95,10 +96,11 @@ export default function AcceptInvitePage({
         })
       });
 
-      const data = await res.json();
+      const parsed = await safeParseResponse(res);
+      const data = parsed.data;
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to accept invitation.');
+      if (!parsed.ok || !data || !data.success) {
+        throw new Error(data?.error || parsed.error || 'Failed to accept invitation.');
       }
 
       setSuccess(true);

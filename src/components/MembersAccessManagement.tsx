@@ -22,7 +22,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn, vibrate } from '../lib/utils';
+import { cn, vibrate, safeParseResponse } from '../lib/utils';
 import { 
   Role, 
   ALL_ROLES, 
@@ -103,32 +103,30 @@ export default function MembersAccessManagement({
     if (!cashbookId) return;
     try {
       const res = await fetch(`/api/rbac/members?cashbookId=${encodeURIComponent(cashbookId)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.members)) {
-          let serverMembers: CashbookMember[] = data.members;
-          if (serverMembers.length === 0) {
-            serverMembers = [
-              {
-                id: `m_primary_${cashbookId}`,
-                cashbook_id: cashbookId,
-                user_id: currentUserId,
-                name: currentUserName || 'Cashbook Owner',
-                email: currentUserEmail || 'owner@trackbook.app',
-                role: 'Primary Admin',
-                status: 'Active',
-                invitation_status: 'Accepted',
-                created_at: new Date().toISOString()
-              }
-            ];
-          }
-          setMembers(serverMembers);
-          localStorage.setItem(`trackbook_members_${cashbookId}`, JSON.stringify(serverMembers));
-          if (onMembersChange) onMembersChange(serverMembers);
-          if (Array.isArray(data.auditLogs)) {
-            setAuditLogs(data.auditLogs);
-            localStorage.setItem(`trackbook_audit_logs_${cashbookId}`, JSON.stringify(data.auditLogs));
-          }
+      const parsed = await safeParseResponse(res);
+      if (parsed.ok && parsed.data && parsed.data.success && Array.isArray(parsed.data.members)) {
+        let serverMembers: CashbookMember[] = parsed.data.members;
+        if (serverMembers.length === 0) {
+          serverMembers = [
+            {
+              id: `m_primary_${cashbookId}`,
+              cashbook_id: cashbookId,
+              user_id: currentUserId,
+              name: currentUserName || 'Cashbook Owner',
+              email: currentUserEmail || 'owner@trackbook.app',
+              role: 'Primary Admin',
+              status: 'Active',
+              invitation_status: 'Accepted',
+              created_at: new Date().toISOString()
+            }
+          ];
+        }
+        setMembers(serverMembers);
+        localStorage.setItem(`trackbook_members_${cashbookId}`, JSON.stringify(serverMembers));
+        if (onMembersChange) onMembersChange(serverMembers);
+        if (Array.isArray(parsed.data.auditLogs)) {
+          setAuditLogs(parsed.data.auditLogs);
+          localStorage.setItem(`trackbook_audit_logs_${cashbookId}`, JSON.stringify(parsed.data.auditLogs));
         }
       }
     } catch (err) {
@@ -349,44 +347,197 @@ export default function MembersAccessManagement({
     setIsSubmittingInvite(true);
     setInviteError(null);
 
-    const name = inviteName.trim() || inviteEmail.split('@')[0];
+    const targetEmail = inviteEmail.trim().toLowerCase();
+    const name = inviteName.trim() || targetEmail.split('@')[0];
+
+    const payload = {
+      cashbookId,
+      cashbookName: cashbookName || 'TrackBook Cashbook',
+      email: targetEmail,
+      recipientEmail: targetEmail,
+      name,
+      recipientName: name,
+      role: inviteRole,
+      inviterUserId: currentUserId,
+      inviterRole: currentUserRole,
+      inviterEmail: currentUserEmail,
+      inviterName: currentUserName
+    };
+
+    let resData: any = null;
+    let errorMsg: string | null = null;
 
     try {
-      const response = await fetch('/api/rbac/invite', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cashbookId,
-          cashbookName,
-          email: inviteEmail.trim(),
-          name,
-          role: inviteRole,
-          inviterUserId: currentUserId,
-          inviterRole: currentUserRole,
-          inviterEmail: currentUserEmail,
-          inviterName: currentUserName
-        })
-      });
+      // 1. Try Supabase Edge Function invocation if available
+      if (supabase?.functions) {
+        try {
+          const edgeResult = await supabase.functions.invoke('send-cashbook-invitation', {
+            body: payload
+          });
+          if (edgeResult.data && edgeResult.data.success) {
+            resData = edgeResult.data;
+          } else if (edgeResult.error) {
+            console.warn('[MembersAccessManagement] Edge function returned note:', edgeResult.error);
+            if ((edgeResult.error as any).context) {
+              const parsed = await safeParseResponse((edgeResult.error as any).context);
+              if (parsed.data?.error) errorMsg = parsed.data.error;
+              else if (parsed.data?.message) errorMsg = parsed.data.message;
+            } else if (edgeResult.error.message) {
+              errorMsg = edgeResult.error.message;
+            }
+          }
+        } catch (edgeErr: any) {
+          console.warn('[MembersAccessManagement] Edge function invoke error:', edgeErr);
+        }
+      }
 
-      const resData = await response.json();
+      // 2. Fall back to local Express /api/rbac/invite endpoint
+      if (!resData) {
+        try {
+          const response = await fetch('/api/rbac/invite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
 
-      if (!response.ok || !resData.success) {
-        throw new Error(resData.error || 'Failed to dispatch member invitation');
+          const parsed = await safeParseResponse(response);
+
+          if (parsed.data && parsed.data.success) {
+            resData = parsed.data;
+          } else {
+            if (parsed.data && (parsed.data.error || parsed.data.message)) {
+              errorMsg = parsed.data.error || parsed.data.message;
+            } else if (!parsed.isJson) {
+              console.error('[MembersAccessManagement] Non-JSON response received:', parsed.status, parsed.rawText);
+              errorMsg = errorMsg || 'Invitation service returned an invalid response. Please try again.';
+            } else if (parsed.error) {
+              errorMsg = parsed.error;
+            }
+          }
+        } catch (fetchErr: any) {
+          console.warn('[MembersAccessManagement] Backend API invite endpoint error:', fetchErr);
+          errorMsg = errorMsg || fetchErr.message;
+        }
+      }
+
+      // 3. Fall back to direct Supabase database operation if both server endpoints are offline
+      if (!resData && supabase) {
+        try {
+          // Check if already active member
+          const { data: activeMember } = await supabase
+            .from('cashbook_members')
+            .select('id, email, status')
+            .eq('cashbook_id', cashbookId)
+            .ilike('email', targetEmail)
+            .eq('status', 'Active')
+            .maybeSingle();
+
+          if (activeMember) {
+            throw new Error(`User ${targetEmail} is already an active member of this Cashbook.`);
+          }
+
+          // Check if already pending invitation
+          const { data: existingInvite } = await supabase
+            .from('cashbook_invitations')
+            .select('id, status')
+            .eq('cashbook_id', cashbookId)
+            .ilike('email', targetEmail)
+            .in('status', ['Sent', 'pending', 'Draft'])
+            .maybeSingle();
+
+          if (existingInvite) {
+            throw new Error('An invitation is already pending for this user.');
+          }
+
+          // Generate client token
+          const rawToken = Array.from(window.crypto.getRandomValues(new Uint8Array(32)))
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
+          const tokenUint8 = new TextEncoder().encode(rawToken);
+          const hashBuf = await window.crypto.subtle.digest('SHA-256', tokenUint8);
+          const tokenHash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+          const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+          // Look up user profile ID
+          let targetUserId: string | null = null;
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('id, email')
+            .ilike('email', targetEmail)
+            .maybeSingle();
+          if (prof?.id) targetUserId = prof.id;
+
+          const { data: invRow, error: invErr } = await supabase
+            .from('cashbook_invitations')
+            .insert({
+              cashbook_id: cashbookId,
+              email: targetEmail,
+              role: inviteRole,
+              token_hash: tokenHash,
+              status: 'Sent',
+              inviter_user_id: currentUserId || null,
+              inviter_email: currentUserEmail || 'owner@trackbook.app',
+              expires_at: expiresAt
+            })
+            .select()
+            .maybeSingle();
+
+          if (invErr) throw invErr;
+
+          const invId = invRow?.id || 'inv_' + Date.now();
+
+          // Dispatch notification to User B
+          const notifPayload = {
+            user_id: targetUserId || currentUserId,
+            email: targetEmail,
+            type: 'cashbook_invitation',
+            title: 'New Cashbook Invitation',
+            message: `${currentUserName || currentUserEmail || 'Admin'} invited you to join ${cashbookName || 'Cashbook'} as ${inviteRole}.`,
+            cashbook_id: cashbookId,
+            invitation_id: invId,
+            is_read: false
+          };
+
+          const { data: notifRow } = await supabase
+            .from('notifications')
+            .insert(notifPayload)
+            .select()
+            .maybeSingle();
+
+          resData = {
+            success: true,
+            invitation_id: invId,
+            invitationId: invId,
+            notification_id: notifRow?.id || 'notif_' + Date.now(),
+            notificationId: notifRow?.id || 'notif_' + Date.now(),
+            token: rawToken,
+            invitationUrl: `${window.location.origin}/accept-invite?token=${rawToken}`,
+            status: 'pending',
+            message: 'Invitation sent successfully.'
+          };
+        } catch (directErr: any) {
+          console.warn('[MembersAccessManagement] Direct Supabase fallback note:', directErr);
+          if (!errorMsg) errorMsg = directErr.message;
+        }
+      }
+
+      if (!resData || !resData.success) {
+        throw new Error(errorMsg || 'Failed to dispatch member invitation. Please check the email and try again.');
       }
 
       const newMember: CashbookMember = {
-        id: resData.invitationId || 'm_' + Date.now(),
+        id: resData.invitation_id || resData.invitationId || 'm_' + Date.now(),
         cashbook_id: cashbookId,
         user_id: 'u_' + Date.now(),
         name,
-        email: inviteEmail.trim(),
+        email: targetEmail,
         role: inviteRole,
         status: 'Pending',
         invitation_status: 'Sent',
         created_at: new Date().toISOString()
       };
 
-      const updated = [...members.filter(m => m.email !== newMember.email), newMember];
+      const updated = [...members.filter(m => m.email.toLowerCase() !== targetEmail), newMember];
       updateMembersState(updated);
       await loadMembersData();
 
@@ -403,10 +554,11 @@ export default function MembersAccessManagement({
       });
 
       setRecentInviteMember(newMember);
-      setGeneratedInviteUrl(resData.invitationUrl || `${window.location.origin}/accept-invite?token=${resData.token}`);
+      setGeneratedInviteUrl(resData.invitationUrl || (resData.token ? `${window.location.origin}/accept-invite?token=${resData.token}` : `${window.location.origin}/accept-invite`));
       setShowEmailPreview(true);
 
     } catch (err: any) {
+      console.error('[MembersAccessManagement] Invitation dispatch error:', err);
       setInviteError(err.message || 'An error occurred while sending invitation.');
     } finally {
       setIsSubmittingInvite(false);
@@ -1053,8 +1205,8 @@ export default function MembersAccessManagement({
                   {/* STEP 1: Email Address */}
                   {inviteStep === 1 && (
                     <div className="space-y-4">
-                      <div className="space-y-1">
-                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
                           Step 1: Email Address *
                         </label>
                         <input 
@@ -1065,13 +1217,13 @@ export default function MembersAccessManagement({
                           onChange={(e) => setInviteEmail(e.target.value)}
                           className={cn(
                             "w-full px-3.5 py-2.5 text-xs rounded-lg border outline-none font-bold focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500",
-                            theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-200 text-zinc-900"
+                            theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-300 text-zinc-900"
                           )}
                         />
                       </div>
 
-                      <div className="space-y-1">
-                        <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
                           Full Name (Optional)
                         </label>
                         <input 
@@ -1081,7 +1233,7 @@ export default function MembersAccessManagement({
                           onChange={(e) => setInviteName(e.target.value)}
                           className={cn(
                             "w-full px-3.5 py-2.5 text-xs rounded-lg border outline-none font-bold focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500",
-                            theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-200 text-zinc-900"
+                            theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-zinc-300 text-zinc-900"
                           )}
                         />
                       </div>
@@ -1090,7 +1242,7 @@ export default function MembersAccessManagement({
                         <button
                           disabled={!inviteEmail.trim()}
                           onClick={() => setInviteStep(2)}
-                          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
+                          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shadow-sm"
                         >
                           Step 2: Select Role →
                         </button>
@@ -1101,7 +1253,7 @@ export default function MembersAccessManagement({
                   {/* STEP 2: Select Role */}
                   {inviteStep === 2 && (
                     <div className="space-y-4">
-                      <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                      <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
                         Step 2: Select Role
                       </label>
 
@@ -1113,8 +1265,8 @@ export default function MembersAccessManagement({
                         )}>
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="text-xs font-extrabold text-zinc-400">Primary Admin</p>
-                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">Not Selectable</span>
+                              <p className="text-xs font-extrabold text-zinc-500 dark:text-zinc-400">Primary Admin</p>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-mono">Not Selectable</span>
                             </div>
                             <p className="text-[11px] text-zinc-500 mt-0.5">Primary Admin cannot be created via normal member invitation.</p>
                           </div>
@@ -1131,15 +1283,15 @@ export default function MembersAccessManagement({
                               className={cn(
                                 "p-3.5 rounded-xl border cursor-pointer flex items-center justify-between transition-all",
                                 isSelected
-                                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold ring-1 ring-emerald-500/20"
-                                  : theme === 'dark' ? "border-zinc-800 bg-zinc-900/40 text-zinc-400" : "border-zinc-200 bg-zinc-50 text-zinc-700"
+                                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-bold ring-1 ring-emerald-500/20"
+                                  : theme === 'dark' ? "border-zinc-800 bg-zinc-900/40 text-zinc-300 hover:border-zinc-700" : "border-zinc-200 bg-zinc-50 text-zinc-800 hover:bg-zinc-100/80"
                               )}
                             >
                               <div>
                                 <p className="text-xs font-extrabold">{role}</p>
-                                <p className="text-[11px] opacity-80 font-normal mt-0.5">{def.description}</p>
+                                <p className="text-[11px] opacity-85 font-normal mt-0.5">{def.description}</p>
                               </div>
-                              {isSelected && <Check size={16} className="text-emerald-500" />}
+                              {isSelected && <Check size={16} className="text-emerald-600 dark:text-emerald-400" />}
                             </div>
                           );
                         })}
@@ -1155,7 +1307,7 @@ export default function MembersAccessManagement({
 
                         <button
                           onClick={() => setInviteStep(3)}
-                          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold"
+                          className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm"
                         >
                           Step 3: Role & Permissions →
                         </button>
@@ -1167,7 +1319,7 @@ export default function MembersAccessManagement({
                   {inviteStep === 3 && (
                     <div className="space-y-4">
                       <div>
-                        <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">
+                        <h4 className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-2">
                           Step 3: Role & Permissions ({inviteRole})
                         </h4>
 
@@ -1228,34 +1380,34 @@ export default function MembersAccessManagement({
                   {inviteStep === 4 && (
                     <form onSubmit={handleSendInvite} className="space-y-4">
                       <div>
-                        <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">
+                        <h4 className="text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-2">
                           Step 4: Confirmation
                         </h4>
 
                         <div className={cn(
                           "p-4 rounded-xl border space-y-3 text-xs",
-                          theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-zinc-50 border-zinc-200"
+                          theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-slate-50 border-slate-200 text-slate-900"
                         )}>
-                          <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
-                            <span className="text-zinc-400">Status State:</span>
-                            <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono text-[10px] font-bold">
+                          <div className="flex items-center justify-between pb-2.5 border-b border-slate-200 dark:border-zinc-800">
+                            <span className="font-bold text-slate-800 dark:text-zinc-200">Status State:</span>
+                            <span className="px-2.5 py-1 rounded-md bg-emerald-100 text-emerald-900 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 font-mono text-[11px] font-bold shadow-xs">
                               Invitation Draft Ready
                             </span>
                           </div>
 
-                          <p><strong className="text-zinc-300">Recipient Email:</strong> {inviteEmail}</p>
-                          {inviteName && <p><strong className="text-zinc-300">Recipient Name:</strong> {inviteName}</p>}
-                          <p><strong className="text-zinc-300">Cashbook:</strong> {cashbookName}</p>
-                          <p><strong className="text-zinc-300">Assigned Role:</strong> <span className="text-emerald-400 font-bold">{inviteRole}</span></p>
+                          <p><strong className="text-slate-700 dark:text-zinc-300 font-bold">Recipient Email:</strong> <span className="font-semibold text-slate-950 dark:text-white">{inviteEmail}</span></p>
+                          {inviteName && <p><strong className="text-slate-700 dark:text-zinc-300 font-bold">Recipient Name:</strong> <span className="font-semibold text-slate-950 dark:text-white">{inviteName}</span></p>}
+                          <p><strong className="text-slate-700 dark:text-zinc-300 font-bold">Cashbook:</strong> <span className="font-semibold text-slate-950 dark:text-white">{cashbookName}</span></p>
+                          <p><strong className="text-slate-700 dark:text-zinc-300 font-bold">Assigned Role:</strong> <span className="text-emerald-700 dark:text-emerald-400 font-extrabold">{inviteRole}</span></p>
 
-                          <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px]">
-                            <strong>Real-Time Notification:</strong> Clicking 'Send Invitation' validates the recipient account and dispatches an in-app notification directly to their TrackBook notification bell.
+                          <div className="p-3 rounded-lg bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-950 dark:text-emerald-200 text-[11px] leading-relaxed font-medium">
+                            <strong className="font-bold text-emerald-900 dark:text-emerald-300">Real-Time Notification:</strong> Clicking 'Send Invitation' validates the recipient account and dispatches an in-app notification directly to their TrackBook notification bell.
                           </div>
                         </div>
                       </div>
 
                       {inviteError && (
-                        <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-bold">
+                        <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-500 dark:text-rose-400 text-xs font-bold">
                           {inviteError}
                         </div>
                       )}

@@ -47,23 +47,24 @@ export function checkCanManageMemberRole(actorRole: string, targetCurrentRole?: 
 
 // 1. CREATE INVITATION ENDPOINT
 export async function handleCreateInvitation(req: Request, res: Response) {
+  res.setHeader('Content-Type', 'application/json');
   try {
-    const { cashbookId, cashbookName, email, name, role, inviterUserId, inviterRole, inviterEmail, inviterName } = req.body;
+    const { cashbookId, cashbookName, email, name, role, inviterUserId, inviterRole, inviterEmail, inviterName } = req.body || {};
 
     if (!cashbookId || !email || !role) {
-      return res.status(400).json({ error: 'Missing required parameters: cashbookId, email, role' });
+      return res.status(400).json({ success: false, error: 'Missing required parameters: cashbookId, email, role' });
     }
 
-    const targetEmail = email.trim().toLowerCase();
+    const targetEmail = String(email).trim().toLowerCase();
 
     // 1. Backend Permission Enforcement
     const effectiveInviterRole = inviterRole || 'Primary Admin';
     if (!['Primary Admin', 'Admin', 'Book Admin'].includes(effectiveInviterRole)) {
-      return res.status(403).json({ error: 'Forbidden: Insufficient permissions to invite cashbook members.' });
+      return res.status(403).json({ success: false, error: 'Forbidden: Insufficient permissions to invite cashbook members.' });
     }
 
     if (role === 'Primary Admin') {
-      return res.status(400).json({ error: 'Invalid operation: Primary Admin role cannot be created via standard invitation.' });
+      return res.status(400).json({ success: false, error: 'Invalid operation: Primary Admin role cannot be created via standard invitation.' });
     }
 
     // 2. REGISTERED USER CHECK: Verify target email belongs to an existing TrackBook user
@@ -344,18 +345,26 @@ export async function handleCreateInvitation(req: Request, res: Response) {
 
     return res.json({
       success: true,
-      message: `Invitation dispatched to ${targetEmail}. An in-app notification has been sent in real time.`,
+      invitation_id: invitationId,
       invitationId,
+      notification_id: notifDbId,
+      notificationId: notifDbId,
+      message: "Invitation sent successfully.",
       status: 'pending',
       email: targetEmail,
       role,
+      token: rawToken,
       invitationUrl,
       expiresAt
     });
 
   } catch (err: any) {
     console.error('[RBAC Server] Error creating invitation:', err);
-    return res.status(500).json({ error: err.message || 'Internal server error creating invitation' });
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Internal invitation service error.', 
+      details: err.message || String(err) 
+    });
   }
 }
 

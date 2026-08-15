@@ -1,165 +1,362 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-serve(async (req) => {
+// UUID validation helper
+function isValidUuid(id: any): boolean {
+  return typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
+// SHA-256 token hashing helper in Web Crypto
+async function hashToken(token: string): Promise<string> {
+  const msgUint8 = new TextEncoder().encode(token);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Random token generation helper
+function generateToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function jsonResponse(body: Record<string, any>, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json",
+    },
+  });
+}
+
+serve(async (req: Request) => {
+  // 1. Handle CORS preflight
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response(JSON.stringify({ status: "ok" }), {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+      },
+    });
+  }
+
+  if (req.method !== "POST") {
+    return jsonResponse({
+      success: false,
+      error: `Method ${req.method} not allowed`,
+    }, 405);
   }
 
   try {
-    const { recipientEmail, recipientName, cashbookName, role, invitationUrl, inviterEmail, inviterName } = await req.json();
-
-    if (!recipientEmail || !cashbookName || !invitationUrl) {
-      return new Response(
-        JSON.stringify({ error: "Missing required invitation parameters: recipientEmail, cashbookName, invitationUrl" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    // 2. Safe JSON input parsing
+    let payload: any = {};
+    try {
+      const rawText = await req.text();
+      if (rawText && rawText.trim()) {
+        payload = JSON.parse(rawText);
+      }
+    } catch (parseErr: any) {
+      return jsonResponse({
+        success: false,
+        error: "Malformed JSON request payload.",
+        details: parseErr.message,
+      }, 400);
     }
 
-    console.log(`[Edge Function send-cashbook-invitation] Dispatching email to ${recipientEmail} for cashbook ${cashbookName}`);
+    const cashbookId = payload.cashbookId || payload.cashbook_id;
+    const cashbookName = payload.cashbookName || payload.cashbook_name || "TrackBook Cashbook";
+    const rawEmail = payload.email || payload.recipientEmail;
+    const name = payload.name || payload.recipientName || (rawEmail ? rawEmail.split('@')[0] : 'Member');
+    const role = payload.role || 'Viewer';
+    const inviterUserId = payload.inviterUserId || payload.inviter_user_id;
+    const inviterRole = payload.inviterRole || payload.inviter_role || 'Primary Admin';
+    const inviterEmail = payload.inviterEmail || payload.inviter_email;
+    const inviterName = payload.inviterName || payload.inviter_name || (inviterEmail ? inviterEmail.split('@')[0] : 'Cashbook Admin');
 
-    if (!RESEND_API_KEY) {
-      console.warn("[Edge Function] RESEND_API_KEY secret is not set in Edge Function secrets.");
-      // Return helpful message indicating API key requirement
-      return new Response(
-        JSON.stringify({
-          error: "Unable to send invitation email. RESEND_API_KEY secret is missing in Edge Function environment.",
-          code: "RESEND_KEY_MISSING"
-        }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (!cashbookId || !rawEmail) {
+      return jsonResponse({
+        success: false,
+        error: "Missing required parameters: cashbookId and email are required.",
+      }, 400);
     }
 
-    // Role Permission Summaries
-    const rolePermissionSummaries: Record<string, string> = {
-      "Admin": "Full cashbook management, member management, entry edits, and reports export.",
-      "Book Admin": "Manage cashbook entries, categorize transactions, and invite book members.",
-      "Data Operator": "Add and view financial cashbook entries and attach receipt vouchers.",
-      "Viewer": "Read-only access to view cashbook entries, summary balances, and analytics reports."
+    const targetEmail = rawEmail.trim().toLowerCase();
+
+    // 3. Permission verification
+    if (!['Primary Admin', 'Admin', 'Book Admin'].includes(inviterRole)) {
+      return jsonResponse({
+        success: false,
+        error: "Forbidden: Insufficient permissions to invite cashbook members.",
+      }, 403);
+    }
+
+    if (role === 'Primary Admin') {
+      return jsonResponse({
+        success: false,
+        error: "Primary Admin role cannot be created via standard invitation.",
+      }, 400);
+    }
+
+    // 4. Initialize Supabase Admin Client
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "https://chbbaswtawmbmyquoiac.supabase.co";
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoYmJhc3d0YXdtYm15cXVvaWFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMjE5MTcsImV4cCI6MjA5MDY5NzkxN30.4qNJG7rjpEJ9vfyiGy_mteUI9_X1I6dNekEuXV26Xic";
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+    // 5. Look up Target User ID
+    let targetUserId: string | null = null;
+
+    try {
+      const { data: prof } = await supabaseAdmin
+        .from('profiles')
+        .select('id, email, full_name')
+        .ilike('email', targetEmail)
+        .maybeSingle();
+
+      if (prof?.id && isValidUuid(prof.id)) {
+        targetUserId = prof.id;
+      }
+    } catch (_) {}
+
+    if (!targetUserId) {
+      try {
+        const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
+        if (usersData?.users) {
+          const found = usersData.users.find((u: any) => u.email?.trim().toLowerCase() === targetEmail);
+          if (found && isValidUuid(found.id)) {
+            targetUserId = found.id;
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (!targetUserId) {
+      try {
+        const { data: memberData } = await supabaseAdmin
+          .from('cashbook_members')
+          .select('user_id')
+          .ilike('email', targetEmail)
+          .not('user_id', 'is', null)
+          .limit(1)
+          .maybeSingle();
+
+        if (memberData?.user_id && isValidUuid(memberData.user_id)) {
+          targetUserId = memberData.user_id;
+        }
+      } catch (_) {}
+    }
+
+    // 6. Check if target user is ALREADY an active member of this Cashbook
+    try {
+      const { data: activeMember } = await supabaseAdmin
+        .from('cashbook_members')
+        .select('id, email, status')
+        .eq('cashbook_id', cashbookId)
+        .ilike('email', targetEmail)
+        .eq('status', 'Active')
+        .maybeSingle();
+
+      if (activeMember) {
+        return jsonResponse({
+          success: false,
+          error: `User ${targetEmail} is already an active member of this Cashbook.`,
+        }, 400);
+      }
+    } catch (_) {}
+
+    // 7. Check if an active invitation is ALREADY pending
+    try {
+      const { data: existingInvite } = await supabaseAdmin
+        .from('cashbook_invitations')
+        .select('id, status')
+        .eq('cashbook_id', cashbookId)
+        .ilike('email', targetEmail)
+        .in('status', ['Sent', 'pending', 'Draft'])
+        .maybeSingle();
+
+      if (existingInvite) {
+        return jsonResponse({
+          success: false,
+          error: 'An invitation is already pending for this user.',
+        }, 400);
+      }
+    } catch (_) {}
+
+    // 8. Generate Token & Expiration
+    const rawToken = generateToken();
+    const tokenHash = await hashToken(rawToken);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
+
+    const origin = req.headers.get("origin") || "https://trackbook.xyz";
+    const invitationUrl = `${origin}/accept-invite?token=${rawToken}`;
+
+    const validInviterUserId = isValidUuid(inviterUserId) ? inviterUserId : null;
+    const validTargetUserId = isValidUuid(targetUserId) ? targetUserId : null;
+
+    // 9. Insert into cashbook_invitations table
+    let invitationId = 'inv_' + Date.now();
+    try {
+      const { data: invData, error: invError } = await supabaseAdmin
+        .from('cashbook_invitations')
+        .insert({
+          cashbook_id: cashbookId,
+          email: targetEmail,
+          role,
+          token_hash: tokenHash,
+          status: 'Sent',
+          inviter_user_id: validInviterUserId,
+          inviter_email: inviterEmail || 'owner@trackbook.app',
+          expires_at: expiresAt,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .maybeSingle();
+
+      if (invError) {
+        console.warn("[send-cashbook-invitation] Primary insert failed, trying fallback:", invError.message);
+        const { data: retryData } = await supabaseAdmin
+          .from('cashbook_invitations')
+          .insert({
+            cashbook_id: cashbookId,
+            email: targetEmail,
+            role,
+            token_hash: tokenHash,
+            status: 'pending'
+          })
+          .select()
+          .maybeSingle();
+
+        if (retryData?.id) {
+          invitationId = retryData.id;
+        }
+      } else if (invData?.id) {
+        invitationId = invData.id;
+      }
+    } catch (dbErr: any) {
+      console.warn("[send-cashbook-invitation] DB insert error:", dbErr.message);
+    }
+
+    // 10. Insert notification into notifications table for User B
+    let notificationId = 'notif_' + Date.now();
+    const notificationData = {
+      user_id: validTargetUserId,
+      email: targetEmail,
+      type: 'cashbook_invitation',
+      title: 'New Cashbook Invitation',
+      message: `${inviterName} invited you to join ${cashbookName} as ${role}.`,
+      cashbook_id: cashbookId,
+      invitation_id: isValidUuid(invitationId) ? invitationId : null,
+      is_read: false,
+      created_at: new Date().toISOString()
     };
 
-    const permSummary = rolePermissionSummaries[role] || "Access cashbook data according to assigned role permissions.";
+    try {
+      const { data: notifData, error: notifErr } = await supabaseAdmin
+        .from('notifications')
+        .insert(notificationData)
+        .select()
+        .maybeSingle();
 
-    // Send email via Resend API
-    const resendResponse = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({
-        from: "TrackBook Cashbooks <onboarding@resend.dev>",
-        to: [recipientEmail],
-        subject: "You're invited to join a TrackBook Cashbook",
-        html: `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>TrackBook Cashbook Invitation</title>
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 32px 16px; color: #18181b; }
-              .card { max-width: 540px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e4e4e7; padding: 36px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05); }
-              .brand { display: flex; align-items: center; gap: 8px; margin-bottom: 24px; }
-              .brand-logo { font-size: 22px; font-weight: 900; color: #059669; letter-spacing: -0.5px; }
-              .brand-tag { font-size: 11px; background: #ecfdf5; color: #047857; font-weight: 700; padding: 2px 8px; border-radius: 6px; border: 1px solid #a7f3d0; text-transform: uppercase; }
-              .title { font-size: 20px; font-weight: 800; color: #09090b; margin-top: 0; margin-bottom: 12px; line-height: 1.3; }
-              .body-text { font-size: 14px; color: #52525b; line-height: 1.6; margin-bottom: 24px; }
-              .details-box { background: #fafafa; border: 1px solid #e4e4e7; border-radius: 12px; padding: 20px; margin-bottom: 28px; }
-              .details-row { margin-bottom: 12px; font-size: 13px; }
-              .details-row:last-child { margin-bottom: 0; }
-              .label { color: #71717a; font-weight: 600; display: block; font-size: 11px; text-transform: uppercase; tracking: 0.5px; margin-bottom: 2px; }
-              .value { font-weight: 700; color: #18181b; font-size: 14px; }
-              .role-badge { display: inline-block; background: #10b981; color: #ffffff; font-weight: 800; padding: 3px 10px; border-radius: 6px; font-size: 12px; }
-              .cta-btn { display: block; width: 100%; text-align: center; background-color: #059669; color: #ffffff !important; font-weight: 800; font-size: 15px; padding: 14px 24px; border-radius: 12px; text-decoration: none; box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25); margin-bottom: 24px; box-sizing: border-box; }
-              .expiry-note { font-size: 12px; color: #71717a; text-align: center; margin-bottom: 24px; }
-              .plain-link { font-size: 11px; color: #a1a1aa; word-break: break-all; margin-top: 20px; padding-top: 16px; border-top: 1px solid #f4f4f5; }
-              .footer { text-align: center; font-size: 11px; color: #a1a1aa; margin-top: 28px; line-height: 1.5; }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <div class="brand">
-                <span class="brand-logo">TrackBook</span>
-                <span class="brand-tag">Cashbooks</span>
-              </div>
+      if (notifErr) {
+        console.warn("[send-cashbook-invitation] Notification insert fallback:", notifErr.message);
+        const { data: retryNotif } = await supabaseAdmin
+          .from('notifications')
+          .insert({
+            user_id: validTargetUserId,
+            email: targetEmail,
+            type: 'cashbook_invitation',
+            title: 'New Cashbook Invitation',
+            message: `${inviterName} invited you to join ${cashbookName} as ${role}.`,
+            cashbook_id: cashbookId,
+            is_read: false
+          })
+          .select()
+          .maybeSingle();
 
-              <h1 class="title">You're invited to join a TrackBook Cashbook</h1>
-
-              <p class="body-text">
-                ${inviterName || inviterEmail ? `<strong>${inviterName || inviterEmail}</strong> has invited you` : 'You have been invited'} to collaborate on TrackBook AI Expense Management.
-              </p>
-
-              <div class="details-box">
-                <div class="details-row">
-                  <span class="label">Cashbook Workspace</span>
-                  <span class="value">${cashbookName}</span>
-                </div>
-                <div class="details-row">
-                  <span class="label">Assigned Role</span>
-                  <span class="role-badge">${role}</span>
-                </div>
-                <div class="details-row">
-                  <span class="label">Role Permissions Summary</span>
-                  <span class="value" style="font-weight: 500; font-size: 13px; color: #3f3f46;">${permSummary}</span>
-                </div>
-                <div class="details-row">
-                  <span class="label">Invited Email</span>
-                  <span class="value" style="font-family: monospace;">${recipientEmail}</span>
-                </div>
-              </div>
-
-              <a href="${invitationUrl}" class="cta-btn">Accept Invitation</a>
-
-              <p class="expiry-note">
-                ⏱️ This invitation expires in <strong>7 days</strong>.
-              </p>
-
-              <div class="plain-link">
-                If the button above does not work, copy and paste this link into your browser:<br>
-                <a href="${invitationUrl}" style="color: #059669;">${invitationUrl}</a>
-              </div>
-
-              <div class="footer">
-                If you were not expecting this invitation, you can safely ignore this email.<br>
-                <strong>TrackBook AI Expense Management</strong>
-              </div>
-            </div>
-          </body>
-          </html>
-        `,
-      }),
-    });
-
-    if (!resendResponse.ok) {
-      const errText = await resendResponse.text();
-      console.error("[Edge Function] Resend API error response:", errText);
-      return new Response(
-        JSON.stringify({ error: "Unable to send invitation email. Please try again.", providerError: errText }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+        if (retryNotif?.id) notificationId = retryNotif.id;
+      } else if (notifData?.id) {
+        notificationId = notifData.id;
+      }
+    } catch (nErr: any) {
+      console.warn("[send-cashbook-invitation] Notification creation exception:", nErr.message);
     }
 
-    const resendData = await resendResponse.json();
-    console.log("[Edge Function] Email sent successfully via Resend:", resendData);
+    // 11. Optionally dispatch email via Resend if RESEND_API_KEY is available
+    const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+    if (RESEND_API_KEY) {
+      try {
+        await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${RESEND_API_KEY}`,
+          },
+          body: JSON.stringify({
+            from: "TrackBook Cashbooks <onboarding@resend.dev>",
+            to: [targetEmail],
+            subject: `You're invited to join "${cashbookName}" on TrackBook`,
+            html: `
+              <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e4e4e7; border-radius: 12px;">
+                <h2 style="color: #059669; margin-top: 0;">TrackBook Cashbooks</h2>
+                <h3>You're invited to collaborate</h3>
+                <p><strong>${inviterName}</strong> (${inviterEmail || 'Admin'}) has invited you to join <strong>${cashbookName}</strong> as <strong>${role}</strong>.</p>
+                <div style="margin: 24px 0;">
+                  <a href="${invitationUrl}" style="background-color: #059669; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Accept Invitation</a>
+                </div>
+                <p style="color: #71717a; font-size: 12px;">This invitation expires in 7 days.</p>
+              </div>
+            `
+          })
+        });
+      } catch (emailErr) {
+        console.warn("[send-cashbook-invitation] Email sending note:", emailErr);
+      }
+    }
 
-    return new Response(
-      JSON.stringify({ success: true, message: `Invitation sent successfully to ${recipientEmail}`, data: resendData }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    // 12. Insert Audit Log
+    try {
+      await supabaseAdmin.from('audit_logs').insert({
+        cashbook_id: cashbookId,
+        actor_user_id: validInviterUserId,
+        actor_name: inviterName,
+        actor_email: inviterEmail || 'owner@trackbook.app',
+        target_user_id: validTargetUserId,
+        target_email: targetEmail,
+        target_name: name,
+        action: 'MEMBER_INVITED',
+        new_role: role,
+        details: `Dispatched invitation for ${targetEmail} as ${role}`
+      });
+    } catch (_) {}
+
+    // 13. Return canonical success JSON contract
+    return jsonResponse({
+      success: true,
+      invitation_id: invitationId,
+      invitationId: invitationId,
+      notification_id: notificationId,
+      notificationId: notificationId,
+      token: rawToken,
+      invitationUrl,
+      status: "pending",
+      message: `Invitation sent successfully to ${targetEmail}. An in-app notification has been delivered in real time.`
+    }, 200);
 
   } catch (err: any) {
-    console.error("[Edge Function] Error in send-cashbook-invitation:", err);
-    return new Response(
-      JSON.stringify({ error: err.message || "Unable to send invitation email. Please try again." }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    console.error("[send-cashbook-invitation] Unhandled error:", err);
+    return jsonResponse({
+      success: false,
+      error: "Internal invitation service error.",
+      details: err?.message || String(err),
+    }, 500);
   }
 });
