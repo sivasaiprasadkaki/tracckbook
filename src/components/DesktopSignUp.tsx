@@ -175,13 +175,13 @@ export default function DesktopSignUp({
 
           {/* Error and Success alerts */}
           {error && (
-            <div className="bg-rose-50 border border-rose-100 text-rose-600 px-3 py-2 rounded-lg flex items-start gap-2 text-xs font-semibold mb-2">
+            <div className="bg-rose-50 border border-rose-100 text-rose-600 px-3 py-2 rounded-none flex items-start gap-2 text-xs font-semibold mb-2">
               <span className="material-symbols-outlined text-rose-500 text-[16px]">error</span>
               <span className="flex-1 leading-relaxed">{error}</span>
             </div>
           )}
           {success && (
-            <div className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-3 py-2 rounded-lg flex items-start gap-2 text-xs font-semibold mb-2">
+            <div className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-3 py-2 rounded-none flex items-start gap-2 text-xs font-semibold mb-2">
               <span className="material-symbols-outlined text-emerald-500 text-[16px]">check_circle</span>
               <span className="flex-1 leading-relaxed whitespace-pre-line">{success}</span>
             </div>
@@ -191,7 +191,7 @@ export default function DesktopSignUp({
           <form className="flex flex-col gap-3" onSubmit={handleFormSubmit}>
             {/* Google Button */}
             <button 
-              className="w-full flex items-center justify-center gap-2.5 py-2 px-3 rounded-lg border border-outline-variant bg-surface-container-lowest hover:bg-surface-container transition-colors text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer font-medium" 
+              className="w-full flex items-center justify-center gap-2.5 py-2 px-3 rounded-none border border-outline-variant bg-surface-container-lowest hover:bg-surface-container transition-colors text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer font-medium" 
               type="button"
               onClick={handleGoogleLogin}
             >
@@ -213,10 +213,10 @@ export default function DesktopSignUp({
 
             {/* Inputs */}
             <div className="flex flex-col gap-2.5">
-              <div className="flex flex-col gap-1 input-glow transition-all rounded-lg">
+              <div className="flex flex-col gap-1 input-glow transition-all rounded-none">
                 <label className="text-xs text-on-surface-variant font-medium ml-0.5" htmlFor="fullName">Full Name</label>
                 <input 
-                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 text-xs text-on-surface focus:border-primary focus:ring-0 outline-none transition-colors placeholder:text-outline/60 shadow-sm" 
+                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none px-3 py-2 text-xs text-on-surface focus:border-primary focus:ring-0 outline-none transition-colors placeholder:text-outline/60 shadow-sm" 
                   id="fullName" 
                   placeholder="Jane Doe" 
                   type="text"
@@ -226,10 +226,10 @@ export default function DesktopSignUp({
                 />
               </div>
 
-              <div className="flex flex-col gap-1 input-glow transition-all rounded-lg">
+              <div className="flex flex-col gap-1 input-glow transition-all rounded-none">
                 <label className="text-xs text-on-surface-variant font-medium ml-0.5" htmlFor="email">Work Email</label>
                 <input 
-                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 text-xs text-on-surface focus:border-primary focus:ring-0 outline-none transition-colors placeholder:text-outline/60 shadow-sm" 
+                  className="w-full bg-surface-container-lowest border border-outline-variant rounded-none px-3 py-2 text-xs text-on-surface focus:border-primary focus:ring-0 outline-none transition-colors placeholder:text-outline/60 shadow-sm" 
                   id="email" 
                   placeholder="jane@company.com" 
                   type="email"
@@ -239,11 +239,11 @@ export default function DesktopSignUp({
                 />
               </div>
 
-              <div className="flex flex-col gap-1 input-glow transition-all rounded-lg">
+              <div className="flex flex-col gap-1 input-glow transition-all rounded-none">
                 <label className="text-xs text-on-surface-variant font-medium ml-0.5" htmlFor="password">Password</label>
                 <div className="relative">
                   <input 
-                    className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 text-xs text-on-surface focus:border-primary focus:ring-0 outline-none transition-colors placeholder:text-outline/60 shadow-sm pr-9" 
+                    className="w-full bg-surface-container-lowest border border-outline-variant rounded-none px-3 py-2 text-xs text-on-surface focus:border-primary focus:ring-0 outline-none transition-colors placeholder:text-outline/60 shadow-sm pr-9" 
                     id="password" 
                     placeholder="••••••••" 
                     type={showPassword ? 'text' : 'password'}
@@ -264,11 +264,11 @@ export default function DesktopSignUp({
               </div>
 
               {/* Confirm Password */}
-              <div className="flex flex-col gap-1 input-glow transition-all rounded-lg">
+              <div className="flex flex-col gap-1 input-glow transition-all rounded-none">
                 <label className="text-xs text-on-surface-variant font-medium ml-0.5" htmlFor="confirmPassword">Confirm Password</label>
                 <div className="relative">
                   <input 
-                    className="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 text-xs text-on-surface focus:border-primary focus:ring-0 outline-none transition-colors placeholder:text-outline/60 shadow-sm pr-9" 
+                    className="w-full bg-surface-container-lowest border border-outline-variant rounded-none px-3 py-2 text-xs text-on-surface focus:border-primary focus:ring-0 outline-none transition-colors placeholder:text-outline/60 shadow-sm pr-9" 
                     id="confirmPassword" 
                     placeholder="••••••••" 
                     type={showConfirmPassword ? 'text' : 'password'}
@@ -289,7 +289,7 @@ export default function DesktopSignUp({
               </div>
 
               {/* Password Requirements */}
-              <div className="p-2.5 bg-surface-container-low/80 rounded-lg border border-outline-variant/50 space-y-1.5 mt-0.5">
+              <div className="p-2.5 bg-surface-container-low/80 rounded-none border border-outline-variant/50 space-y-1.5 mt-0.5">
                 <p className="text-[10px] text-on-surface-variant font-semibold uppercase tracking-wider">Password Requirements</p>
                 <div className="grid grid-cols-2 gap-1">
                   {reqs.map((req, i) => (
@@ -316,7 +316,7 @@ export default function DesktopSignUp({
             <div className="flex items-start gap-2.5 mt-0.5 select-none">
               <div className="flex items-center h-4 mt-0.5">
                 <input 
-                  className="w-3.5 h-3.5 rounded border-outline-variant text-primary focus:ring-primary focus:ring-offset-surface bg-surface-container-lowest cursor-pointer transition-colors" 
+                  className="w-3.5 h-3.5 rounded-none border-outline-variant text-primary focus:ring-primary focus:ring-offset-surface bg-surface-container-lowest cursor-pointer transition-colors" 
                   id="terms" 
                   type="checkbox"
                   checked={agreedToTerms}
@@ -330,7 +330,7 @@ export default function DesktopSignUp({
 
             {/* Submit */}
             <button 
-              className="w-full bg-primary hover:bg-surface-tint text-white text-xs py-2.5 px-4 rounded-lg transition-all duration-300 shadow-[0_4px_14px_rgba(91,61,245,0.2)] hover:shadow-[0_6px_20px_rgba(91,61,245,0.3)] mt-1 cursor-pointer flex justify-center items-center font-bold uppercase tracking-wider" 
+              className="w-full bg-primary hover:bg-surface-tint text-white text-xs py-2.5 px-4 rounded-none transition-all duration-300 shadow-[0_4px_14px_rgba(91,61,245,0.2)] hover:shadow-[0_6px_20px_rgba(91,61,245,0.3)] mt-1 cursor-pointer flex justify-center items-center font-bold uppercase tracking-wider" 
               type="submit"
               disabled={loading}
             >

@@ -178,14 +178,14 @@ export default function DesktopForgot({
 
           {/* Error alerts */}
           {error && (
-            <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-lg flex items-start gap-2 text-xs font-semibold">
+            <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-none flex items-start gap-2 text-xs font-semibold">
               <span className="material-symbols-outlined text-rose-500 text-[18px]">error</span>
               <span className="flex-1 leading-relaxed">{error}</span>
             </div>
           )}
 
           {/* Form Area */}
-          <div className="glass-panel rounded-xl p-6 lg:p-8 space-y-6 opacity-0 animate-fade-up" style={{ animationDelay: '0.4s', animationFillMode: 'forwards' }}>
+          <div className="glass-panel rounded-none p-6 lg:p-8 space-y-6 opacity-0 animate-fade-up" style={{ animationDelay: '0.4s', animationFillMode: 'forwards' }}>
             {!success ? (
               /* Standard State Form */
               <form onSubmit={handleFormSubmit} className="space-y-5" id="resetForm">
@@ -196,7 +196,7 @@ export default function DesktopForgot({
                       <span className="material-symbols-outlined text-outline text-[20px]">mail</span>
                     </div>
                     <input 
-                      className="input-field block w-full pl-10 pr-3 py-2.5 border border-outline-variant rounded-lg bg-white text-on-surface font-body-md text-body-md placeholder-outline-variant focus:ring-0" 
+                      className="input-field block w-full pl-10 pr-3 py-2.5 border border-outline-variant rounded-none bg-white text-on-surface font-body-md text-body-md placeholder-outline-variant focus:ring-0" 
                       id="email" 
                       name="email" 
                       placeholder="name@company.com" 
@@ -209,7 +209,7 @@ export default function DesktopForgot({
                 </div>
 
                 <button 
-                  className="btn-primary w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg font-label-md text-label-md uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-container cursor-pointer font-bold" 
+                  className="btn-primary w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-none font-label-md text-label-md uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-container cursor-pointer font-bold" 
                   type="submit"
                   disabled={loading}
                 >
@@ -219,7 +219,7 @@ export default function DesktopForgot({
             ) : (
               /* Success Confirmation State */
               <div className="flex flex-col items-center justify-center text-center space-y-4 py-4" id="confirmationState">
-                <div className="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center mb-2">
+                <div className="w-16 h-16 rounded-none bg-surface-container flex items-center justify-center mb-2">
                   <span className="material-symbols-outlined text-primary-container text-4xl">mark_email_read</span>
                 </div>
                 <h3 className="font-headline-md text-headline-md text-on-surface">Check your email</h3>

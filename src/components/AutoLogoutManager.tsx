@@ -10,16 +10,22 @@ export default function AutoLogoutManager({ session }: { session: any }) {
     // Only monitor on stable sessions
     if (!session || !supabase) return;
 
-    // "Desktop users only"
-    // Use responsive detection (screen width >= 1024px) combined with absence of touch capabilities
+    // "Desktop users only" - Mobile view/devices will never be logged out automatically
     const checkIsDesktop = () => {
-      const isLargeScreen = window.innerWidth >= 1024;
-      const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-      return isLargeScreen && !hasTouch;
+      if (typeof window === 'undefined') return false;
+      const ua = navigator.userAgent || '';
+      const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile|CriOS/i.test(ua);
+      const isSmallScreen = window.innerWidth < 1024;
+      const hasTouch = 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+      
+      if (isMobileUA || isSmallScreen || hasTouch) {
+        return false;
+      }
+      return true;
     };
 
     if (!checkIsDesktop()) {
-      console.log('[AutoLogout] Mobile/Tablet touch user detected. Inactivity timer bypassed.');
+      console.log('[AutoLogout] Mobile device/view detected. Automatic inactivity logout is disabled.');
       return;
     }
 

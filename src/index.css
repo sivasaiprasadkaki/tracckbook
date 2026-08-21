@@ -80,17 +80,6 @@
   --color-on-error: #ffffff;
   --color-on-secondary-fixed: #001f28;
   --color-primary: #4212de;
-
-  /* Sharp Enterprise Edges Everywhere */
-  --radius-xs: 0px;
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
-  --radius-2xl: 0px;
-  --radius-3xl: 0px;
-  --radius-4xl: 0px;
-  --radius: 0px;
 }
 
 @layer base {
@@ -104,28 +93,30 @@
     @apply cursor-not-allowed;
   }
 
-  /* Sharp Enterprise Square Corners Everywhere */
-  *, ::before, ::after {
-    border-radius: 0px !important;
-  }
+  /* Sharp Enterprise Square Corners on Desktop View Only (>= 1024px) */
+  @media (min-width: 1024px) {
+    *, ::before, ::after {
+      border-radius: 0px !important;
+    }
 
-  button, input, select, textarea, [role="button"], [role="dialog"], [role="tab"], [role="menu"], [role="listbox"], [role="option"], .card, .modal, [class*="rounded"] {
-    border-radius: 0px !important;
-  }
+    button, input, select, textarea, [role="button"], [role="dialog"], [role="tab"], [role="menu"], [role="listbox"], [role="option"], .card, .modal, [class*="rounded"] {
+      border-radius: 0px !important;
+    }
 
-  /* Explicit exception for circular indicator pings/dots if tagged */
-  .force-circle, [data-circle="true"] {
-    border-radius: 9999px !important;
+    /* Explicit exception for circular indicator pings/dots or user profile avatars if tagged */
+    .force-circle, [data-circle="true"] {
+      border-radius: 9999px !important;
+    }
   }
 }
 
 @layer components {
   .card {
-    @apply bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-sm transition-all;
+    @apply bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl transition-all;
   }
   
   .input {
-    @apply w-full px-4 py-2.5 rounded-sm border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 focus:ring-1 focus:ring-emerald-500 outline-none transition-all dark:text-white text-sm;
+    @apply w-full px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 focus:ring-1 focus:ring-emerald-500 outline-none transition-all dark:text-white text-sm;
   }
 }
 

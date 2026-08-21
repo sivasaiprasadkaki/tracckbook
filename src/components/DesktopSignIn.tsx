@@ -107,8 +107,8 @@ export default function DesktopSignIn({
               />
               
               {/* Floating Widgets / Glassmorphism Accents */}
-              <div className="absolute top-[15%] left-[5%] glass-panel rounded-xl p-4 flex items-center gap-4 float-anim-delayed">
-                <div className="w-10 h-10 rounded-full bg-primary-container/20 flex items-center justify-center">
+              <div className="absolute top-[15%] left-[5%] glass-panel rounded-none p-4 flex items-center gap-4 float-anim-delayed">
+                <div className="w-10 h-10 rounded-none bg-primary-container/20 flex items-center justify-center">
                   <span className="material-symbols-outlined text-primary">receipt_long</span>
                 </div>
                 <div>
@@ -117,8 +117,8 @@ export default function DesktopSignIn({
                 </div>
               </div>
               
-              <div className="absolute bottom-[20%] right-[5%] glass-panel rounded-xl p-4 flex items-center gap-4 float-anim">
-                <div className="w-10 h-10 rounded-full bg-secondary-container/20 flex items-center justify-center">
+              <div className="absolute bottom-[20%] right-[5%] glass-panel rounded-none p-4 flex items-center gap-4 float-anim">
+                <div className="w-10 h-10 rounded-none bg-secondary-container/20 flex items-center justify-center">
                   <span className="material-symbols-outlined text-secondary">analytics</span>
                 </div>
                 <div>
@@ -132,7 +132,7 @@ export default function DesktopSignIn({
 
         {/* Right Side: Auth Card (40%) */}
         <div className="w-full lg:w-[40%] bg-surface flex items-center justify-center p-[16px] lg:p-[40px] z-20 shadow-[-20px_0_40px_rgba(0,0,0,0.02)]">
-          <div className="w-full max-w-md bg-white rounded-[24px] p-8 lg:p-10 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.08)] border border-surface-variant fade-in-up" style={{ animationDelay: '0.2s' }}>
+          <div className="w-full max-w-md bg-white rounded-none p-8 lg:p-10 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.08)] border border-surface-variant fade-in-up" style={{ animationDelay: '0.2s' }}>
             
             <div className="text-center mb-8">
               <img 
@@ -147,13 +147,13 @@ export default function DesktopSignIn({
 
             {/* Error and Success alerts */}
             {error && (
-              <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-lg flex items-start gap-2 text-xs font-semibold mb-4">
+              <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-none flex items-start gap-2 text-xs font-semibold mb-4">
                 <span className="material-symbols-outlined text-rose-500 text-[18px]">error</span>
                 <span className="flex-1 leading-relaxed">{error}</span>
               </div>
             )}
             {success && (
-              <div className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-4 py-3 rounded-lg flex items-start gap-2 text-xs font-semibold mb-4">
+              <div className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-4 py-3 rounded-none flex items-start gap-2 text-xs font-semibold mb-4">
                 <span className="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
                 <span className="flex-1 leading-relaxed whitespace-pre-line">{success}</span>
               </div>
@@ -167,7 +167,7 @@ export default function DesktopSignIn({
                     <span className="material-symbols-outlined text-outline-variant text-[20px]">mail</span>
                   </div>
                   <input 
-                    className="block w-full pl-10 pr-3 py-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-on-surface placeholder-outline focus:ring-2 focus:ring-primary-container focus:border-primary-container transition-all text-sm" 
+                    className="block w-full pl-10 pr-3 py-3 border border-outline-variant rounded-none bg-surface-container-lowest text-on-surface placeholder-outline focus:ring-2 focus:ring-primary-container focus:border-primary-container transition-all text-sm" 
                     id="email" 
                     placeholder="you@company.com" 
                     type="email"
@@ -194,7 +194,7 @@ export default function DesktopSignIn({
                     <span className="material-symbols-outlined text-outline-variant text-[20px]">lock</span>
                   </div>
                   <input 
-                    className="block w-full pl-10 pr-10 py-3 border border-outline-variant rounded-lg bg-surface-container-lowest text-on-surface placeholder-outline focus:ring-2 focus:ring-primary-container focus:border-primary-container transition-all text-sm" 
+                    className="block w-full pl-10 pr-10 py-3 border border-outline-variant rounded-none bg-surface-container-lowest text-on-surface placeholder-outline focus:ring-2 focus:ring-primary-container focus:border-primary-container transition-all text-sm" 
                     id="password" 
                     placeholder="••••••••" 
                     type={showPassword ? 'text' : 'password'}
@@ -215,7 +215,7 @@ export default function DesktopSignIn({
               </div>
 
               <button 
-                className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg shadow-sm font-body-md text-body-md font-medium text-white bg-primary hover:bg-primary-container hover:shadow-md transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary mt-6 cursor-pointer" 
+                className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-none shadow-sm font-body-md text-body-md font-medium text-white bg-primary hover:bg-primary-container hover:shadow-md transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary mt-6 cursor-pointer" 
                 type="submit"
                 disabled={loading}
               >
@@ -232,7 +232,7 @@ export default function DesktopSignIn({
               </div>
 
               <button 
-                className="w-full flex items-center justify-center py-3 px-4 border border-outline-variant rounded-lg shadow-sm font-body-md text-body-md font-medium text-on-surface bg-white hover:bg-surface-container-low transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary cursor-pointer" 
+                className="w-full flex items-center justify-center py-3 px-4 border border-outline-variant rounded-none shadow-sm font-body-md text-body-md font-medium text-on-surface bg-white hover:bg-surface-container-low transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary cursor-pointer" 
                 type="button"
                 onClick={handleGoogleLogin}
               >

@@ -699,19 +699,19 @@ export default function Auth({
         className={cn(
           "w-full flex flex-col relative font-sans text-slate-900 transition-colors duration-300",
           isDesktop 
-            ? "max-w-[414px] min-h-[850px] max-h-[900px] rounded-[40px] shadow-[0_24px_60px_rgba(66,18,222,0.12)] border border-slate-200/50 bg-[#f8f9fd] dark:bg-[#030303] overflow-y-auto overflow-x-hidden" 
+            ? "max-w-[414px] min-h-[850px] max-h-[900px] rounded-none shadow-[0_24px_60px_rgba(66,18,222,0.12)] border border-slate-200/50 bg-[#f8f9fd] dark:bg-[#030303] overflow-y-auto overflow-x-hidden" 
             : "h-full max-h-screen h-[100dvh] max-h-[100dvh] max-w-md p-4 sm:p-6 overflow-y-auto overflow-x-hidden bg-transparent"
         )}
       >
         {/* Top gradient decorative bubble */}
-        <div className="absolute top-0 left-0 w-full h-[250px] bg-gradient-to-b from-[#5b3df5]/8 to-transparent -z-10 rounded-b-[40px] pointer-events-none" />
+        <div className={cn("absolute top-0 left-0 w-full h-[250px] bg-gradient-to-b from-[#5b3df5]/8 to-transparent -z-10 pointer-events-none", isDesktop ? "rounded-none" : "rounded-b-[40px]")} />
 
         {/* Back navigation header (Only on Register and Forgot pages) */}
         {mode !== 'signin' && (
           <header className={cn("flex items-center w-full shrink-0 z-10", isDesktop ? "px-5 h-16" : "px-4 h-12")}>
             <button
               onClick={() => setMode('signin')}
-              className="p-2 -ml-2 rounded-full hover:bg-slate-200/50 dark:hover:bg-zinc-850 transition-colors active:scale-95 text-slate-800 dark:text-zinc-200 cursor-pointer bg-transparent border-none outline-none"
+              className={cn("p-2 -ml-2 hover:bg-slate-200/50 dark:hover:bg-zinc-850 transition-colors active:scale-95 text-slate-800 dark:text-zinc-200 cursor-pointer bg-transparent border-none outline-none", isDesktop ? "rounded-none" : "rounded-full")}
             >
               <ArrowLeft size={20} className="stroke-[2.5px]" />
             </button>
@@ -730,7 +730,7 @@ export default function Auth({
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-2xl flex flex-col gap-1.5 text-xs font-semibold overflow-hidden shadow-sm mb-4"
+                  className={cn("bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 flex flex-col gap-1.5 text-xs font-semibold overflow-hidden shadow-sm mb-4", isDesktop ? "rounded-none" : "rounded-2xl")}
                 >
                   <div className="flex items-start gap-2">
                     <AlertCircle size={15} className="shrink-0 mt-0.5 text-rose-500" />
@@ -745,7 +745,7 @@ export default function Auth({
                       <button
                         type="button"
                         onClick={handleAutoSignUpAndLogin}
-                        className="w-full bg-rose-600 hover:bg-rose-700 text-white py-2 px-3 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-colors flex items-center justify-center gap-1 cursor-pointer border-none"
+                        className={cn("w-full bg-rose-600 hover:bg-rose-700 text-white py-2 px-3 font-bold text-[10px] uppercase tracking-wider transition-colors flex items-center justify-center gap-1 cursor-pointer border-none", isDesktop ? "rounded-none" : "rounded-xl")}
                       >
                         ✨ Create Account & Login instantly
                       </button>
@@ -759,7 +759,7 @@ export default function Auth({
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-4 py-3 rounded-2xl flex items-start gap-2 text-xs font-semibold overflow-hidden shadow-sm mb-4"
+                  className={cn("bg-emerald-50 border border-emerald-100 text-emerald-600 px-4 py-3 flex items-start gap-2 text-xs font-semibold overflow-hidden shadow-sm mb-4", isDesktop ? "rounded-none" : "rounded-2xl")}
                 >
                   <CheckCircle2 size={15} className="shrink-0 mt-0.5 text-emerald-500" />
                   <span className="whitespace-pre-line flex-1">{success}</span>
@@ -810,8 +810,8 @@ export default function Auth({
 
               {/* Login Credentials Card */}
               <div className={cn(
-                "bg-white dark:bg-zinc-900/50 rounded-[28px] shadow-[0_4px_30px_rgba(66,18,222,0.03)] border border-slate-100 dark:border-zinc-800/80 p-5 sm:p-6 mx-4 sm:mx-5",
-                isDesktop ? "mb-6" : "mb-3"
+                "bg-white dark:bg-zinc-900/50 shadow-[0_4px_30px_rgba(66,18,222,0.03)] border border-slate-100 dark:border-zinc-800/80 p-5 sm:p-6 mx-4 sm:mx-5",
+                isDesktop ? "mb-6 rounded-none" : "mb-3 rounded-[28px]"
               )}>
                 <form onSubmit={handleAuth} className="space-y-3.5">
                   {/* Email field */}
@@ -822,7 +822,7 @@ export default function Auth({
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="Email address"
-                      className="w-full px-4 py-3 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 rounded-xl text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium"
+                      className={cn("w-full px-4 py-3 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium", isDesktop ? "rounded-none" : "rounded-xl")}
                     />
                   </div>
 
@@ -834,7 +834,7 @@ export default function Auth({
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Password"
-                      className="w-full pl-4 pr-12 py-3 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 rounded-xl text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium"
+                      className={cn("w-full pl-4 pr-12 py-3 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium", isDesktop ? "rounded-none" : "rounded-xl")}
                     />
                     <button
                       type="button"
@@ -860,7 +860,7 @@ export default function Auth({
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full bg-[#4212de] hover:bg-[#340eb3] text-white font-bold py-3 rounded-xl shadow-[0_8px_30px_rgba(66,18,222,0.15)] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer border-none outline-none mt-1"
+                    className={cn("w-full bg-[#4212de] hover:bg-[#340eb3] text-white font-bold py-3 shadow-[0_8px_30px_rgba(66,18,222,0.15)] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer border-none outline-none mt-1", isDesktop ? "rounded-none" : "rounded-xl")}
                   >
                     {loading ? <Loader2 size={18} className="animate-spin" /> : "Sign In"}
                   </button>
@@ -876,7 +876,7 @@ export default function Auth({
                   <button
                     type="button"
                     onClick={handleGoogleLogin}
-                    className="w-full bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-200 border border-[#c8c4d9] dark:border-zinc-800 font-bold py-3 rounded-xl flex items-center justify-center gap-3 hover:bg-slate-50 dark:hover:bg-zinc-850 active:scale-[0.98] transition-all cursor-pointer"
+                    className={cn("w-full bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-200 border border-[#c8c4d9] dark:border-zinc-800 font-bold py-3 flex items-center justify-center gap-3 hover:bg-slate-50 dark:hover:bg-zinc-850 active:scale-[0.98] transition-all cursor-pointer", isDesktop ? "rounded-none" : "rounded-xl")}
                   >
                     <svg fill="none" height="18" viewBox="0 0 24 24" width="18" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
                       <path d="M22.56 12.25C22.56 11.47 22.49 10.72 22.36 10H12V14.26H17.92C17.67 15.63 16.89 16.79 15.72 17.57V20.33H19.29C21.37 18.41 22.56 15.59 22.56 12.25Z" fill="#4285F4"></path>
@@ -911,8 +911,8 @@ export default function Auth({
               <div className={cn("px-5 text-left", isDesktop ? "mb-5" : "mb-3")}>
                 {/* Soft Bank Rounded Box */}
                 <div className={cn(
-                  "bg-[#5b3df5] rounded-2xl flex items-center justify-center shadow-[0_8px_30px_rgba(66,18,222,0.15)] text-white",
-                  isDesktop ? "w-14 h-14 mb-4" : "w-10 h-10 mb-2"
+                  "bg-[#5b3df5] flex items-center justify-center shadow-[0_8px_30px_rgba(66,18,222,0.15)] text-white",
+                  isDesktop ? "w-14 h-14 mb-4 rounded-none" : "w-10 h-10 mb-2 rounded-2xl"
                 )}>
                   <svg className={isDesktop ? "w-7 h-7" : "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
@@ -927,8 +927,8 @@ export default function Auth({
 
               {/* Registration Card */}
               <div className={cn(
-                "bg-white dark:bg-zinc-900/50 rounded-[28px] shadow-[0_4px_30px_rgba(66,18,222,0.03)] border border-slate-100 dark:border-zinc-800/80 p-5 sm:p-6 mx-4 sm:mx-5",
-                isDesktop ? "mb-6" : "mb-3"
+                "bg-white dark:bg-zinc-900/50 shadow-[0_4px_30px_rgba(66,18,222,0.03)] border border-slate-100 dark:border-zinc-800/80 p-5 sm:p-6 mx-4 sm:mx-5",
+                isDesktop ? "mb-6 rounded-none" : "mb-3 rounded-[28px]"
               )}>
                 <form onSubmit={handleAuth} className="space-y-3">
                   {/* Full Name */}
@@ -939,7 +939,7 @@ export default function Auth({
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       placeholder="Full Name"
-                      className="w-full px-4 py-2.5 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 rounded-xl text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium"
+                      className={cn("w-full px-4 py-2.5 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium", isDesktop ? "rounded-none" : "rounded-xl")}
                     />
                   </div>
 
@@ -951,7 +951,7 @@ export default function Auth({
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="Email"
-                      className="w-full px-4 py-2.5 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 rounded-xl text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium"
+                      className={cn("w-full px-4 py-2.5 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium", isDesktop ? "rounded-none" : "rounded-xl")}
                     />
                   </div>
 
@@ -963,7 +963,7 @@ export default function Auth({
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Password"
-                      className="w-full pl-4 pr-12 py-2.5 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 rounded-xl text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium"
+                      className={cn("w-full pl-4 pr-12 py-2.5 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium", isDesktop ? "rounded-none" : "rounded-xl")}
                     />
                     <button
                       type="button"
@@ -982,7 +982,7 @@ export default function Auth({
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="Confirm Password"
-                      className="w-full pl-4 pr-12 py-2.5 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 rounded-xl text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium"
+                      className={cn("w-full pl-4 pr-12 py-2.5 bg-[#f8f9fd] dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium", isDesktop ? "rounded-none" : "rounded-xl")}
                     />
                     <button
                       type="button"
@@ -999,7 +999,7 @@ export default function Auth({
                       type="checkbox"
                       id="terms"
                       required
-                      className="w-4 h-4 rounded border-slate-300 text-[#4212de] focus:ring-[#4212de] bg-transparent cursor-pointer"
+                      className={cn("w-4 h-4 border-slate-300 text-[#4212de] focus:ring-[#4212de] bg-transparent cursor-pointer", isDesktop ? "rounded-none" : "rounded")}
                     />
                     <label htmlFor="terms" className="ml-2.5 text-xs text-slate-500 dark:text-zinc-400 font-semibold cursor-pointer select-none">
                       I agree to <span className="text-[#4212de] dark:text-[#7d5bf7] font-bold hover:underline">Terms</span> &amp; <span className="text-[#4212de] dark:text-[#7d5bf7] font-bold hover:underline">Privacy</span>
@@ -1010,7 +1010,7 @@ export default function Auth({
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full bg-[#4212de] hover:bg-[#340eb3] text-white font-bold py-3 rounded-xl shadow-[0_8px_30px_rgba(66,18,222,0.15)] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer border-none outline-none mt-1"
+                    className={cn("w-full bg-[#4212de] hover:bg-[#340eb3] text-white font-bold py-3 shadow-[0_8px_30px_rgba(66,18,222,0.15)] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer border-none outline-none mt-1", isDesktop ? "rounded-none" : "rounded-xl")}
                   >
                     {loading ? <Loader2 size={18} className="animate-spin" /> : "Create Account"}
                   </button>
@@ -1026,7 +1026,7 @@ export default function Auth({
                   <button
                     type="button"
                     onClick={handleGoogleLogin}
-                    className="w-full bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-200 border border-[#c8c4d9] dark:border-zinc-800 font-bold py-2.5 rounded-xl flex items-center justify-center gap-3 hover:bg-slate-50 dark:hover:bg-zinc-850 active:scale-[0.98] transition-all cursor-pointer"
+                    className={cn("w-full bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-200 border border-[#c8c4d9] dark:border-zinc-800 font-bold py-2.5 flex items-center justify-center gap-3 hover:bg-slate-50 dark:hover:bg-zinc-850 active:scale-[0.98] transition-all cursor-pointer", isDesktop ? "rounded-none" : "rounded-xl")}
                   >
                     <svg fill="none" height="18" viewBox="0 0 24 24" width="18" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
                       <path d="M22.56 12.25C22.56 11.47 22.49 10.72 22.36 10H12V14.26H17.92C17.67 15.63 16.89 16.79 15.72 17.57V20.33H19.29C21.37 18.41 22.56 15.59 22.56 12.25Z" fill="#4285F4"></path>
@@ -1061,11 +1061,11 @@ export default function Auth({
                 {/* Center Image Illustration */}
                 <div className={cn("flex justify-center", isDesktop ? "mt-4 mb-6" : "mt-2 mb-3")}>
                   <div className={cn(
-                    "relative rounded-full overflow-hidden bg-indigo-50 dark:bg-zinc-900 flex items-center justify-center p-0.5 shadow-sm",
-                    isDesktop ? "w-40 h-40" : "w-24 h-24"
+                    "relative overflow-hidden bg-indigo-50 dark:bg-zinc-900 flex items-center justify-center p-0.5 shadow-sm",
+                    isDesktop ? "w-40 h-40 rounded-none" : "w-24 h-24 rounded-full"
                   )}>
                     <img
-                      className="w-full h-full object-cover rounded-full"
+                      className={cn("w-full h-full object-cover", isDesktop ? "rounded-none" : "rounded-full")}
                       alt="Forgot Password illustration"
                       src="https://lh3.googleusercontent.com/aida-public/AB6AXuD_bq3fUpU7IqvHnwyxH1OROgQknC668PAgbPYm5C4MdpHhM5y5AOMHwExnYzFSCTJFTsOf9TLs824M6mYRJGLgoyyC7nKBXKHlLEfyCWdj6mVL9csFCRE5IdJfu-Ytlcg7xzx-Mpq2hf5Jhnm4wK3SIWbbsU1PeEYRTO2zicoleB0d6HFXyrzuH2Fq33HfIAhQnXib36LlrtPVEor3bnOlQ1uL7NVFTT1w8cGC-QbRtZNi6vQbvv14STPyZdVnhnpdnOnoVDv6wdc"
                       referrerPolicy="no-referrer"
@@ -1097,7 +1097,7 @@ export default function Auth({
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="Email Address"
-                      className="w-full pl-11 pr-4 py-3 bg-white dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 rounded-xl text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium"
+                      className={cn("w-full pl-11 pr-4 py-3 bg-white dark:bg-zinc-950 border border-[#c8c4d9] dark:border-zinc-800 text-sm text-slate-800 dark:text-zinc-100 placeholder-slate-400 focus:outline-none focus:border-[#4212de] focus:ring-1 focus:ring-[#4212de] transition-colors font-medium", isDesktop ? "rounded-none" : "rounded-xl")}
                     />
                   </div>
 
@@ -1105,7 +1105,7 @@ export default function Auth({
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full bg-[#4212de] hover:bg-[#340eb3] text-white font-bold py-3 rounded-xl shadow-[0_8px_30px_rgba(66,18,222,0.15)] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer border-none outline-none mt-4"
+                    className={cn("w-full bg-[#4212de] hover:bg-[#340eb3] text-white font-bold py-3 shadow-[0_8px_30px_rgba(66,18,222,0.15)] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer border-none outline-none mt-4", isDesktop ? "rounded-none" : "rounded-xl")}
                   >
                     {loading ? <Loader2 size={18} className="animate-spin" /> : "Send Reset Link"}
                   </button>
