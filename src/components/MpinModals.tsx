@@ -45,23 +45,23 @@ export function CreateMpinModal({ isOpen, onClose, userId, onSuccess, theme = 'l
     setError(null);
 
     if (mpin.length !== 6) {
-      setError('Please enter a full 6-digit MPIN.');
+      setError('Please enter a full 6-digit TPIN.');
       return;
     }
 
     if (confirmMpin.length !== 6) {
-      setError('Please confirm your 6-digit MPIN.');
+      setError('Please confirm your 6-digit TPIN.');
       return;
     }
 
     if (mpin !== confirmMpin) {
-      setError('MPIN and Confirm MPIN do not match.');
+      setError('TPIN and Confirm TPIN do not match.');
       return;
     }
 
     const validation = validateMpinStrength(mpin);
     if (!validation.isValid) {
-      setError(validation.error || 'Invalid MPIN strength.');
+      setError(validation.error || 'Invalid TPIN strength.');
       return;
     }
 
@@ -69,9 +69,9 @@ export function CreateMpinModal({ isOpen, onClose, userId, onSuccess, theme = 'l
     try {
       const res = await saveUserMpin(userId, mpin);
       if (!res.success) {
-        setError(res.error || 'Failed to save MPIN.');
+        setError(res.error || 'Failed to save TPIN.');
       } else {
-        setSuccess('MPIN created successfully');
+        setSuccess('TPIN created successfully');
         setTimeout(() => {
           onSuccess();
           onClose();
@@ -113,7 +113,7 @@ export function CreateMpinModal({ isOpen, onClose, userId, onSuccess, theme = 'l
                   <Shield size={18} />
                 </div>
                 <div>
-                  <h3 className="text-base font-extrabold tracking-tight">Create your MPIN</h3>
+                  <h3 className="text-base font-extrabold tracking-tight">Create your TPIN</h3>
                   <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-medium">6-digit mobile security PIN</p>
                 </div>
               </div>
@@ -154,10 +154,10 @@ export function CreateMpinModal({ isOpen, onClose, userId, onSuccess, theme = 'l
             </AnimatePresence>
 
             <form onSubmit={handleCreate} className="space-y-4">
-              {/* MPIN input */}
+              {/* TPIN input */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
-                  MPIN (6 Digits)
+                  TPIN (6 Digits)
                 </label>
                 <div className="relative">
                   <input
@@ -183,10 +183,10 @@ export function CreateMpinModal({ isOpen, onClose, userId, onSuccess, theme = 'l
                 </div>
               </div>
 
-              {/* Confirm MPIN input */}
+              {/* Confirm TPIN input */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
-                  Confirm MPIN
+                  Confirm TPIN
                 </label>
                 <div className="relative">
                   <input
@@ -235,7 +235,7 @@ export function CreateMpinModal({ isOpen, onClose, userId, onSuccess, theme = 'l
                   disabled={loading || mpin.length !== 6 || confirmMpin.length !== 6}
                   className="flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                 >
-                  {loading ? <Loader2 size={16} className="animate-spin" /> : "Create MPIN"}
+                  {loading ? <Loader2 size={16} className="animate-spin" /> : "Create TPIN"}
                 </button>
               </div>
             </form>
@@ -289,59 +289,59 @@ export function ChangeMpinModal({
     setError(null);
 
     if (currentMpin.length !== 6) {
-      setError('Please enter your 6-digit Current MPIN.');
+      setError('Please enter your 6-digit Current TPIN.');
       return;
     }
 
     if (newMpin.length !== 6) {
-      setError('Please enter your 6-digit New MPIN.');
+      setError('Please enter your 6-digit New TPIN.');
       return;
     }
 
     if (confirmNewMpin.length !== 6) {
-      setError('Please confirm your 6-digit New MPIN.');
+      setError('Please confirm your 6-digit New TPIN.');
       return;
     }
 
     if (newMpin !== confirmNewMpin) {
-      setError('New MPIN and Confirmation do not match.');
+      setError('New TPIN and Confirmation do not match.');
       return;
     }
 
     if (currentMpin === newMpin) {
-      setError('New MPIN cannot be the same as your Current MPIN.');
+      setError('New TPIN cannot be the same as your Current TPIN.');
       return;
     }
 
     const validation = validateMpinStrength(newMpin);
     if (!validation.isValid) {
-      setError(validation.error || 'Invalid New MPIN strength.');
+      setError(validation.error || 'Invalid New TPIN strength.');
       return;
     }
 
     setLoading(true);
     try {
-      // 1. Verify Current MPIN
+      // 1. Verify Current TPIN
       const verifyRes = await verifyUserMpin(userId, currentMpin);
       if (!verifyRes.success) {
-        setError(verifyRes.error || 'Current MPIN is incorrect.');
+        setError(verifyRes.error || 'Current TPIN is incorrect.');
         setLoading(false);
         return;
       }
 
-      // 2. Save New MPIN
+      // 2. Save New TPIN
       const saveRes = await saveUserMpin(userId, newMpin);
       if (!saveRes.success) {
-        setError(saveRes.error || 'Failed to update MPIN.');
+        setError(saveRes.error || 'Failed to update TPIN.');
       } else {
-        setSuccess('MPIN changed successfully');
+        setSuccess('TPIN changed successfully');
         setTimeout(() => {
           onSuccess();
           onClose();
         }, 1200);
       }
     } catch (err: any) {
-      setError(err.message || 'An error occurred while changing MPIN.');
+      setError(err.message || 'An error occurred while changing TPIN.');
     } finally {
       setLoading(false);
     }
@@ -376,7 +376,7 @@ export function ChangeMpinModal({
                   <KeyRound size={18} />
                 </div>
                 <div>
-                  <h3 className="text-base font-extrabold tracking-tight">Change your MPIN</h3>
+                  <h3 className="text-base font-extrabold tracking-tight">Change your TPIN</h3>
                   <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-medium">Update existing 6-digit security PIN</p>
                 </div>
               </div>
@@ -417,11 +417,11 @@ export function ChangeMpinModal({
             </AnimatePresence>
 
             <form onSubmit={handleChange} className="space-y-3.5">
-              {/* Current MPIN */}
+              {/* Current TPIN */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">
-                    Current MPIN
+                    Current TPIN
                   </label>
                   {onOpenForgotMpin && (
                     <button
@@ -432,7 +432,7 @@ export function ChangeMpinModal({
                       }}
                       className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
                     >
-                      Forgot MPIN?
+                      Forgot TPIN?
                     </button>
                   )}
                 </div>
@@ -454,10 +454,10 @@ export function ChangeMpinModal({
                 />
               </div>
 
-              {/* New MPIN */}
+              {/* New TPIN */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
-                  New MPIN
+                  New TPIN
                 </label>
                 <input
                   type="password"
@@ -477,10 +477,10 @@ export function ChangeMpinModal({
                 />
               </div>
 
-              {/* Confirm New MPIN */}
+              {/* Confirm New TPIN */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
-                  Confirm New MPIN
+                  Confirm New TPIN
                 </label>
                 <input
                   type="password"
@@ -610,18 +610,18 @@ export function ForgotMpinModal({
     setError(null);
 
     if (newMpin.length !== 6 || confirmNewMpin.length !== 6) {
-      setError('Please provide and confirm a 6-digit MPIN.');
+      setError('Please provide and confirm a 6-digit TPIN.');
       return;
     }
 
     if (newMpin !== confirmNewMpin) {
-      setError('MPIN and Confirmation do not match.');
+      setError('TPIN and Confirmation do not match.');
       return;
     }
 
     const validation = validateMpinStrength(newMpin);
     if (!validation.isValid) {
-      setError(validation.error || 'Weak MPIN choice.');
+      setError(validation.error || 'Weak TPIN choice.');
       return;
     }
 
@@ -629,16 +629,16 @@ export function ForgotMpinModal({
     try {
       const res = await saveUserMpin(userId, newMpin);
       if (!res.success) {
-        setError(res.error || 'Failed to save new MPIN.');
+        setError(res.error || 'Failed to save new TPIN.');
       } else {
-        setSuccess('MPIN reset successfully');
+        setSuccess('TPIN reset successfully');
         setTimeout(() => {
           onSuccess();
           onClose();
         }, 1200);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to update MPIN.');
+      setError(err.message || 'Failed to update TPIN.');
     } finally {
       setLoading(false);
     }
@@ -674,10 +674,10 @@ export function ForgotMpinModal({
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold tracking-tight">
-                    {step === 'verify' ? 'Forgot MPIN' : 'Set New MPIN'}
+                    {step === 'verify' ? 'Forgot TPIN' : 'Set New TPIN'}
                   </h3>
                   <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-medium">
-                    {step === 'verify' ? 'Verify TrackBook Account' : 'Choose 6-digit MPIN'}
+                    {step === 'verify' ? 'Verify TrackBook Account' : 'Choose 6-digit TPIN'}
                   </p>
                 </div>
               </div>
@@ -720,7 +720,7 @@ export function ForgotMpinModal({
             {step === 'verify' ? (
               <form onSubmit={handleVerifyAccount} className="space-y-4">
                 <div className="p-3 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-xs font-medium text-slate-600 dark:text-zinc-300">
-                  To reset your MPIN, please enter your password for account: <strong className="text-slate-900 dark:text-white block mt-0.5">{userEmail}</strong>
+                  To reset your TPIN, please enter your password for account: <strong className="text-slate-900 dark:text-white block mt-0.5">{userEmail}</strong>
                 </div>
 
                 <div>
@@ -781,7 +781,7 @@ export function ForgotMpinModal({
               <form onSubmit={handleSaveNewMpin} className="space-y-3.5">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
-                    New MPIN (6 Digits)
+                    New TPIN (6 Digits)
                   </label>
                   <input
                     type="password"
@@ -803,7 +803,7 @@ export function ForgotMpinModal({
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
-                    Confirm New MPIN
+                    Confirm New TPIN
                   </label>
                   <input
                     type="password"
@@ -842,7 +842,7 @@ export function ForgotMpinModal({
                     disabled={loading || newMpin.length !== 6 || confirmNewMpin.length !== 6}
                     className="flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                   >
-                    {loading ? <Loader2 size={16} className="animate-spin" /> : "Save New MPIN"}
+                    {loading ? <Loader2 size={16} className="animate-spin" /> : "Save New TPIN"}
                   </button>
                 </div>
               </form>

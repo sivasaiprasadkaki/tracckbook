@@ -41,15 +41,15 @@ const BANNED_MPINS = new Set([
  */
 export function validateMpinStrength(mpin: string): { isValid: boolean; error?: string } {
   if (!mpin) {
-    return { isValid: false, error: 'MPIN is required.' };
+    return { isValid: false, error: 'TPIN is required.' };
   }
 
   if (!/^\d{6}$/.test(mpin)) {
-    return { isValid: false, error: 'MPIN must be exactly 6 digits.' };
+    return { isValid: false, error: 'TPIN must be exactly 6 digits.' };
   }
 
   if (BANNED_MPINS.has(mpin)) {
-    return { isValid: false, error: 'This MPIN is too common or easy to guess. Choose a stronger one.' };
+    return { isValid: false, error: 'This TPIN is too common or easy to guess. Choose a stronger one.' };
   }
 
   // Check all identical digits (e.g., 000000, 777777)
@@ -247,19 +247,19 @@ export async function verifyUserMpin(userId: string, enteredMpin: string): Promi
   if (lockoutRemaining > 0) {
     return {
       success: false,
-      error: `Too many failed attempts. Please wait ${lockoutRemaining} seconds or reset via Forgot MPIN.`,
+      error: `Too many failed attempts. Please wait ${lockoutRemaining} seconds or reset via Forgot TPIN.`,
     };
   }
 
   const recordStr = localStorage.getItem(`${STORAGE_PREFIX}${userId}`);
   if (!recordStr) {
-    return { success: false, error: 'No MPIN set for this account.' };
+    return { success: false, error: 'No TPIN set for this account.' };
   }
 
   try {
     const record = JSON.parse(recordStr);
     if (!record.salt || !record.hash) {
-      return { success: false, error: 'Corrupted MPIN record. Please reset using Forgot MPIN.' };
+      return { success: false, error: 'Corrupted TPIN record. Please reset using Forgot TPIN.' };
     }
 
     const calculatedHash = await hashMpinWithSalt(enteredMpin, userId, record.salt);
@@ -274,18 +274,18 @@ export async function verifyUserMpin(userId: string, enteredMpin: string): Promi
       if (remaining <= 0) {
         return {
           success: false,
-          error: `Incorrect MPIN. Account locked for ${INITIAL_LOCKOUT_SECONDS}s.`,
+          error: `Incorrect TPIN. Account locked for ${INITIAL_LOCKOUT_SECONDS}s.`,
           remainingAttempts: 0,
         };
       }
       return {
         success: false,
-        error: `Incorrect MPIN. ${remaining} attempt${remaining > 1 ? 's' : ''} remaining.`,
+        error: `Incorrect TPIN. ${remaining} attempt${remaining > 1 ? 's' : ''} remaining.`,
         remainingAttempts: remaining,
       };
     }
   } catch (err) {
-    console.error('Error during MPIN verification:', err);
+    console.error('Error during TPIN verification:', err);
     return { success: false, error: 'Verification failed. Please try again.' };
   }
 }

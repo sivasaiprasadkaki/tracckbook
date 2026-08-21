@@ -6809,7 +6809,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <span className="font-medium flex-1 text-left">Settings</span>
                       </button>
 
-                      {/* Mobile-Only MPIN Security Options */}
+                      {/* Mobile-Only TPIN Security Options */}
                       {isMobileSecurityActive && (
                         <>
                           {!hasUserMpin ? (
@@ -6821,7 +6821,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                               )}
                             >
                               <Shield size={18} className="text-indigo-500" />
-                              <span className="font-medium flex-1 text-left">Create your MPIN</span>
+                              <span className="font-medium flex-1 text-left">Create your TPIN</span>
                             </button>
                           ) : (
                             <>
@@ -6833,7 +6833,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                 )}
                               >
                                 <KeyRound size={18} className="text-indigo-500" />
-                                <span className="font-medium flex-1 text-left">Change your MPIN</span>
+                                <span className="font-medium flex-1 text-left">Change your TPIN</span>
                               </button>
                               <button 
                                 onClick={() => { vibrate(); openMpinForgotModal(); setIsProfileOpen(false); }}
@@ -6843,7 +6843,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                 )}
                               >
                                 <RefreshCw size={18} className="text-indigo-500" />
-                                <span className="font-medium flex-1 text-left">Forgot MPIN</span>
+                                <span className="font-medium flex-1 text-left">Forgot TPIN</span>
                               </button>
                             </>
                           )}
