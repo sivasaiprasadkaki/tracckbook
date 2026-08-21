@@ -64,6 +64,7 @@ import {
   UserPlus,
   ShieldCheck,
   Camera,
+  ImagePlus,
   Phone,
   Crop,
   CheckCircle2,
@@ -72,13 +73,13 @@ import {
   Merge,
   Eye
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { cn, formatCurrency, vibrate } from '../lib/utils';
 import { parseReceipt, parseMultipleReceipts } from '../services/gemini';
 import { processAndOcrImage } from '../services/ocrService';
 import { supabase } from '../lib/supabase';
-import { uploadToCloudinary, getOptimizedCloudinaryUrl, getExportOptimizedCloudinaryUrl, getUserCloudinaryFolder, resolveAttachmentUrl } from '../services/cloudinary';
+import { uploadToCloudinary, getOptimizedCloudinaryUrl, getExportOptimizedCloudinaryUrl, getUserCloudinaryFolder, getUserProfileCloudinaryFolder, resolveAttachmentUrl } from '../services/cloudinary';
 import imageCompression from 'browser-image-compression';
 import XLSX from 'xlsx-js-style';
 import { jsPDF } from 'jspdf';
@@ -900,7 +901,7 @@ const MobileTransactionRow = React.memo(({
   return (
     <motion.div
       id={`entry-${t.id}`}
-      initial={{ opacity: 0, y: 16 }}
+      initial={false}
       animate={
         isCurrentlyDeleting 
           ? { opacity: 0, x: -100, scale: 0.9, height: 0, margin: 0, padding: 0 } 
@@ -911,7 +912,7 @@ const MobileTransactionRow = React.memo(({
       transition={
         isJustEdited
           ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
-          : { duration: 0.4, ease: [0.16, 1, 0.3, 1], delay: Math.min(index * 0.03, 0.35) }
+          : { duration: 0.2, ease: "easeOut" }
       }
       onMouseDown={() => canSelect && onTouchStart(t.id)}
       onMouseUp={canSelect ? onTouchEnd : undefined}
@@ -1161,7 +1162,7 @@ const DesktopTransactionRow = React.memo(({
   return (
     <motion.tr 
       id={`entry-${t.id}`}
-      initial={{ opacity: 0, y: 12 }}
+      initial={false}
       animate={
         isCurrentlyDeleting 
           ? { opacity: 0, x: -50, scale: 0.95 } 
@@ -1172,7 +1173,7 @@ const DesktopTransactionRow = React.memo(({
       transition={
         isJustEdited
           ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
-          : { duration: 0.35, ease: [0.16, 1, 0.3, 1], delay: Math.min(index * 0.03, 0.35) }
+          : { duration: 0.2, ease: "easeOut" }
       }
       className={cn(
         "group transition-all",
@@ -1681,6 +1682,7 @@ export function getBookSlug(name: string, id: string): string {
 }
 
 export default function Dashboard({ session, theme, setTheme }: { session: any, theme: 'light' | 'dark', setTheme: React.Dispatch<React.SetStateAction<'light' | 'dark'>> }) {
+  const shouldReduceMotion = useReducedMotion();
   // Routing Hooks
   const { bookSlug, tabName } = useParams();
   const navigate = useNavigate();
@@ -1702,9 +1704,19 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   // Global State
   const [userName, setUserName] = useState('Siva');
-  const [books, setBooks] = useState<Cashbook[]>([]);
+  const [books, setBooks] = useState<Cashbook[]>(() => {
+    try {
+      const saved = localStorage.getItem('trackbook_cached_books');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
   
   const booksLengthRef = useRef(books.length);
+  const initialLoadedRef = useRef(false);
   useEffect(() => {
     booksLengthRef.current = books.length;
   }, [books.length]);
@@ -1762,8 +1774,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [helpResponse, setHelpResponse] = useState('');
   const [isHelpLoading, setIsHelpLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [isLoading, setIsLoading] = useState(true);
-  const [activeBookId, setActiveBookIdState] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(() => {
+    try {
+      const saved = localStorage.getItem('trackbook_cached_books');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return false;
+      }
+    } catch (e) {}
+    return true;
+  });
+  const [activeBookId, setActiveBookIdState] = useState<string | null>(() => {
+    if (bookSlug && books.length > 0) {
+      const foundBook = books.find(b => getBookSlug(b.name, b.id) === bookSlug || b.id === bookSlug);
+      if (foundBook) return foundBook.id;
+    }
+    return null;
+  });
   const [isEntriesLoading, setIsEntriesLoading] = useState(false);
   const [showOfflineDialog, setShowOfflineDialog] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
@@ -1785,9 +1812,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const setActiveBookId = (id: string | null) => {
     setActiveBookIdState(id);
     if (id) {
-      const cached = entriesCache.get(id);
-      if (!cached || cached.length === 0) {
+      if (!entriesCache.has(id)) {
         setIsEntriesLoading(true);
+      } else {
+        setIsEntriesLoading(false);
       }
     } else {
       setIsEntriesLoading(false);
@@ -1940,6 +1968,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('trackbook_avatar') || null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [userPhone, setUserPhone] = useState<string | null>(null);
   const [userPhoneVerified, setUserPhoneVerified] = useState(false);
   const [userPhoneLinkedAt, setUserPhoneLinkedAt] = useState<string | null>(null);
@@ -2420,15 +2457,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     if (!supabase || !session?.user) return;
     try {
       await supabase.auth.updateUser({
-        data: { full_name: userName }
+        data: { full_name: userName, avatar_url: userAvatarUrl }
       });
       try {
         await supabase.from('profiles').upsert({
           id: session.user.id,
           email: session.user.email || null,
           full_name: userName,
+          avatar_url: userAvatarUrl,
           phone: session.user.phone || null,
           phone_verified: session.user.phone_confirmed_at ? true : false,
+          updated_at: new Date().toISOString()
         }, { onConflict: 'id' });
       } catch (dbErr) {
         console.warn('Profiles table sync failed:', dbErr);
@@ -2470,13 +2509,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     vibrate(30);
   };
 
-  // Set isEntriesLoading to true immediately on activeBookId changes if cache is empty, to prevent false empty flashes
+  // Set isEntriesLoading to true immediately on activeBookId changes only if cache is missing
   useEffect(() => {
     if (activeBookId) {
-      const cached = entriesCache.get(activeBookId);
-      if (!cached || cached.length === 0) {
+      if (!entriesCache.has(activeBookId)) {
         setIsEntriesLoading(true);
+      } else {
+        setIsEntriesLoading(false);
       }
+    } else {
+      setIsEntriesLoading(false);
     }
   }, [activeBookId]);
 
@@ -3073,14 +3115,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
   }, [activeBookId]);
 
-  // Set user name and phone from session & profiles database
+  // Set user name, phone and avatar from session & profiles database
   useEffect(() => {
     const fetchProfileData = async () => {
       if (!supabase || !session?.user) return;
       try {
+        let avatarFromMeta = session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || null;
+        
         const { data, error } = await supabase
           .from('profiles')
-          .select('phone, full_name, phone_verified, phone_linked_at')
+          .select('phone, full_name, phone_verified, phone_linked_at, avatar_url')
           .eq('id', session.user.id)
           .maybeSingle();
         
@@ -3097,12 +3141,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           } else if (session.user.user_metadata?.full_name) {
             setUserName(session.user.user_metadata.full_name);
           }
+          if (data.avatar_url) {
+            setUserAvatarUrl(data.avatar_url);
+            try { localStorage.setItem('trackbook_avatar', data.avatar_url); } catch (e) {}
+          } else if (avatarFromMeta) {
+            setUserAvatarUrl(avatarFromMeta);
+            try { localStorage.setItem('trackbook_avatar', avatarFromMeta); } catch (e) {}
+          }
         } else {
           setUserPhone(session.user.phone || null);
           setUserPhoneVerified(!!session.user.phone_confirmed_at);
           setUserPhoneLinkedAt(session.user.phone_confirmed_at || null);
           if (session.user.user_metadata?.full_name) {
             setUserName(session.user.user_metadata.full_name);
+          }
+          if (avatarFromMeta) {
+            setUserAvatarUrl(avatarFromMeta);
+            try { localStorage.setItem('trackbook_avatar', avatarFromMeta); } catch (e) {}
           }
         }
       } catch (err) {
@@ -3112,6 +3167,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         setUserPhoneLinkedAt(session.user.phone_confirmed_at || null);
         if (session.user.user_metadata?.full_name) {
           setUserName(session.user.user_metadata.full_name);
+        }
+        const avatarFromMeta = session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || null;
+        if (avatarFromMeta) {
+          setUserAvatarUrl(avatarFromMeta);
         }
       }
     };
@@ -3133,7 +3192,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       console.log('[DEBUG] QUERY INVALIDATED');
     }
 
-    setIsLoading(true);
+    // Only trigger full-screen loading spinner on very initial load if no cached books
+    if (!initialLoadedRef.current && booksLengthRef.current === 0) {
+      setIsLoading(true);
+    }
     try {
       console.log('[fetchData] Loading cashbooks and entries...');
       const userEmail = session.user.email ? session.user.email.toLowerCase() : '';
@@ -3356,6 +3418,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         });
 
         setBooks(mappedBooks);
+        try {
+          localStorage.setItem('trackbook_cached_books', JSON.stringify(mappedBooks));
+        } catch (e) {}
 
         // Solve loading delay by resolving activeBookId immediately if not set
         if (bookSlugRef.current) {
@@ -3370,6 +3435,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     } catch (error: any) {
       console.error('Error fetching data from Supabase:', error);
     } finally {
+      initialLoadedRef.current = true;
       setIsLoading(false);
       setIsEntriesLoading(false);
     }
@@ -3659,18 +3725,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const lastWeek = new Date(today);
       lastWeek.setDate(lastWeek.getDate() - 7);
 
+      const tDate = t.date instanceof Date 
+        ? t.date 
+        : new Date(t.date || t.created_at || 0);
+
       if (transactionDurationFilter === 'Today') {
-        matchesDuration = t.date >= today;
+        matchesDuration = tDate >= today;
       } else if (transactionDurationFilter === 'Yesterday') {
-        matchesDuration = t.date >= yesterday && t.date < today;
+        matchesDuration = tDate >= yesterday && tDate < today;
       } else if (transactionDurationFilter === 'Last Week') {
-        matchesDuration = t.date >= lastWeek;
+        matchesDuration = tDate >= lastWeek;
       } else if (transactionDurationFilter === 'Custom' && customFilterDate) {
         // Parse custom date string "YYYY-MM-DD"
         const [cy, cm, cd] = customFilterDate.split('-').map(Number);
         const filterDateStart = new Date(cy, cm - 1, cd);
         const filterDateEnd = new Date(cy, cm - 1, cd + 1);
-        matchesDuration = t.date >= filterDateStart && t.date < filterDateEnd;
+        matchesDuration = tDate >= filterDateStart && tDate < filterDateEnd;
       }
 
       return matchesSearch && matchesType && matchesCategory && matchesDuration;
@@ -3678,18 +3748,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     // Apply Dynamic Sorting
     return [...filtered].sort((a, b) => {
+      const timeA = a.date instanceof Date ? a.date.getTime() : new Date(a.date || a.created_at || 0).getTime() || 0;
+      const timeB = b.date instanceof Date ? b.date.getTime() : new Date(b.date || b.created_at || 0).getTime() || 0;
+
       let comparison = 0;
       if (sortColumn === 'category') {
         // Primary: Category, Secondary: Date (newest first)
-        comparison = a.category.localeCompare(b.category);
+        comparison = (a.category || '').localeCompare(b.category || '');
         if (comparison === 0) {
-          comparison = b.date.getTime() - a.date.getTime();
+          comparison = timeB - timeA;
         }
       } else {
         // Primary: Date (newest first), Secondary: Category
-        comparison = b.date.getTime() - a.date.getTime();
+        comparison = timeB - timeA;
         if (comparison === 0) {
-          comparison = a.category.localeCompare(b.category);
+          comparison = (a.category || '').localeCompare(b.category || '');
         }
       }
       return sortDirection === 'asc' ? comparison : -comparison;
@@ -3705,14 +3778,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const runningBalancesMap = useMemo(() => {
     if (!activeBook || !activeBookId) return new Map<string, number>();
     
-    const sig = activeBook.transactions.map(t => `${t.id}_${t.amount}_${t.type}_${t.date?.getTime()}`).join('|');
+    const sig = activeBook.transactions.map(t => {
+      const tTime = t.date instanceof Date ? t.date.getTime() : new Date(t.date || t.created_at || 0).getTime() || 0;
+      return `${t.id}_${t.amount}_${t.type}_${tTime}`;
+    }).join('|');
     const cachedSig = computedBalancesSignatureCache.get(activeBookId);
     if (cachedSig === sig && computedBalancesCache.has(activeBookId)) {
       return computedBalancesCache.get(activeBookId)!;
     }
     
     // Sort all transactions in active book chronologically (oldest date first)
-    const chronological = [...activeBook.transactions].sort((a, b) => a.date.getTime() - b.date.getTime());
+    const chronological = [...activeBook.transactions].sort((a, b) => {
+      const timeA = a.date instanceof Date ? a.date.getTime() : new Date(a.date || a.created_at || 0).getTime() || 0;
+      const timeB = b.date instanceof Date ? b.date.getTime() : new Date(b.date || b.created_at || 0).getTime() || 0;
+      return timeA - timeB;
+    });
     
     const map = new Map<string, number>();
     let current = 0;
@@ -4079,11 +4159,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     const finalCategory = category === 'Custom' ? customCategory : category;
     const finalMode = mode === 'Custom' ? customMode : mode;
+
     const amountNum = parseFloat(amount);
     const dateObj = new Date(transactionDate);
 
     const isEdit = !!editingTransaction;
-    const hasAttachments = selectedImages.some(img => img.startsWith('blob:'));
 
     // Check if there are any changes for an edit transaction
     let hasChanges = true;
@@ -4110,7 +4190,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
 
     if (isEdit && !hasChanges) {
-      // No changes made, just close without any animation or DB queries!
+      // No changes made, close immediately
       setShowForm(null);
       setEditingTransaction(null);
       resetForm();
@@ -4118,294 +4198,76 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return;
     }
 
-    // Only show loading animation if new image attachments are being uploaded/processed
-    const showLoadingAnimation = hasAttachments;
+    const resolvedName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User';
 
-    // Initialize progress modal state with appropriate steps
-    let steps: Array<{ label: string; status: 'pending' | 'loading' | 'success' | 'error' }> = [];
-    if (isEdit) {
-      steps = [
-        { label: 'Validating changes', status: 'loading' as const },
-        { label: 'Updating attachment', status: 'pending' as const },
-        { label: 'Updating transaction', status: 'pending' as const },
-        { label: 'Refreshing dashboard', status: 'pending' as const },
-        { label: 'Completed', status: 'pending' as const }
-      ];
-    } else {
-      if (hasAttachments) {
-        steps = [
-          { label: 'Preparing entry', status: 'loading' as const },
-          { label: 'Compressing image', status: 'pending' as const },
-          { label: 'Uploading to TrackBook Cloud', status: 'pending' as const },
-          { label: 'Saving transaction', status: 'pending' as const },
-          { label: 'Completed', status: 'pending' as const }
-        ];
-      } else {
-        steps = [
-          { label: 'Preparing entry', status: 'loading' as const },
-          { label: 'Saving transaction', status: 'pending' as const },
-          { label: 'Completed', status: 'pending' as const }
-        ];
-      }
-    }
+    if (isEdit && editingTransaction) {
+      const originalTx = editingTransaction;
+      const savedId = originalTx.id;
+      const currentSelectedImages = [...selectedImages];
+      const currentImageLayout = imageLayout;
+      const currentCategory = finalCategory || 'General';
+      const currentMode = finalMode || 'Cash';
+      const currentDescription = description;
+      const currentShowForm = showForm;
 
-    if (showLoadingAnimation) {
-      setProgressModal({
-        isOpen: true,
-        type: isEdit ? 'edit' : 'create',
-        progress: 5,
-        steps,
-        statusText: isEdit ? 'Validating changes...' : 'Preparing entry...',
-        errorMsg: null,
-        success: false
-      });
-    }
+      // 1. OPTIMISTIC UPDATE: Update UI state instantly
+      const updatedTx: Transaction = {
+        ...originalTx,
+        amount: amountNum,
+        type: currentShowForm as 'in' | 'out',
+        description: currentDescription,
+        category: currentCategory,
+        mode: currentMode,
+        date: dateObj,
+        images: currentSelectedImages,
+        imageLayout: currentImageLayout
+      };
 
-    const updateStepStatus = (
-      stepLabel: string,
-      status: 'pending' | 'loading' | 'success' | 'error',
-      progress: number,
-      statusText: string
-    ) => {
-      if (!showLoadingAnimation) return;
-      setProgressModal(prev => {
-        if (!prev) return null;
-        const nextSteps = prev.steps.map(s => {
-          if (s.label === stepLabel) {
-            return { ...s, status };
-          }
-          return s;
-        });
-        return {
-          ...prev,
-          progress,
-          steps: nextSteps,
-          statusText
-        };
-      });
-    };
+      setBooks(prev => prev.map(b => b.id === activeBookId ? {
+        ...b,
+        transactions: b.transactions.map(t => t.id === originalTx.id ? updatedTx : t)
+      } : b));
 
-    try {
-      const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
+      const prevCached = entriesCache.get(activeBookId) || [];
+      entriesCache.set(activeBookId, prevCached.map(t => t.id === originalTx.id ? {
+        ...t,
+        amount: amountNum,
+        type: currentShowForm,
+        description: currentDescription,
+        category: currentCategory,
+        mode: currentMode,
+        date: dateObj,
+        image_layout: currentImageLayout
+      } : t));
 
-      if (isEdit && editingTransaction) {
-        console.log('[handleAddTransaction] Direct Edit Mode for existing ID:', editingTransaction.id);
-        
-        // 1. Validating changes completed
-        updateStepStatus('Validating changes', 'success', 20, 'Updating attachment...');
-        // Set updating attachment as loading
-        setProgressModal(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            steps: prev.steps.map(s => s.label === 'Updating attachment' ? { ...s, status: 'loading' as const } : s)
-          };
-        });
+      attachmentCache.set(savedId, { images: currentSelectedImages, isAi: false });
 
-        const finalImages: string[] = [];
-        let index = 0;
-        const totalBlobImages = selectedImages.filter(img => {
-          const clean = img.split('#')[0];
-          return clean.startsWith('blob:');
-        }).length;
+      // 2. CLOSE FORM IMMEDIATELY
+      setShowForm(null);
+      setEditingTransaction(null);
+      resetForm();
+      setIsSubmitting(false);
+      setProgressModal(null);
 
-        for (const img of selectedImages) {
-          const hashIdx = img.indexOf('#');
-          const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
-          const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
-
-          if (cleanImg.startsWith('blob:')) {
-            const file = imageFilesRef.current[cleanImg];
-            if (file) {
-              // Compressing step
-              updateStepStatus('Updating attachment', 'loading', 30 + Math.floor((index / totalBlobImages) * 15), `Compressing image ${index + 1}/${totalBlobImages}...`);
-              const isImage = file.type && file.type.startsWith('image/');
-              const processedFile = isImage ? await compressImage(file) : file;
-              const fileToUpload = processedFile instanceof File 
-                ? processedFile 
-                : new File([processedFile], file.name || 'image.jpg', { type: file.type });
-              
-              // Uploading step
-              updateStepStatus('Updating attachment', 'loading', 45 + Math.floor((index / totalBlobImages) * 25), `Uploading attachment ${index + 1}/${totalBlobImages}...`);
-              const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
-              if (cloudUrl) {
-                finalImages.push(cloudUrl + hash);
-              }
-              index++;
-            }
-          } else {
-            finalImages.push(img);
-          }
+      // Highlight the edited transaction in the list
+      setTimeout(() => {
+        setJustEditedTransactionId(savedId);
+        const element = document.getElementById(`entry-${savedId}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
-
-        updateStepStatus('Updating attachment', 'success', 70, 'Updating transaction details...');
-        // Set updating transaction as loading
-        setProgressModal(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            steps: prev.steps.map(s => s.label === 'Updating transaction' ? { ...s, status: 'loading' as const } : s)
-          };
-        });
-
-        const resolvedUser = await resolveUserDataForAttachments();
-        const payload: any = {
-          amount: amountNum,
-          type: showForm,
-          description: description,
-          category: finalCategory || 'General',
-          mode: finalMode,
-          date: safeToISOString(dateObj),
-          user_name: resolvedUser.name
-        };
-
-        // Update database metadata
-        let entryError: any = null;
-        const firstUpdate = await supabase
-          .from('entries')
-          .update({ ...payload, image_layout: imageLayout })
-          .eq('id', editingTransaction.id);
-        entryError = firstUpdate.error;
-        
-        if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-          // Retry without image_layout
-          const secondUpdate = await supabase
-            .from('entries')
-            .update(payload)
-            .eq('id', editingTransaction.id);
-          entryError = secondUpdate.error;
-
-          if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-            // Retry without user_name
-            const payloadNoUser = { ...payload };
-            delete payloadNoUser.user_name;
-            
-            const thirdUpdate = await supabase
-              .from('entries')
-              .update({ ...payloadNoUser, image_layout: imageLayout })
-              .eq('id', editingTransaction.id);
-            entryError = thirdUpdate.error;
-
-            if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-              const fourthUpdate = await supabase
-                .from('entries')
-                .update(payloadNoUser)
-                .eq('id', editingTransaction.id);
-              entryError = fourthUpdate.error;
-            }
-          }
-        }
-
-        // RBAC Service fallback if direct Supabase update fails
-        if (entryError) {
-          try {
-            const rbacSaveRes = await fetch('/api/rbac/save-entry', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                entry: { id: editingTransaction.id, cashbook_id: activeBookId, ...payload, image_layout: imageLayout },
-                userId: session.user.id,
-                userEmail: session.user.email
-              })
-            });
-            if (rbacSaveRes.ok) {
-              const rbacSaveJson = await rbacSaveRes.json();
-              if (rbacSaveJson.success) {
-                entryError = null;
-              }
-            }
-          } catch (_) {}
-        }
-
-        if (entryError) throw entryError;
-
-        // Synchronize attachment links
-        await supabase.from('attachments').delete().eq('entry_id', editingTransaction.id);
-        await supabase.from('ai_attachments').delete().eq('entry_id', editingTransaction.id);
-        if (finalImages.length > 0) {
-          const resolvedUser = await resolveUserDataForAttachments();
-          const attachmentInserts = finalImages.map(url => ({
-            entry_id: editingTransaction.id,
-            user_id: session.user.id,
-            user_name: resolvedUser.name,
-            user_email: resolvedUser.email,
-            file_url: url
-          }));
-          await supabase.from('attachments').insert(attachmentInserts);
-        }
-
-        updateStepStatus('Updating transaction', 'success', 85, 'Refreshing dashboard...');
-        // Set refreshing dashboard as loading
-        setProgressModal(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            steps: prev.steps.map(s => s.label === 'Refreshing dashboard' ? { ...s, status: 'loading' as const } : s)
-          };
-        });
-
-        // Refreshing dashboard
-        await fetchData();
-
-        updateStepStatus('Refreshing dashboard', 'success', 100, 'Saving complete!');
-        // Set completed as success, and set success state
-        setProgressModal(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            success: true,
-            steps: prev.steps.map(s => s.label === 'Completed' ? { ...s, status: 'success' as const } : s)
-          };
-        });
-
-        // Hold for 700ms and close if animation was active
-        if (showLoadingAnimation) {
-          await new Promise(resolve => setTimeout(resolve, 700));
-        }
-
-        // Close form and finish
-        setShowForm(null);
-        setEditingTransaction(null);
-        resetForm();
-        setIsSubmitting(false);
-        setProgressModal(null);
-
-        const savedId = editingTransaction.id;
         setTimeout(() => {
-          setJustEditedTransactionId(savedId);
-          const element = document.getElementById(`entry-${savedId}`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-          setTimeout(() => {
-            setJustEditedTransactionId(null);
-          }, 2000);
-        }, 150);
+          setJustEditedTransactionId(null);
+        }, 2000);
+      }, 50);
 
-      } else {
-        console.log('[handleAddTransaction] Direct Creation Mode...');
-        const tempId = safeUUID();
+      // 3. PERSIST SILENTLY IN BACKGROUND
+      (async () => {
+        try {
+          const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
+          const finalImages: string[] = [];
 
-        // 1. Preparing entry step
-        updateStepStatus('Preparing entry', 'success', hasAttachments ? 20 : 40, hasAttachments ? 'Compressing image...' : 'Saving transaction...');
-        
-        const finalImages: string[] = [];
-        if (hasAttachments) {
-          // Set compressing image as loading
-          setProgressModal(prev => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              steps: prev.steps.map(s => s.label === 'Compressing image' ? { ...s, status: 'loading' as const } : s)
-            };
-          });
-
-          const blobImages = selectedImages.filter(img => {
-            const clean = img.split('#')[0];
-            return clean.startsWith('blob:');
-          });
-          let index = 0;
-          for (const img of selectedImages) {
+          for (const img of currentSelectedImages) {
             const hashIdx = img.indexOf('#');
             const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
             const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
@@ -4413,234 +4275,281 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             if (cleanImg.startsWith('blob:')) {
               const file = imageFilesRef.current[cleanImg];
               if (file) {
-                updateStepStatus('Compressing image', 'loading', 20 + Math.floor((index / blobImages.length) * 15), `Compressing image ${index + 1}/${blobImages.length}...`);
                 const isImage = file.type && file.type.startsWith('image/');
                 const processedFile = isImage ? await compressImage(file) : file;
                 const fileToUpload = processedFile instanceof File 
                   ? processedFile 
                   : new File([processedFile], file.name || 'image.jpg', { type: file.type });
-                
-                if (index === blobImages.length - 1) {
-                  updateStepStatus('Compressing image', 'success', 35, 'Uploading to TrackBook Cloud...');
-                  setProgressModal(prev => {
-                    if (!prev) return null;
-                    return {
-                      ...prev,
-                      steps: prev.steps.map(s => s.label === 'Uploading to TrackBook Cloud' ? { ...s, status: 'loading' as const } : s)
-                    };
-                  });
-                }
-
-                updateStepStatus('Uploading to TrackBook Cloud', 'loading', 40 + Math.floor((index / blobImages.length) * 45), `Uploading attachment ${index + 1}/${blobImages.length}...`);
                 const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
                 if (cloudUrl) {
                   finalImages.push(cloudUrl + hash);
                 }
-                index++;
               }
             } else {
               finalImages.push(img);
             }
           }
-          updateStepStatus('Uploading to TrackBook Cloud', 'success', 85, 'Saving transaction...');
-        }
 
-        // Set saving transaction as loading
-        setProgressModal(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            steps: prev.steps.map(s => s.label === 'Saving transaction' ? { ...s, status: 'loading' as const } : s)
+          const resolvedUser = await resolveUserDataForAttachments();
+          const payload: any = {
+            amount: amountNum,
+            type: currentShowForm,
+            description: currentDescription,
+            category: currentCategory,
+            mode: currentMode,
+            date: safeToISOString(dateObj),
+            user_name: resolvedUser.name
           };
-        });
 
-        const resolvedUser = await resolveUserDataForAttachments();
-        const payload: any = {
-          id: tempId,
-          cashbook_id: activeBookId,
-          user_id: session.user.id,
-          user_name: resolvedUser.name,
-          amount: amountNum,
-          type: showForm,
-          description: description,
-          category: finalCategory || 'General',
-          mode: finalMode,
-          date: safeToISOString(dateObj),
-          source: 'Manual'
-        };
-
-        let entryError: any = null;
-        
-        // Attempt insert with fallback combinations
-        const firstTry = await supabase
-          .from('entries')
-          .insert([{ ...payload, image_layout: imageLayout }]);
-        entryError = firstTry.error;
-
-        if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-          const secondTry = await supabase.from('entries').insert([payload]);
-          entryError = secondTry.error;
+          let entryError: any = null;
+          const firstUpdate = await supabase
+            .from('entries')
+            .update({ ...payload, image_layout: currentImageLayout })
+            .eq('id', savedId);
+          entryError = firstUpdate.error;
 
           if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-            const payloadNoSource = { ...payload };
-            delete payloadNoSource.source;
-            const thirdTry = await supabase
-              .from('entries')
-              .insert([{ ...payloadNoSource, image_layout: imageLayout }]);
-            entryError = thirdTry.error;
-
+            const secondUpdate = await supabase.from('entries').update(payload).eq('id', savedId);
+            entryError = secondUpdate.error;
             if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-              const fourthTry = await supabase.from('entries').insert([payloadNoSource]);
-              entryError = fourthTry.error;
-
+              const payloadNoUser = { ...payload };
+              delete payloadNoUser.user_name;
+              const thirdUpdate = await supabase.from('entries').update({ ...payloadNoUser, image_layout: currentImageLayout }).eq('id', savedId);
+              entryError = thirdUpdate.error;
               if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-                // Fall back completely by removing user_name in case column does not exist
-                const payloadNoUser = { ...payload };
-                delete payloadNoUser.user_name;
-                const fifthTry = await supabase
-                  .from('entries')
-                  .insert([{ ...payloadNoUser, image_layout: imageLayout }]);
-                entryError = fifthTry.error;
+                const fourthUpdate = await supabase.from('entries').update(payloadNoUser).eq('id', savedId);
+                entryError = fourthUpdate.error;
+              }
+            }
+          }
 
+          if (entryError) {
+            try {
+              const rbacSaveRes = await fetch('/api/rbac/save-entry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  entry: { id: savedId, cashbook_id: activeBookId, ...payload, image_layout: currentImageLayout },
+                  userId: session.user.id,
+                  userEmail: session.user.email
+                })
+              });
+              if (rbacSaveRes.ok) {
+                const rbacSaveJson = await rbacSaveRes.json();
+                if (rbacSaveJson.success) entryError = null;
+              }
+            } catch (_) {}
+          }
+
+          if (entryError) throw entryError;
+
+          await supabase.from('attachments').delete().eq('entry_id', savedId);
+          await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
+          if (finalImages.length > 0) {
+            const attachmentInserts = finalImages.map(url => ({
+              entry_id: savedId,
+              user_id: session.user.id,
+              user_name: resolvedUser.name,
+              user_email: resolvedUser.email,
+              file_url: url
+            }));
+            await supabase.from('attachments').insert(attachmentInserts);
+          }
+
+          await fetchData();
+        } catch (bgErr: any) {
+          console.error('[Instant Edit] Background sync error:', bgErr);
+          setBooks(prev => prev.map(b => b.id === activeBookId ? {
+            ...b,
+            transactions: b.transactions.map(t => t.id === originalTx.id ? originalTx : t)
+          } : b));
+          entriesCache.set(activeBookId, prevCached);
+          setError(bgErr.message || 'Failed to update entry. Please check your connection.');
+        }
+      })();
+
+    } else {
+      // Direct Creation Mode
+      const tempId = safeUUID();
+      const currentSelectedImages = [...selectedImages];
+      const currentImageLayout = imageLayout;
+      const currentCategory = finalCategory || 'General';
+      const currentMode = finalMode || 'Cash';
+      const currentDescription = description;
+      const currentShowForm = showForm;
+
+      // 1. OPTIMISTIC UPDATE: Add transaction to UI state instantly
+      const optimisticTx: Transaction = {
+        id: tempId,
+        amount: amountNum,
+        type: currentShowForm as 'in' | 'out',
+        description: currentDescription,
+        category: currentCategory,
+        mode: currentMode,
+        date: dateObj,
+        images: currentSelectedImages,
+        imageLayout: currentImageLayout,
+        source: 'Manual',
+        user_name: resolvedName
+      };
+
+      setBooks(prev => prev.map(b => b.id === activeBookId ? {
+        ...b,
+        transactions: [optimisticTx, ...b.transactions]
+      } : b));
+
+      const prevCached = entriesCache.get(activeBookId) || [];
+      entriesCache.set(activeBookId, [{
+        id: tempId,
+        amount: amountNum,
+        type: currentShowForm,
+        description: currentDescription,
+        category: currentCategory,
+        mode: currentMode,
+        date: dateObj,
+        image_layout: currentImageLayout,
+        user_id: session.user.id,
+        cashbook_id: activeBookId
+      }, ...prevCached]);
+
+      attachmentCache.set(tempId, { images: currentSelectedImages, isAi: false });
+
+      // 2. CLOSE FORM IMMEDIATELY
+      setShowForm(null);
+      resetForm();
+      setIsSubmitting(false);
+      setProgressModal(null);
+
+      // Scroll and highlight the new transaction immediately
+      setTimeout(() => {
+        setJustEditedTransactionId(tempId);
+        const element = document.getElementById(`entry-${tempId}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        setTimeout(() => {
+          setJustEditedTransactionId(null);
+        }, 2000);
+      }, 50);
+
+      // 3. PERSIST SILENTLY IN BACKGROUND
+      (async () => {
+        try {
+          const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
+          const finalImages: string[] = [];
+
+          for (const img of currentSelectedImages) {
+            const hashIdx = img.indexOf('#');
+            const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
+            const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
+
+            if (cleanImg.startsWith('blob:')) {
+              const file = imageFilesRef.current[cleanImg];
+              if (file) {
+                const isImage = file.type && file.type.startsWith('image/');
+                const processedFile = isImage ? await compressImage(file) : file;
+                const fileToUpload = processedFile instanceof File 
+                  ? processedFile 
+                  : new File([processedFile], file.name || 'image.jpg', { type: file.type });
+                const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
+                if (cloudUrl) {
+                  finalImages.push(cloudUrl + hash);
+                }
+              }
+            } else {
+              finalImages.push(img);
+            }
+          }
+
+          const resolvedUser = await resolveUserDataForAttachments();
+          const payload: any = {
+            id: tempId,
+            cashbook_id: activeBookId,
+            user_id: session.user.id,
+            user_name: resolvedUser.name,
+            amount: amountNum,
+            type: currentShowForm,
+            description: currentDescription,
+            category: currentCategory,
+            mode: currentMode,
+            date: safeToISOString(dateObj),
+            source: 'Manual'
+          };
+
+          let entryError: any = null;
+          const firstTry = await supabase
+            .from('entries')
+            .insert([{ ...payload, image_layout: currentImageLayout }]);
+          entryError = firstTry.error;
+
+          if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+            const secondTry = await supabase.from('entries').insert([payload]);
+            entryError = secondTry.error;
+            if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+              const payloadNoSource = { ...payload };
+              delete payloadNoSource.source;
+              const thirdTry = await supabase.from('entries').insert([{ ...payloadNoSource, image_layout: currentImageLayout }]);
+              entryError = thirdTry.error;
+              if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+                const fourthTry = await supabase.from('entries').insert([payloadNoSource]);
+                entryError = fourthTry.error;
                 if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-                  const sixthTry = await supabase.from('entries').insert([payloadNoUser]);
-                  entryError = sixthTry.error;
-
+                  const payloadNoUser = { ...payload };
+                  delete payloadNoUser.user_name;
+                  const fifthTry = await supabase.from('entries').insert([{ ...payloadNoUser, image_layout: currentImageLayout }]);
+                  entryError = fifthTry.error;
                   if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-                    const payloadNoUserNoSource = { ...payloadNoUser };
-                    delete payloadNoUserNoSource.source;
-                    const seventhTry = await supabase
-                      .from('entries')
-                      .insert([{ ...payloadNoUserNoSource, image_layout: imageLayout }]);
-                    entryError = seventhTry.error;
-
-                    if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-                      const eighthTry = await supabase.from('entries').insert([payloadNoUserNoSource]);
-                      entryError = eighthTry.error;
-                    }
+                    const sixthTry = await supabase.from('entries').insert([payloadNoUser]);
+                    entryError = sixthTry.error;
                   }
                 }
               }
             }
           }
-        }
 
-        // RBAC Service fallback for insert
-        if (entryError) {
-          try {
-            const rbacSaveRes = await fetch('/api/rbac/save-entry', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                entry: { id: tempId, cashbook_id: activeBookId, ...payload, image_layout: imageLayout },
-                userId: session.user.id,
-                userEmail: session.user.email
-              })
-            });
-            if (rbacSaveRes.ok) {
-              const rbacSaveJson = await rbacSaveRes.json();
-              if (rbacSaveJson.success) {
-                entryError = null;
+          if (entryError) {
+            try {
+              const rbacSaveRes = await fetch('/api/rbac/save-entry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  entry: { id: tempId, cashbook_id: activeBookId, ...payload, image_layout: currentImageLayout },
+                  userId: session.user.id,
+                  userEmail: session.user.email
+                })
+              });
+              if (rbacSaveRes.ok) {
+                const rbacSaveJson = await rbacSaveRes.json();
+                if (rbacSaveJson.success) entryError = null;
               }
-            }
-          } catch (_) {}
-        }
-
-        if (entryError) throw entryError;
-
-        // Insert attachments if any exist
-        if (finalImages.length > 0) {
-          const resolvedUser = await resolveUserDataForAttachments();
-          const attachmentInserts = finalImages.map(url => ({
-            entry_id: tempId,
-            user_id: session.user.id,
-            user_name: resolvedUser.name,
-            user_email: resolvedUser.email,
-            file_url: url
-          }));
-          const { error: attachError } = await supabase.from('attachments').insert(attachmentInserts);
-          if (attachError) console.error('[handleAddTransaction] Error creating attachments:', attachError);
-        }
-
-        updateStepStatus('Saving transaction', 'success', 95, 'Refreshing dashboard...');
-
-        if (submitAndAddNew) {
-          resetFormFields(true);
-          setQuickAddSuccess(true);
-          setTimeout(() => setQuickAddSuccess(false), 1500);
-          setIsSubmitting(false);
-          setProgressModal(null);
-          setTimeout(() => {
-            amountInputRef.current?.focus();
-          }, 80);
-        } else {
-          updateStepStatus('Completed', 'success', 100, 'Saving complete!');
-          setProgressModal(prev => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              success: true,
-              steps: prev.steps.map(s => s.label === 'Completed' ? { ...s, status: 'success' as const } : s)
-            };
-          });
-
-          // Hold for 700ms and close
-          if (showLoadingAnimation) {
-            await new Promise(resolve => setTimeout(resolve, 700));
+            } catch (_) {}
           }
-        }
 
-        if (!submitAndAddNew) {
-          setShowForm(null);
-          resetForm();
-          setIsSubmitting(false);
-          setProgressModal(null);
-        } else {
-          resetForm();
-          setIsSubmitting(false);
-          setProgressModal(null);
-        }
+          if (entryError) throw entryError;
 
-        // Reload data immediately so dashboard updates
-        await fetchData();
-
-        // Scroll to the newly created transaction!
-        if (!submitAndAddNew) {
-          setTimeout(() => {
-            setJustEditedTransactionId(tempId);
-            const element = document.getElementById(`entry-${tempId}`);
-            if (element) {
-              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-            setTimeout(() => {
-              setJustEditedTransactionId(null);
-            }, 2000);
-          }, 150);
-        }
-      }
-    } catch (error: any) {
-      console.error('[handleAddTransaction] Error in transaction save flow:', error);
-      
-      // Update step status to error in modal
-      setProgressModal(prev => {
-        if (!prev) return null;
-        const nextSteps = prev.steps.map(s => {
-          if (s.status === 'loading') {
-            return { ...s, status: 'error' as const };
+          if (finalImages.length > 0) {
+            const attachmentInserts = finalImages.map(url => ({
+              entry_id: tempId,
+              user_id: session.user.id,
+              user_name: resolvedUser.name,
+              user_email: resolvedUser.email,
+              file_url: url
+            }));
+            const { error: attachError } = await supabase.from('attachments').insert(attachmentInserts);
+            if (attachError) console.error('[Instant Save] Error creating attachments:', attachError);
           }
-          return s;
-        });
-        return {
-          ...prev,
-          isError: true,
-          errorMsg: error.message || 'Transaction save failed',
-          steps: nextSteps,
-          statusText: 'Couldn\'t save your entry.'
-        };
-      });
 
-      setError(error.message || 'Transaction save failed');
-      setIsSubmitting(false);
+          await fetchData();
+        } catch (bgErr: any) {
+          console.error('[Instant Save] Background sync error:', bgErr);
+          setBooks(prev => prev.map(b => b.id === activeBookId ? {
+            ...b,
+            transactions: b.transactions.filter(t => t.id !== tempId)
+          } : b));
+          entriesCache.set(activeBookId, prevCached);
+          setError(bgErr.message || 'Failed to save entry. Please check your connection.');
+        }
+      })();
     }
   };
 
@@ -4917,22 +4826,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setImageLayout(t.imageLayout || 'split');
   };
 
-  const toggleSelectTransaction = (id: string) => {
+  function toggleSelectTransaction(id: string) {
     setSelectedTransactions(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  }
 
-  const toggleSelectAll = () => {
+  function toggleSelectAll() {
     if (selectedTransactions.size === filteredTransactions.length) {
       setSelectedTransactions(new Set());
     } else {
       setSelectedTransactions(new Set(filteredTransactions.map(t => t.id)));
     }
-  };
+  }
 
   const generateShareCode = () => {
     const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -6067,9 +5976,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     // Limit to 5 images as per user request
     const filesToProcess = Array.from(files).slice(0, 5) as File[];
 
-    // Edit images first
-    const finalFiles = await editImagesIfNeeded(filesToProcess);
-    if (finalFiles.length === 0) return; // Cancelled
+    // Bypass cropping workflow; images should be processed immediately upon upload/drop
+    const finalFiles = filesToProcess;
+    if (finalFiles.length === 0) return;
 
     const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
 
@@ -6350,7 +6259,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     // Reset input
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
-  const startAiUploadReceiptParsing = async (filesInput: File | File[] | FileList) => {
+  async function startAiUploadReceiptParsing(filesInput: File | File[] | FileList) {
     if (!activeBookId) return;
 
     let files: File[] = [];
@@ -6364,12 +6273,26 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     if (files.length === 0) return;
 
-    // Limit to 5 receipts as per BUG 2
-    const filesToScan = files.slice(0, 5);
+    // Filter to images only (JPG, JPEG, PNG, WEBP)
+    const validImageExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
+    const validImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    const imageOnlyFiles = files.filter(f => 
+      validImageTypes.includes(f.type?.toLowerCase()) || 
+      validImageExtensions.some(ext => f.name.toLowerCase().endsWith(ext)) ||
+      (f.type && f.type.startsWith('image/'))
+    );
 
-    // Edit images first
-    const finalFilesToScan = await editImagesIfNeeded(filesToScan);
-    if (finalFilesToScan.length === 0) return; // Cancelled
+    if (imageOnlyFiles.length === 0) {
+      setError('Please select image files only (JPG, JPEG, PNG, WEBP).');
+      return;
+    }
+
+    // Limit to 5 receipts as per BUG 2
+    const filesToScan = imageOnlyFiles.slice(0, 5);
+
+    // Bypass cropping workflow; images should be processed immediately upon upload/drop
+    const finalFilesToScan = filesToScan;
+    if (finalFilesToScan.length === 0) return;
 
     setSelectedFiles(finalFilesToScan);
 
@@ -6648,7 +6571,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   }
   return (
     <div className={cn(
-      "min-h-screen transition-colors duration-300",
+      "min-h-screen transition-colors duration-300 overflow-x-clip",
       theme === 'dark' ? "bg-black text-slate-100" : "bg-slate-50 text-black"
     )}>
       {showOfflineDialog && (
@@ -6770,12 +6693,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               <div className="relative shrink-0" ref={dropdownRef}>
                 <button 
                   onClick={() => { vibrate(); setIsProfileOpen(!isProfileOpen); }}
-                  className="flex items-center gap-1.5 sm:gap-2 p-1 pr-2 sm:pr-3 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-indigo-600 ring-2 ring-indigo-500/30 hover:ring-indigo-500/60 transition-all cursor-pointer select-none overflow-hidden flex items-center justify-center text-white font-bold text-xs sm:text-sm shrink-0 aspect-square shadow-sm active:scale-95"
+                  style={{ borderRadius: '9999px', clipPath: 'circle(50% at 50% 50%)' }}
+                  title="Profile and settings"
+                  aria-label="Profile and settings"
                 >
-                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-xs sm:text-sm">
-                    {userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}
-                  </div>
-                  <ChevronDown size={14} className={cn("text-slate-400 transition-transform", isProfileOpen && "rotate-180")} />
+                  {userAvatarUrl ? (
+                    <img 
+                      src={userAvatarUrl} 
+                      alt={userName || "Profile"} 
+                      className="w-full h-full object-cover block" 
+                      style={{ borderRadius: '9999px', objectFit: 'cover' }}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span className="select-none font-bold">{userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}</span>
+                  )}
                 </button>
 
                 <AnimatePresence>
@@ -6790,19 +6723,37 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       )}
                     >
                       <div className={cn(
-                        "p-3 border-b mb-2 transition-colors duration-300",
+                        "p-3 border-b mb-2 transition-colors duration-300 flex items-center gap-3",
                         theme === 'dark' ? "border-zinc-800" : "border-slate-100"
                       )}>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Signed in as</p>
-                        <p className={cn(
-                          "font-bold truncate transition-colors duration-300",
-                          theme === 'dark' ? "text-slate-100" : "text-black"
-                        )}>{userName}</p>
-                        {userPhoneVerified && (
-                          <div className="flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-[8.5px] font-extrabold uppercase tracking-widest bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/40 dark:border-emerald-900/30 w-fit">
-                            ✓ Verified Mobile Number
-                          </div>
-                        )}
+                        <div 
+                          className="w-10 h-10 rounded-full bg-indigo-600 ring-2 ring-indigo-500/20 overflow-hidden flex items-center justify-center text-white font-bold text-sm shrink-0 aspect-square shadow-sm"
+                          style={{ borderRadius: '9999px', overflow: 'hidden' }}
+                        >
+                          {userAvatarUrl ? (
+                            <img 
+                              src={userAvatarUrl} 
+                              alt={userName || "Profile"} 
+                              className="w-full h-full object-cover rounded-full block" 
+                              style={{ borderRadius: '9999px', objectFit: 'cover' }}
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span className="select-none font-bold">{userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}</span>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Signed in as</p>
+                          <p className={cn(
+                            "font-bold truncate text-sm transition-colors duration-300",
+                            theme === 'dark' ? "text-slate-100" : "text-black"
+                          )}>{userName}</p>
+                          {userPhoneVerified && (
+                            <div className="flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[8px] font-extrabold uppercase tracking-widest bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/40 dark:border-emerald-900/30 w-fit">
+                              ✓ Verified Mobile
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       <button 
@@ -6898,35 +6849,34 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       )}
 
       {/* Main Content Area */}
-      <main className="w-full px-6 md:px-8 py-6 sm:py-8">
-        <AnimatePresence mode="wait">
-          {!activeBookId ? (
-            /* PAGE 1: HOME / BOOKS LIST */
-            <motion.div
-              key="home"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="space-y-6"
-            >
+      <main className="w-full px-6 md:px-8 py-6 sm:py-8 overflow-x-clip">
+        {!activeBookId ? (
+          /* PAGE 1: HOME / BOOKS LIST */
+          <motion.div
+            key="home"
+            initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-6"
+          >
               {/* User Welcome Section */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-0.5 sm:space-y-1">
-                    <h2 className={cn(
-                      "text-2xl sm:text-3xl lg:text-[clamp(1.5rem,2.2vw,1.875rem)] font-bold transition-colors duration-300 flex items-center gap-2 flex-wrap",
-                      theme === 'dark' ? "text-slate-100" : "text-slate-800"
-                    )}>
-                      Hello, <span className="text-indigo-600 dark:text-indigo-400">{userName}</span>!
-                      {userPhoneVerified && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/40 dark:border-emerald-900/30">
-                          ✓ Verified
-                        </span>
-                      )}
-                    </h2>
-                    <p className={cn(
-                      "text-sm sm:text-base transition-colors duration-300",
-                      theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                    )}>Welcome back to your financial dashboard.</p>
+                  <h2 className={cn(
+                    "text-xl sm:text-2xl lg:text-[clamp(1.35rem,2vw,1.75rem)] font-bold transition-colors duration-300 flex items-center gap-2 flex-wrap",
+                    theme === 'dark' ? "text-slate-100" : "text-slate-800"
+                  )}>
+                    Hello, <span className="text-indigo-600 dark:text-indigo-400">{userName}</span>!
+                    {userPhoneVerified && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/40 dark:border-emerald-900/30">
+                        ✓ Verified
+                      </span>
+                    )}
+                  </h2>
+                  <p className={cn(
+                    "text-xs sm:text-sm transition-colors duration-300",
+                    theme === 'dark' ? "text-slate-400" : "text-slate-500"
+                  )}>Welcome back to your financial dashboard.</p>
                 </div>
 
                 <div className="flex items-center gap-3 sm:gap-4">
@@ -6946,12 +6896,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <button
                         onClick={() => { vibrate(); setIsCreatingBook(true); }}
                         className={cn(
-                          "group/shortcut relative flex-1 sm:flex-none py-2 sm:py-2.5 px-4 sm:px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm sm:text-base hover:scale-[1.02] active:scale-[0.98] duration-200 cursor-pointer",
+                          "group/shortcut relative py-2 sm:py-2.5 px-3.5 sm:px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all inline-flex items-center justify-center gap-1.5 text-xs sm:text-sm hover:scale-[1.02] active:scale-[0.98] duration-200 cursor-pointer w-auto shrink-0",
                           theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
                         )}
                       >
-                        <Plus size={18} />
-                        Create a Book
+                        <Plus size={16} />
+                        <span>Create a Book</span>
                         <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
                           Press <kbd className="bg-slate-700 px-1 rounded">C</kbd> + <kbd className="bg-slate-700 px-1 rounded">B</kbd>
                         </span>
@@ -6992,31 +6942,31 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               {/* Books Section */}
               {filteredBooks.length === 0 ? (
                 <div className={cn(
-                  "flex flex-col items-center justify-center py-8 sm:py-12 text-center space-y-4 sm:space-y-6 border rounded-[24px] sm:rounded-[32px] shadow-sm mx-auto max-w-md transition-colors duration-300",
+                  "flex flex-col items-center justify-center p-6 sm:p-10 text-center space-y-4 sm:space-y-5 border rounded-3xl shadow-sm mx-auto max-w-sm sm:max-w-md transition-colors duration-300",
                   theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
                 )}>
                   <div className={cn(
-                    "w-12 h-12 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-colors duration-300",
-                    theme === 'dark' ? "bg-indigo-950/30 text-indigo-400" : "bg-indigo-50 text-indigo-600"
+                    "w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center transition-colors duration-300 shadow-inner",
+                    theme === 'dark' ? "bg-indigo-950/40 text-indigo-400" : "bg-indigo-50 text-indigo-600"
                   )}>
-                    <BookOpen size={24} className="sm:w-8 sm:h-8" />
+                    <BookOpen size={22} className="sm:w-6 sm:h-6" />
                   </div>
-                  <div className="space-y-1 sm:space-y-2 px-4">
+                  <div className="space-y-1 px-4">
                     <h3 className={cn(
-                      "text-lg sm:text-xl font-black transition-colors duration-300",
+                      "text-base sm:text-lg font-black transition-colors duration-300",
                       theme === 'dark' ? "text-slate-100" : "text-slate-800"
                     )}>No Cashbooks Yet</h3>
                     <p className={cn(
-                      "max-w-[200px] sm:max-w-xs mx-auto text-[10px] sm:text-xs transition-colors duration-300",
-                      theme === 'dark' ? "text-slate-500" : "text-slate-400"
+                      "max-w-[220px] sm:max-w-xs mx-auto text-xs transition-colors duration-300 leading-relaxed",
+                      theme === 'dark' ? "text-slate-400" : "text-slate-500"
                     )}>Start your financial journey by creating your first cashbook today.</p>
                   </div>
-                  <div className="flex flex-col sm:flex-row items-center gap-2 w-full justify-center">
+                  <div className="pt-2">
                     <button
                       onClick={() => { vibrate(); setIsCreatingBook(true); }}
                       className={cn(
-                        "w-full sm:w-auto py-2 sm:py-2.5 px-5 sm:px-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 active:scale-95 text-xs sm:text-sm cursor-pointer",
-                        theme === 'dark' ? "shadow-none" : "shadow-xl shadow-indigo-100"
+                        "w-auto inline-flex items-center justify-center gap-2 py-2.5 px-5 sm:px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all active:scale-95 text-xs sm:text-sm cursor-pointer shadow-md shadow-indigo-500/20",
+                        theme === 'dark' ? "shadow-none" : ""
                       )}
                     >
                       <Plus size={16} />
@@ -7031,10 +6981,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6" 
                     : "grid-cols-1 gap-3"
                 )}>
-                  {filteredBooks.map((book, index) => (
+                  {filteredBooks.map((book) => (
                     <motion.div
                       key={book.id}
-                      initial={{ opacity: 0, y: 15 }}
+                      initial={false}
                       animate={
                         justEditedBookId === book.id
                           ? { scale: [1, 1.05, 1.05, 1], y: 0, opacity: 1 }
@@ -7043,7 +6993,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       transition={
                         justEditedBookId === book.id
                           ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
-                          : { duration: 0.35, ease: [0.16, 1, 0.3, 1], delay: Math.min(index * 0.035, 0.3) }
+                          : { duration: 0.2, ease: "easeOut" }
                       }
                       onMouseDown={() => onTouchStartBook(book.id)}
                       onMouseUp={onTouchEndBook}
@@ -7120,10 +7070,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           ) : (
               /* PAGE 2: INDIVIDUAL CASHBOOK VIEW */
             <motion.div
-              key="cashbook"
-              initial={{ opacity: 0, x: 20 }}
+              key={activeBookId}
+              initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
+              transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
               className="w-full space-y-4 sm:space-y-6 pb-[180px] lg:pb-0"
             >
               {/* STICKY TOP CONTROLS SECTION */}
@@ -8138,9 +8088,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <h3 className={cn(
                         "text-lg font-extrabold transition-colors duration-300",
                         theme === 'dark' ? "text-white" : "text-black"
-                      )}>Upload Bill or Document</h3>
+                      )}>Upload Bill Image</h3>
                       <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm">
-                        Camera snapshots, library photos, or PDF invoices are fully supported.
+                        JPG, JPEG, PNG, or WEBP receipts are supported (Max 5 images).
                       </p>
                     </div>
 
@@ -8171,16 +8121,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <p className={cn(
                           "font-bold transition-colors duration-300",
                           theme === 'dark' ? "text-white" : "text-black"
-                        )}>Drag & Drop bill here</p>
+                        )}>Drag & Drop image here</p>
                         <p className={cn(
                           "text-sm transition-colors duration-300",
                           theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                        )}>or click to browse files</p>
+                        )}>or click to browse image files</p>
                       </div>
                     </div>
 
                     {/* Quick Selection Buttons */}
-                    <div className="grid grid-cols-2 gap-3 pt-2">
+                    <div className="pt-2">
                       <button
                         type="button"
                         onClick={() => {
@@ -8189,29 +8139,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           if (el) el.click();
                         }}
                         className={cn(
-                          "flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
+                          "w-full flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
                           theme === 'dark' ? "border-zinc-800 text-slate-300" : "border-slate-200 text-slate-700"
                         )}
                         id="btn-upload-camera"
                       >
                         <Camera size={14} />
-                        Camera / Gallery
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          vibrate();
-                          const el = document.getElementById('custom-ai-file-picker');
-                          if (el) el.click();
-                        }}
-                        className={cn(
-                          "flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
-                          theme === 'dark' ? "border-zinc-800 text-slate-300" : "border-slate-200 text-slate-700"
-                        )}
-                        id="btn-upload-doc"
-                      >
-                        <FileText size={14} />
-                        Upload PDF Bill
+                        Select Receipt Images (Camera / Gallery)
                       </button>
                     </div>
 
@@ -8219,7 +8153,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     <input 
                       type="file"
                       multiple
-                      accept="image/*,application/pdf"
+                      accept="image/jpeg,image/png,image/webp,image/jpg,image/*"
                       onChange={(e) => {
                         if (e.target.files && e.target.files.length > 0) {
                           startAiUploadReceiptParsing(e.target.files);
@@ -9028,7 +8962,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             )}
             </motion.div>
           )}
-        </AnimatePresence>
       </main>
 
       {/* MODALS */}
@@ -9611,9 +9544,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <h3 className={cn(
                         "text-lg font-extrabold transition-colors duration-300",
                         theme === 'dark' ? "text-white" : "text-black"
-                      )}>Upload Bill or Document</h3>
+                      )}>Upload Bill Image</h3>
                       <p className="text-slate-500 dark:text-slate-400 text-xs text-center">
-                        Camera snapshots, library photos, or PDF invoices are fully supported.
+                        JPG, JPEG, PNG, or WEBP receipts are supported (Max 5 images).
                       </p>
                     </div>
 
@@ -9643,16 +9576,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <p className={cn(
                           "font-bold transition-colors text-sm",
                           theme === 'dark' ? "text-white" : "text-black"
-                        )}>Drag & Drop bill here</p>
+                        )}>Drag & Drop image here</p>
                         <p className={cn(
                           "text-xs transition-colors",
                           theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                        )}>or click to browse files</p>
+                        )}>or click to browse image files</p>
                       </div>
                     </div>
 
                     {/* Quick Selection Buttons */}
-                    <div className="grid grid-cols-2 gap-3 pt-1">
+                    <div className="pt-1">
                       <button
                         type="button"
                         onClick={() => {
@@ -9661,116 +9594,19 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           if (el) el.click();
                         }}
                         className={cn(
-                          "flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
+                          "w-full flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
                           theme === 'dark' ? "border-zinc-800 text-slate-300" : "border-slate-200 text-slate-700"
                         )}
                       >
                         <Camera size={14} />
-                        Camera / Gallery
+                        Select Receipt Images (Camera / Gallery)
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          vibrate();
-                          const el = document.getElementById('modal-ai-file-picker');
-                          if (el) el.click();
-                        }}
-                        className={cn(
-                          "flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
-                          theme === 'dark' ? "border-zinc-800 text-slate-300" : "border-slate-200 text-slate-700"
-                        )}
-                      >
-                        <FileText size={14} />
-                        Upload PDF Bill
-                      </button>
-                    </div>
-
-                    {/* Handwritten Bill Configuration Section */}
-                    <div className={cn(
-                      "p-3.5 rounded-2xl border transition-all space-y-3 font-sans",
-                      isHandwritten 
-                        ? (theme === 'dark' ? "bg-amber-950/20 border-amber-900/40 text-amber-300" : "bg-amber-50/50 border-amber-200 text-amber-900")
-                        : (theme === 'dark' ? "bg-zinc-900/30 border-zinc-900/60 text-slate-400" : "bg-slate-50 border-slate-150 text-slate-600")
-                    )}>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <FileText size={16} className={isHandwritten ? "text-amber-500" : "text-slate-400"} />
-                          <div>
-                            <span className="text-xs font-bold block">Hand-written Bill?</span>
-                            <span className="text-[10px] text-slate-400 dark:text-zinc-500 block">Optimized accuracy for hand-written bills</span>
-                          </div>
-                        </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input 
-                            type="checkbox" 
-                            checked={isHandwritten}
-                            onChange={(e) => {
-                              vibrate();
-                              setIsHandwritten(e.target.checked);
-                            }}
-                            className="sr-only peer"
-                          />
-                          <div className="w-9 h-5 bg-slate-200 dark:bg-zinc-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
-                        </label>
-                      </div>
-
-                      {isHandwritten && (
-                        <div className="space-y-3 pt-2.5 border-t border-amber-200/40 dark:border-amber-900/30">
-                          {/* Time Picker/Input */}
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500 block">
-                              What time was this bill paid?
-                            </label>
-                            <input 
-                              type="text"
-                              value={handwrittenTime}
-                              onChange={(e) => setHandwrittenTime(e.target.value)}
-                              placeholder="e.g., 01:20 PM or 21:30"
-                              className={cn(
-                                "w-full px-3 py-2 text-xs font-bold rounded-xl border focus:ring-1 focus:ring-amber-500 focus:outline-none transition-colors",
-                                theme === 'dark' ? "border-zinc-800 bg-zinc-900 text-white" : "border-slate-200 bg-white text-zinc-900"
-                              )}
-                            />
-                          </div>
-
-                          {/* Food Item Toggle */}
-                          <div className="flex items-center justify-between pt-1">
-                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Is this a Food Item?</span>
-                            <div className="flex bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200/50 dark:border-zinc-800">
-                              {[
-                                { val: true, label: "Yes" },
-                                { val: false, label: "No" }
-                              ].map((opt) => {
-                                const isSel = handwrittenIsFood === opt.val;
-                                return (
-                                  <button
-                                    key={opt.label}
-                                    type="button"
-                                    onClick={() => {
-                                      vibrate();
-                                      setHandwrittenIsFood(opt.val);
-                                    }}
-                                    className={cn(
-                                      "px-3 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap",
-                                      isSel 
-                                        ? "bg-amber-500 text-black shadow-sm" 
-                                        : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
-                                    )}
-                                  >
-                                    {opt.label}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        </div>
-                      )}
                     </div>
 
                     <input 
                       type="file"
                       multiple
-                      accept="image/*,application/pdf"
+                      accept="image/jpeg,image/png,image/webp,image/jpg,image/*"
                       onChange={(e) => {
                         if (e.target.files && e.target.files.length > 0) {
                           startAiUploadReceiptParsing(e.target.files);
@@ -10480,6 +10316,31 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           return;
         };
 
+        const handleAvatarFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+          if (e.target.files && e.target.files[0]) {
+            const file = e.target.files[0];
+            if (!file.type.startsWith('image/')) {
+              setProfileError('Please select a valid image file (JPG, PNG, WebP).');
+              return;
+            }
+            if (file.size > 10 * 1024 * 1024) {
+              setProfileError('Image size should be less than 10MB.');
+              return;
+            }
+            setAvatarFile(file);
+            const preview = URL.createObjectURL(file);
+            setAvatarPreview(preview);
+            setProfileError(null);
+          }
+        };
+
+        const handleRemoveAvatar = () => {
+          setAvatarFile(null);
+          setAvatarPreview(null);
+          setUserAvatarUrl(null);
+          try { localStorage.removeItem('trackbook_avatar'); } catch (e) {}
+        };
+
         const handleSaveProfileName = async () => {
           if (!supabase || !session?.user) return;
           setProfileLoading(true);
@@ -10487,30 +10348,71 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           setProfileSuccess(null);
           
           try {
-            const { error: authErr } = await supabase.auth.updateUser({
-              data: { full_name: userName }
-            });
-            if (authErr) throw authErr;
+            let finalAvatarUrl = userAvatarUrl;
+            if (avatarFile) {
+              try {
+                const profileFolder = await getUserProfileCloudinaryFolder(session?.user);
+                const uploadedUrl = await uploadToCloudinary(avatarFile, profileFolder);
+                if (uploadedUrl) {
+                  finalAvatarUrl = uploadedUrl;
+                  setUserAvatarUrl(uploadedUrl);
+                  try { localStorage.setItem('trackbook_avatar', uploadedUrl); } catch (e) {}
+                }
+              } catch (uploadErr) {
+                console.warn('Profile image upload failed, falling back to preview URL:', uploadErr);
+                if (avatarPreview) {
+                  finalAvatarUrl = avatarPreview;
+                  setUserAvatarUrl(avatarPreview);
+                  try { localStorage.setItem('trackbook_avatar', avatarPreview); } catch (e) {}
+                }
+              }
+            } else if (avatarPreview === null && !userAvatarUrl) {
+              finalAvatarUrl = null;
+            }
+
+            try {
+              const { error: authErr } = await supabase.auth.updateUser({
+                data: { full_name: userName, avatar_url: finalAvatarUrl }
+              });
+              if (authErr) console.warn('Auth user metadata update note:', authErr);
+            } catch (e) {}
             
             try {
-              await supabase.from('profiles').upsert({
+              const { error: profErr } = await supabase.from('profiles').upsert({
                 id: session.user.id,
                 email: session.user.email || null,
                 full_name: userName,
+                avatar_url: finalAvatarUrl,
                 phone: session.user.phone || null,
                 phone_verified: session.user.phone_confirmed_at ? true : false,
+                updated_at: new Date().toISOString()
               }, { onConflict: 'id' });
+              
+              if (profErr) {
+                console.warn('Profiles table sync note:', profErr);
+                if (profErr.code === '42703' || profErr.message?.includes('column')) {
+                  await supabase.from('profiles').upsert({
+                    id: session.user.id,
+                    email: session.user.email || null,
+                    full_name: userName,
+                    phone: session.user.phone || null,
+                    phone_verified: session.user.phone_confirmed_at ? true : false,
+                  }, { onConflict: 'id' });
+                }
+              }
             } catch (dbErr) {
               console.warn('Profiles table sync failed:', dbErr);
             }
             
-            setProfileSuccess('Profile name updated successfully!');
+            setProfileSuccess('Profile updated successfully!');
             setTimeout(() => {
               setIsEditingName(false);
+              setAvatarFile(null);
+              setAvatarPreview(null);
               setProfileSuccess(null);
-            }, 1500);
+            }, 1200);
           } catch (err: any) {
-            console.error('Error saving profile name:', err);
+            console.error('Error saving profile settings:', err);
             setProfileError(err.message || 'Failed to save changes.');
           } finally {
             setProfileLoading(false);
@@ -10519,6 +10421,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         const handleCloseProfileModal = () => {
           setIsEditingName(false);
+          setAvatarFile(null);
+          setAvatarPreview(null);
           setLinkingMode('view');
           setPhoneNumberToLink('');
           setLinkingOtp('');
@@ -10624,6 +10528,86 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                               : "border-slate-200 bg-slate-50 text-slate-800 focus:border-indigo-500 focus:ring-indigo-100"
                           )}
                         />
+                      </div>
+
+                      {/* Profile Picture (WhatsApp DP Style under Your Name) */}
+                      <div className="space-y-2 pt-1">
+                        <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block ml-1">Profile Picture</label>
+                        
+                        <div className={cn(
+                          "p-4 rounded-2xl border flex items-center gap-4 transition-colors",
+                          theme === 'dark' ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/70 border-slate-200/80"
+                        )}>
+                          {/* Round WhatsApp DP Avatar */}
+                          <div className="relative group shrink-0">
+                            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full ring-4 ring-indigo-500/20 overflow-hidden bg-indigo-600 flex items-center justify-center text-white font-black text-xl sm:text-2xl shadow-md relative aspect-square">
+                              {avatarPreview || userAvatarUrl ? (
+                                <img 
+                                  src={avatarPreview || userAvatarUrl || ''} 
+                                  alt="Profile Avatar" 
+                                  className="w-full h-full object-cover rounded-full"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <span className="select-none">{userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}</span>
+                              )}
+                              
+                              {/* Hover Overlay */}
+                              <label 
+                                htmlFor="profile-avatar-input"
+                                className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white text-[10px] font-bold cursor-pointer transition-opacity backdrop-blur-[1px] rounded-full"
+                              >
+                                <Camera size={18} className="mb-0.5" />
+                                <span>Change</span>
+                              </label>
+                            </div>
+                            
+                            {/* Floating camera button (WhatsApp style badge) */}
+                            <label
+                              htmlFor="profile-avatar-input"
+                              className="absolute bottom-0 right-0 p-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-full shadow-lg border-2 border-white dark:border-slate-900 cursor-pointer transition-all"
+                              title="Upload profile picture"
+                            >
+                              <Camera size={13} />
+                            </label>
+                            
+                            <input 
+                              id="profile-avatar-input"
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={handleAvatarFileSelect}
+                            />
+                          </div>
+
+                          {/* Action details & buttons */}
+                          <div className="flex flex-col items-start gap-1 flex-1 min-w-0">
+                            <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+                              {avatarPreview || userAvatarUrl ? 'Custom Profile Photo' : 'Add an image'}
+                            </p>
+                            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+                              Same as WhatsApp DP. JPG, PNG or WebP.
+                            </p>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <label
+                                htmlFor="profile-avatar-input"
+                                className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl text-[11px] font-bold cursor-pointer transition-all inline-flex items-center gap-1.5 border border-indigo-200/50 dark:border-indigo-800/40 select-none"
+                              >
+                                <ImagePlus size={13} />
+                                <span>{avatarPreview || userAvatarUrl ? 'Change Photo' : 'Add an image'}</span>
+                              </label>
+                              {(avatarPreview || userAvatarUrl) && (
+                                <button
+                                  type="button"
+                                  onClick={handleRemoveAvatar}
+                                  className="px-2.5 py-1.5 text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl text-[11px] font-bold transition-all cursor-pointer select-none"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
 
                       {/* Email (Read Only) */}
@@ -11073,7 +11057,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         type="datetime-local"
                         value={transactionDate}
                         onChange={(e) => setTransactionDate(e.target.value)}
-                        tabIndex={2}
+                        tabIndex={-1}
                         className={cn(
                           "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
                           theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
@@ -11101,22 +11085,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Details</label>
-                    <textarea
-                      ref={descriptionInputRef}
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      placeholder="Enter transaction details"
-                      rows={2}
-                      tabIndex={3}
-                      className={cn(
-                        "w-full px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium resize-none transition-colors duration-300",
-                        theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
-                      )}
-                    />
-                  </div>
-
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</label>
@@ -11125,7 +11093,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           <select
                             value={category}
                             onChange={(e) => setCategory(e.target.value)}
-                            tabIndex={4}
+                            tabIndex={2}
                             className={cn(
                               "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium appearance-none transition-colors duration-300",
                               theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
@@ -11141,6 +11109,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             placeholder="Enter custom category"
                             value={customCategory}
                             onChange={(e) => setCustomCategory(e.target.value)}
+                            tabIndex={2}
                             className={cn(
                               "w-full h-[52px] px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition-all",
                               theme === 'dark' ? "bg-slate-800 border-indigo-900/30 text-white" : "bg-slate-50 border-indigo-100 text-black"
@@ -11157,7 +11126,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           <select
                             value={mode}
                             onChange={(e) => setMode(e.target.value)}
-                            tabIndex={5}
+                            tabIndex={3}
                             className={cn(
                               "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium appearance-none transition-colors duration-300",
                               theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
@@ -11173,6 +11142,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             placeholder="Enter custom mode"
                             value={customMode}
                             onChange={(e) => setCustomMode(e.target.value)}
+                            tabIndex={3}
                             className={cn(
                               "w-full h-[52px] px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition-all",
                               theme === 'dark' ? "bg-slate-800 border-indigo-900/30 text-white" : "bg-slate-50 border-indigo-100 text-black"
@@ -11181,6 +11151,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         )}
                       </div>
                     </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Details</label>
+                    <textarea
+                      ref={descriptionInputRef}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="Enter transaction details"
+                      rows={2}
+                      tabIndex={4}
+                      className={cn(
+                        "w-full px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium resize-none transition-colors duration-300",
+                        theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                      )}
+                    />
                   </div>
 
                   {/* Image Layout Selection */}
@@ -11383,9 +11369,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       
                       {selectedImages.length === 0 && (
                         <div 
+                          tabIndex={5}
                           onClick={() => triggerUploadSelector('transaction')}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); triggerUploadSelector('transaction'); } }}
                           className={cn(
-                            "border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center gap-2 hover:border-indigo-300 transition-all cursor-pointer group",
+                            "border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center gap-2 hover:border-indigo-300 transition-all cursor-pointer group focus:outline-none focus:ring-2 focus:ring-indigo-500",
                             theme === 'dark' ? "border-slate-800 hover:border-indigo-500" : "border-slate-200"
                           )}
                         >
@@ -11414,39 +11402,28 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   <div className="flex gap-3 pt-2">
                     <button
                       type="button"
+                      tabIndex={7}
                       disabled={isSubmitting}
                       onClick={resetForm}
                       className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Cancel
                     </button>
-                    {!editingTransaction && (
-                      <button
-                        type="submit"
-                        disabled={isSubmitting}
-                        onClick={() => { vibrate(30); setSubmitAndAddNew(true); }}
-                        className={cn(
-                          "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed",
-                          isSubmitting && submitAndAddNew ? "bg-slate-400" : (theme === 'dark' ? "bg-indigo-600 hover:bg-indigo-700 shadow-none" : "bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100")
-                        )}
-                      >
-                        {isSubmitting && submitAndAddNew ? "Saving..." : "Save & Add New"}
-                      </button>
-                    )}
                     <button
                       type="submit"
+                      tabIndex={6}
                       disabled={isSubmitting}
                       onClick={() => { vibrate(30); setSubmitAndAddNew(false); }}
                       className={cn(
                         "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed",
-                        isSubmitting && !submitAndAddNew ? "bg-slate-400" : (
+                        isSubmitting ? "bg-slate-400" : (
                           showForm === 'in' 
                             ? (theme === 'dark' ? "bg-emerald-600 hover:bg-emerald-700 shadow-none" : "bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-100")
                             : (theme === 'dark' ? "bg-rose-600 hover:bg-rose-700 shadow-none" : "bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-100")
                         )
                       )}
                     >
-                      {isSubmitting && !submitAndAddNew ? "Saving..." : (editingTransaction ? 'Save Changes' : 'Save')}
+                      {isSubmitting ? "Saving..." : (editingTransaction ? 'Save Changes' : 'Save')}
                     </button>
                   </div>
                 </form>
@@ -12785,11 +12762,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </button>
                     ) : (
                       <a
-                        href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Import my TrackBook entries using this code:
-
-${generatedCode}
-
-Open TrackBook → Import Shared Entries`)}`}
+                        href={`https://api.whatsapp.com/send?text=${encodeURIComponent('Import my TrackBook entries using this code:\n\n' + generatedCode + '\n\nOpen TrackBook → Import Shared Entries')}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex-1 py-3 bg-[#25D366] hover:bg-[#20ba59] active:scale-95 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm text-center shadow-lg shadow-emerald-500/10"
@@ -13037,7 +13010,7 @@ Open TrackBook → Import Shared Entries`)}`}
       {/* Hidden AI OCR File Input */}
       <input 
         type="file"
-        accept="image/*,application/pdf"
+        accept="image/jpeg,image/png,image/webp,image/jpg,image/*"
         ref={aiOcrFileInputRef}
         onChange={handleAiOcrFileSelected}
         className="hidden"

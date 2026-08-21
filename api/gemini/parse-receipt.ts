@@ -48,10 +48,18 @@ function getMealType(timeStr: string): "Breakfast" | "Lunch" | "Dinner" | undefi
 }
 
 // Helper to build intelligent entry description
-function generateSmartDescription(billType: string, groupSize: number, meal?: string): string {
+function generateSmartDescription(billType: string, groupSize: number, meal?: string, merchant?: string): string {
   const normType = billType.toLowerCase();
+  const cleanMerchant = (merchant && merchant !== "Unknown Vendor" && merchant.trim().length > 0) ? merchant.trim() : "";
   
   if (normType === "food" || normType === "restaurant") {
+    const base = meal || "Food";
+    if (cleanMerchant) {
+      if (groupSize > 1) {
+        return `${base} at ${cleanMerchant} (${groupSize} Members)`;
+      }
+      return `${base} at ${cleanMerchant}`;
+    }
     if (meal) {
       if (groupSize > 1) {
         return `${meal} for ${groupSize} Members`;
@@ -64,13 +72,26 @@ function generateSmartDescription(billType: string, groupSize: number, meal?: st
     return "Food";
   }
   
-  if (normType === "travel" || normType === "taxi" || normType === "cab" || normType === "transport") {
+  if (normType === "travel" || normType === "taxi" || normType === "cab" || normType === "transport" || normType === "bus" || normType === "train" || normType === "flight") {
+    if (cleanMerchant) {
+      if (groupSize > 1) {
+        return `${cleanMerchant} (${billType}) for ${groupSize} Members`;
+      }
+      return `${cleanMerchant} - ${billType}`;
+    }
     if (groupSize > 1) {
       return `Travel for ${groupSize} Members`;
     }
-    return "Travel";
+    return billType || "Travel";
   }
   
+  if (cleanMerchant) {
+    if (groupSize > 1) {
+      return `${cleanMerchant} - ${billType} (${groupSize} Members)`;
+    }
+    return `${cleanMerchant} - ${billType}`;
+  }
+
   if (groupSize > 1) {
     return `${billType} for ${groupSize} Members`;
   }
@@ -129,7 +150,7 @@ function overrideTravelClassificationIfNeeded(data: {
       matchedBillType = "Flight";
     }
     data.billType = matchedBillType;
-    data.description = generateSmartDescription(matchedBillType, data.groupSize);
+    data.description = generateSmartDescription(matchedBillType, data.groupSize, undefined, data.merchant);
     data.mealType = undefined;
 
     // Date is mandatory for Travel receipts. If a travel receipt is detected, a date must be present (or extracted).
@@ -926,7 +947,7 @@ Extract and classify into the following keys carefully:
       mealType = getMealType(finalTime);
     }
 
-    const finalDescription = generateSmartDescription(finalBillType, groupSize, mealType);
+    const finalDescription = generateSmartDescription(finalBillType, groupSize, mealType, finalMerchant);
 
     const finalResult = {
       amount: finalAmount,

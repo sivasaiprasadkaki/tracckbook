@@ -14,11 +14,32 @@ export async function getUserCloudinaryFolder(user?: { email?: string | null; id
   }
 
   if (resolvedUser) {
-    const identifier = resolvedUser.email || resolvedUser.id;
+    const identifier = (resolvedUser.email && resolvedUser.email.trim()) 
+      ? resolvedUser.email.trim().toLowerCase() 
+      : resolvedUser.id;
     return `trackbook/${identifier}`;
   }
 
   throw new Error("No authenticated user found for Cloudinary folder generation.");
+}
+
+export async function getUserProfileCloudinaryFolder(user?: { email?: string | null; id: string } | null): Promise<string> {
+  let resolvedUser = user;
+  if (!resolvedUser && supabase) {
+    const { data } = await supabase.auth.getSession();
+    if (data?.session?.user) {
+      resolvedUser = data.session.user;
+    }
+  }
+
+  if (resolvedUser) {
+    const identifier = (resolvedUser.email && resolvedUser.email.trim()) 
+      ? resolvedUser.email.trim().toLowerCase() 
+      : resolvedUser.id;
+    return `profiles/${identifier}`;
+  }
+
+  return `profiles/general`;
 }
 
 export async function uploadToCloudinary(fileDataUriOrFile: string | File, folder?: string): Promise<string> {

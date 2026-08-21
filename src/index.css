@@ -80,17 +80,42 @@
   --color-on-error: #ffffff;
   --color-on-secondary-fixed: #001f28;
   --color-primary: #4212de;
+
+  /* Sharp Enterprise Edges Everywhere */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+  --radius: 0px;
 }
 
 @layer base {
   body {
-    @apply font-sans transition-colors duration-300;
+    @apply font-sans;
   }
   button {
     @apply cursor-pointer;
   }
   button:disabled {
     @apply cursor-not-allowed;
+  }
+
+  /* Sharp Enterprise Square Corners Everywhere */
+  *, ::before, ::after {
+    border-radius: 0px !important;
+  }
+
+  button, input, select, textarea, [role="button"], [role="dialog"], [role="tab"], [role="menu"], [role="listbox"], [role="option"], .card, .modal, [class*="rounded"] {
+    border-radius: 0px !important;
+  }
+
+  /* Explicit exception for circular indicator pings/dots if tagged */
+  .force-circle, [data-circle="true"] {
+    border-radius: 9999px !important;
   }
 }
 
@@ -233,6 +258,15 @@
 .fade-in-up {
   animation: fadeInUp 0.8s ease-out forwards;
   opacity: 0;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.15s ease-out forwards;
 }
 
 @keyframes fadeInUp {

@@ -342,7 +342,9 @@ export default function AutomationMail({ session, theme, setTheme }: AutomationM
 
   const dateRange = (() => {
     if (!selectedBook || selectedBook.transactions.length === 0) return 'N/A';
-    const dates = selectedBook.transactions.map(t => t.date.getTime()).filter(Boolean);
+    const dates = selectedBook.transactions
+      .map(t => (t.date instanceof Date ? t.date.getTime() : new Date(t.date || (t as any).created_at || 0).getTime()))
+      .filter(ts => !isNaN(ts) && ts > 0);
     if (dates.length === 0) return 'N/A';
     const minD = new Date(Math.min(...dates));
     const maxD = new Date(Math.max(...dates));

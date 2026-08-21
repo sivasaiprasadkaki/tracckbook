@@ -1,149 +1,174 @@
 import React from 'react';
 import { 
   LayoutGrid, 
-  BookOpen, 
-  RotateCw, 
-  Sparkles, 
-  DownloadCloud, 
-  UploadCloud, 
-  Share, 
+  Wallet, 
+  BarChart3, 
+  Bot, 
+  Users, 
   Settings, 
   ChevronLeft, 
   ChevronRight,
   LogOut,
   Sun,
   Moon,
-  CloudLightning,
-  Menu,
-  X
+  X,
+  BookOpen
 } from 'lucide-react';
 import { cn, vibrate } from '../lib/utils';
 
 export type SectionType = 
   | 'dashboard' 
   | 'cashbooks' 
+  | 'reports'
+  | 'automation'
+  | 'members'
+  | 'settings'
   | 'processing-center' 
   | 'ai-upload' 
   | 'exports' 
   | 'imports' 
-  | 'shared-entries' 
-  | 'settings';
+  | 'shared-entries';
 
 interface SaaSSidebarProps {
   currentSection: SectionType;
-  setCurrentSection: (section: SectionType) => void;
-  activeBookId: string | null;
-  onSelectBook: (id: string | null) => void;
-  books: any[];
+  setCurrentSection?: (section: SectionType) => void;
+  onSelectSection?: (section: SectionType) => void;
+  activeBookId?: string | null;
+  onSelectBook?: (id: string | null) => void;
+  books?: any[];
   theme: 'light' | 'dark';
-  toggleTheme: (e: any) => void;
+  toggleTheme?: (e: any) => void;
+  onToggleTheme?: (e: any) => void;
   userName: string;
-  onSignOut: () => void;
-  isCollapsed: boolean;
-  setIsCollapsed: (collapsed: boolean) => void;
-  activeTasksCount: number;
-  isOpenMobile: boolean;
-  setIsOpenMobile: (open: boolean) => void;
+  onSignOut: () => void | Promise<any>;
+  isCollapsed?: boolean;
+  setIsCollapsed?: (collapsed: boolean) => void;
+  activeTasksCount?: number;
+  isOpenMobile?: boolean;
+  isMobileOpen?: boolean;
+  setIsOpenMobile?: (open: boolean) => void;
+  onCloseMobile?: () => void;
 }
 
 export default function SaaSSidebar({
   currentSection,
   setCurrentSection,
-  activeBookId,
-  onSelectBook,
-  books,
+  onSelectSection,
+  activeBookId = null,
+  onSelectBook = () => {},
+  books = [],
   theme,
   toggleTheme,
+  onToggleTheme,
   userName,
   onSignOut,
-  isCollapsed,
-  setIsCollapsed,
-  activeTasksCount,
-  isOpenMobile,
-  setIsOpenMobile,
+  isCollapsed: controlledIsCollapsed,
+  setIsCollapsed: controlledSetIsCollapsed,
+  activeTasksCount = 0,
+  isOpenMobile: controlledIsOpenMobile,
+  isMobileOpen: controlledIsMobileOpen,
+  setIsOpenMobile: controlledSetIsOpenMobile,
+  onCloseMobile,
 }: SaaSSidebarProps) {
+  const [internalCollapsed, setInternalCollapsed] = React.useState(false);
+  const [internalOpenMobile, setInternalOpenMobile] = React.useState(false);
+
+  const isCollapsed = controlledIsCollapsed !== undefined ? controlledIsCollapsed : internalCollapsed;
+  const setIsCollapsed = controlledSetIsCollapsed || setInternalCollapsed;
+
+  const isOpenMobile = controlledIsOpenMobile !== undefined 
+    ? controlledIsOpenMobile 
+    : (controlledIsMobileOpen !== undefined ? controlledIsMobileOpen : internalOpenMobile);
+
+  const handleCloseMobile = () => {
+    if (onCloseMobile) onCloseMobile();
+    if (controlledSetIsOpenMobile) controlledSetIsOpenMobile(false);
+    setInternalOpenMobile(false);
+  };
+
+  const handleSelectSection = (sec: SectionType) => {
+    if (onSelectSection) onSelectSection(sec);
+    if (setCurrentSection) setCurrentSection(sec);
+    handleCloseMobile();
+  };
+
+  const handleThemeToggle = (e: any) => {
+    if (onToggleTheme) onToggleTheme(e);
+    else if (toggleTheme) toggleTheme(e);
+  };
 
   const navItems: { id: SectionType; label: string; icon: any; badge?: number }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
-    { id: 'cashbooks', label: 'Cashbooks', icon: BookOpen, badge: books.length > 0 ? books.length : undefined },
-    { id: 'processing-center', label: 'Processing Center', icon: RotateCw, badge: activeTasksCount > 0 ? activeTasksCount : undefined },
-    { id: 'ai-upload', label: 'AI Scanner', icon: Sparkles },
-    { id: 'exports', label: 'Export Hub', icon: DownloadCloud },
-    { id: 'imports', label: 'Import Center', icon: UploadCloud },
-    { id: 'shared-entries', label: 'Shared Links', icon: Share },
-    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'cashbooks', label: 'Cashbooks', icon: Wallet, badge: books.length > 0 ? books.length : undefined },
+    { id: 'reports', label: 'Reports', icon: BarChart3 },
+    { id: 'automation', label: 'Automation', icon: Bot, badge: activeTasksCount > 0 ? activeTasksCount : undefined },
+    { id: 'members', label: 'Members & Access', icon: Users },
   ];
 
   const handleNavClick = (sectionId: SectionType) => {
     vibrate(15);
-    setCurrentSection(sectionId);
-    onSelectBook(null); // clear active cashbook selection to show main panel section
-    setIsOpenMobile(false);
+    handleSelectSection(sectionId);
+    if (onSelectBook) onSelectBook(null);
   };
 
   const sidebarContent = (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full py-6">
       {/* Brand Header */}
       <div className={cn(
-        "flex items-center justify-between p-4 border-b h-14 shrink-0",
-        theme === 'dark' ? "border-zinc-800 bg-zinc-950" : "border-zinc-200 bg-white"
+        "px-6 mb-6 flex items-center justify-between shrink-0 select-none",
+        isCollapsed && "px-3 justify-center"
       )}>
-        <div className="flex items-center gap-2.5 overflow-hidden select-none">
-          {!isCollapsed ? (
-            <span className="font-sans text-xs tracking-[0.08em] uppercase font-medium text-emerald-600 dark:text-emerald-400">
-              TRACKBOOK
-            </span>
-          ) : (
-            <div className="w-8 h-8 rounded-sm bg-emerald-600/10 dark:bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold text-xs shrink-0">
-              TB
+        <div 
+          onClick={() => handleNavClick('dashboard')}
+          className="flex items-center gap-3 cursor-pointer overflow-hidden"
+        >
+          <div className="w-8 h-8 rounded-md bg-[#3525cd] text-white flex items-center justify-center font-bold text-lg shadow-xs shrink-0">
+            T
+          </div>
+          {!isCollapsed && (
+            <div>
+              <h1 className={cn(
+                "font-bold text-xl tracking-tight leading-none",
+                theme === 'dark' ? "text-indigo-400" : "text-[#3525cd]"
+              )}>
+                TrackBook
+              </h1>
             </div>
           )}
         </div>
 
-        {/* Collapse Button - Desktop Only */}
-        <button
-          onClick={() => { vibrate(10); setIsCollapsed(!isCollapsed); }}
-          className={cn(
-            "hidden md:flex items-center justify-center w-6 h-6 rounded-sm border transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900 cursor-pointer text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200",
-            theme === 'dark' ? "border-zinc-800 bg-zinc-950" : "border-zinc-200 bg-white"
-          )}
-        >
-          {isCollapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
-        </button>
+        {/* Collapse toggle desktop */}
+        {!isCollapsed && (
+          <button
+            onClick={() => { vibrate(10); setIsCollapsed(!isCollapsed); }}
+            className={cn(
+              "hidden md:flex items-center justify-center w-6 h-6 rounded-md border transition-colors cursor-pointer text-slate-400 hover:text-slate-600 dark:hover:text-slate-200",
+              theme === 'dark' ? "border-zinc-800 bg-zinc-900" : "border-slate-200 bg-white"
+            )}
+            title="Collapse Sidebar"
+          >
+            <ChevronLeft size={14} />
+          </button>
+        )}
       </div>
 
-      {/* User Section (Top-Sidebar Profile card) */}
-      {!isCollapsed && (
-        <div className={cn(
-          "p-3 mx-3 mt-4 rounded-sm border flex items-center gap-3 transition-all",
-          theme === 'dark' ? "bg-zinc-900/40 border-zinc-800/80" : "bg-zinc-50 border-zinc-200"
-        )}>
-          <div className="w-8 h-8 rounded-sm bg-emerald-600 flex items-center justify-center text-white font-bold text-xs shrink-0">
-            {userName ? userName[0].toUpperCase() : 'U'}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className={cn(
-              "text-xs font-bold truncate",
-              theme === 'dark' ? "text-zinc-200" : "text-zinc-800"
-            )}>
-              {userName || 'User'}
-            </p>
-            <div className="flex items-center gap-1 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-medium truncate">
-                Cloud Sync Active
-              </span>
-            </div>
-          </div>
+      {isCollapsed && (
+        <div className="hidden md:flex justify-center mb-4">
+          <button
+            onClick={() => { vibrate(10); setIsCollapsed(!isCollapsed); }}
+            className={cn(
+              "flex items-center justify-center w-7 h-7 rounded-md border transition-colors cursor-pointer text-slate-400 hover:text-slate-600 dark:hover:text-slate-200",
+              theme === 'dark' ? "border-zinc-800 bg-zinc-900" : "border-slate-200 bg-white"
+            )}
+            title="Expand Sidebar"
+          >
+            <ChevronRight size={14} />
+          </button>
         </div>
       )}
 
-      {/* Navigation Items */}
-      <nav className="flex-1 overflow-y-auto px-2.5 py-4 space-y-1 scrollbar-thin">
-        <div className="px-2.5 mb-2 text-[10px] font-bold uppercase tracking-wider text-zinc-450 dark:text-zinc-500">
-          {!isCollapsed ? "Workspace" : "•"}
-        </div>
-        
+      {/* Main Navigation Items */}
+      <nav className="flex-1 px-3 space-y-1.5 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = currentSection === item.id && activeBookId === null;
           const Icon = item.icon;
@@ -152,29 +177,38 @@ export default function SaaSSidebar({
               key={item.id}
               onClick={() => handleNavClick(item.id)}
               className={cn(
-                "w-full flex items-center gap-3 px-3 py-2 text-left text-xs font-semibold transition-all relative group cursor-pointer border-l-[3px] rounded-none",
+                "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm transition-all relative group cursor-pointer",
                 isActive
                   ? theme === 'dark'
-                    ? "bg-emerald-950/20 text-emerald-400 border-emerald-500 font-bold"
-                    : "bg-emerald-50 text-emerald-800 border-emerald-600 font-bold"
-                  : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100/60 dark:hover:bg-zinc-900/40"
+                    ? "bg-indigo-950/40 text-indigo-400 font-bold border-r-4 border-indigo-500"
+                    : "bg-[#eff4ff] text-[#3525cd] font-bold border-r-4 border-[#3525cd]"
+                  : theme === 'dark'
+                    ? "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 font-medium"
+                    : "text-[#475569] hover:text-[#0F172A] hover:bg-[#e5eeff]/70 font-medium"
               )}
             >
-              <Icon size={16} className={cn("shrink-0", isActive ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400 group-hover:text-zinc-500 dark:group-hover:text-zinc-300")} />
+              <Icon 
+                size={18} 
+                className={cn(
+                  "shrink-0 transition-colors",
+                  isActive 
+                    ? theme === 'dark' ? "text-indigo-400" : "text-[#3525cd]" 
+                    : "text-[#64748B] group-hover:text-[#0F172A] dark:group-hover:text-zinc-200"
+                )} 
+              />
               
               {!isCollapsed && (
                 <span className="flex-1 truncate">{item.label}</span>
               )}
 
-              {/* Badges */}
-              {item.badge !== undefined && (
+              {item.badge !== undefined && !isCollapsed && (
                 <span className={cn(
-                  "px-1.5 py-0.5 rounded-sm text-[9px] font-bold tracking-tight shrink-0",
+                  "px-2 py-0.5 rounded-full text-[10px] font-bold tracking-tight shrink-0",
                   isActive
-                    ? "bg-emerald-600/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                    ? "bg-[#3525cd]/15 text-[#3525cd] dark:bg-indigo-500/20 dark:text-indigo-300"
                     : theme === 'dark'
                       ? "bg-zinc-800 text-zinc-400"
-                      : "bg-zinc-100 text-zinc-600"
+                      : "bg-slate-100 text-slate-600"
                 )}>
                   {item.badge}
                 </span>
@@ -182,7 +216,7 @@ export default function SaaSSidebar({
 
               {/* Tooltip for Collapsed Sidebar */}
               {isCollapsed && (
-                <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-zinc-900 text-white text-xs font-semibold rounded-sm opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none z-50 whitespace-nowrap shadow-md">
+                <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none z-50 whitespace-nowrap shadow-lg">
                   {item.label}
                   {item.badge !== undefined && ` (${item.badge})`}
                 </div>
@@ -191,14 +225,14 @@ export default function SaaSSidebar({
           );
         })}
 
-        {/* Shortcuts / Books Section */}
-        {books.length > 0 && (
-          <div className="pt-4 mt-4 border-t border-zinc-200 dark:border-zinc-800">
-            <div className="px-2.5 mb-2 text-[10px] font-bold uppercase tracking-wider text-zinc-450 dark:text-zinc-500 flex items-center justify-between">
-              <span>{!isCollapsed ? "Quick Access" : "Books"}</span>
+        {/* Quick Access Books Section */}
+        {books.length > 0 && !isCollapsed && (
+          <div className="pt-5 mt-5 border-t border-slate-100 dark:border-zinc-800">
+            <div className="px-3 mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500 flex items-center justify-between">
+              <span>Recent Cashbooks</span>
             </div>
-            <div className="space-y-0.5">
-              {books.slice(0, 5).map((book) => {
+            <div className="space-y-1">
+              {books.slice(0, 4).map((book) => {
                 const isBookActive = activeBookId === book.id;
                 return (
                   <button
@@ -206,24 +240,23 @@ export default function SaaSSidebar({
                     onClick={() => {
                       vibrate(10);
                       onSelectBook(book.id);
-                      setIsOpenMobile(false);
+                      handleCloseMobile();
                     }}
                     className={cn(
-                      "w-full flex items-center gap-3 px-3 py-2 text-left text-xs font-semibold transition-all relative group cursor-pointer border-l-[3px] rounded-none",
+                      "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-xs font-medium transition-all group cursor-pointer",
                       isBookActive
                         ? theme === 'dark'
-                          ? "bg-emerald-950/20 text-emerald-400 font-bold border-emerald-500"
-                          : "bg-emerald-50 text-emerald-800 font-bold border-emerald-600"
-                        : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100/60 dark:hover:bg-zinc-900/40"
+                          ? "bg-indigo-950/40 text-indigo-400 font-bold"
+                          : "bg-[#eff4ff] text-[#3525cd] font-bold"
+                        : theme === 'dark'
+                          ? "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
+                          : "text-[#475569] hover:text-[#0F172A] hover:bg-slate-100"
                     )}
                   >
-                    <BookOpen size={14} className="shrink-0 text-zinc-400 group-hover:text-zinc-500" />
-                    {!isCollapsed && <span className="truncate flex-1">{book.name}</span>}
-                    {isCollapsed && (
-                      <div className="absolute left-full ml-2 px-2.5 py-1.5 bg-zinc-900 text-white text-xs font-semibold rounded-sm opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none z-50 whitespace-nowrap shadow-md">
-                        {book.name}
-                      </div>
-                    )}
+                    <div className="w-5 h-5 rounded bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-slate-600 dark:text-zinc-300 shrink-0">
+                      {book.name ? book.name[0].toUpperCase() : 'B'}
+                    </div>
+                    <span className="truncate flex-1">{book.name}</span>
                   </button>
                 );
               })}
@@ -232,46 +265,56 @@ export default function SaaSSidebar({
         )}
       </nav>
 
-      {/* Footer Settings and Action */}
-      <div className={cn(
-        "p-3 border-t shrink-0 space-y-1.5",
-        theme === 'dark' ? "border-zinc-850 bg-zinc-950" : "border-zinc-200 bg-white"
-      )}>
-        {/* Toggle Theme inline */}
-        {!isCollapsed ? (
-          <button
-            onClick={toggleTheme}
-            className={cn(
-              "w-full flex items-center justify-between p-2 rounded-sm text-xs font-medium transition-all hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer",
-              theme === 'dark' ? "text-zinc-400" : "text-zinc-650"
-            )}
-          >
-            <div className="flex items-center gap-2.5">
-              {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-              <span>Appearance</span>
-            </div>
-            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">
-              {theme}
-            </span>
-          </button>
-        ) : (
-          <button
-            onClick={toggleTheme}
-            className="w-full flex items-center justify-center p-2 rounded-sm transition-all hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer text-zinc-400"
-          >
-            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-          </button>
-        )}
+      {/* Bottom Navigation & Settings */}
+      <div className="px-3 mt-auto pt-4 border-t border-slate-100 dark:border-zinc-800 space-y-1">
+        {/* Settings button */}
+        <button
+          onClick={() => handleNavClick('settings')}
+          className={cn(
+            "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm transition-all cursor-pointer",
+            currentSection === 'settings'
+              ? theme === 'dark'
+                ? "bg-indigo-950/40 text-indigo-400 font-bold border-r-4 border-indigo-500"
+                : "bg-[#eff4ff] text-[#3525cd] font-bold border-r-4 border-[#3525cd]"
+              : theme === 'dark'
+                ? "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 font-medium"
+                : "text-[#475569] hover:text-[#0F172A] hover:bg-[#e5eeff]/70 font-medium"
+          )}
+        >
+          <Settings size={18} className="shrink-0 text-[#64748B]" />
+          {!isCollapsed && <span className="flex-1 truncate">Settings</span>}
+        </button>
 
-        {/* Sign Out Button */}
+        {/* Theme switch */}
+        <button
+          onClick={(e) => { vibrate(10); toggleTheme(e); }}
+          className={cn(
+            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-xs font-medium transition-all cursor-pointer",
+            theme === 'dark' 
+              ? "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900" 
+              : "text-[#475569] hover:text-[#0F172A] hover:bg-slate-100"
+          )}
+        >
+          {theme === 'dark' ? <Sun size={16} className="shrink-0" /> : <Moon size={16} className="shrink-0" />}
+          {!isCollapsed && (
+            <div className="flex items-center justify-between flex-1">
+              <span>Theme</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                {theme}
+              </span>
+            </div>
+          )}
+        </button>
+
+        {/* Sign out */}
         <button
           onClick={onSignOut}
           className={cn(
-            "w-full flex items-center gap-2.5 p-2 rounded-sm text-xs font-semibold text-rose-600 hover:bg-rose-50/50 dark:hover:bg-rose-950/20 transition-all cursor-pointer",
+            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer",
             isCollapsed && "justify-center"
           )}
         >
-          <LogOut size={15} className="shrink-0" />
+          <LogOut size={16} className="shrink-0" />
           {!isCollapsed && <span>Sign Out</span>}
         </button>
       </div>
@@ -280,33 +323,31 @@ export default function SaaSSidebar({
 
   return (
     <>
-      {/* Sidebar Desktop Mode */}
+      {/* Sidebar Desktop */}
       <aside
         className={cn(
-          "hidden md:block shrink-0 h-screen sticky top-0 border-r z-40 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
-          isCollapsed ? "w-16" : "w-60",
-          theme === 'dark' ? "bg-zinc-950 border-zinc-900 text-white" : "bg-white border-slate-150 text-black"
+          "hidden md:flex flex-col h-screen fixed left-0 top-0 border-r z-30 transition-all duration-200",
+          isCollapsed ? "w-16" : "w-64",
+          theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-[#E2E8F0] text-[#0F172A]"
         )}
       >
         {sidebarContent}
       </aside>
 
-      {/* Mobile Drawer Slide-out overlay */}
+      {/* Mobile Drawer */}
       {isOpenMobile && (
         <div className="fixed inset-0 z-50 md:hidden flex">
-          {/* Backdrop */}
           <div 
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-            onClick={() => setIsOpenMobile(false)}
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+            onClick={handleCloseMobile}
           />
-          {/* Sidebar Drawer Container */}
           <div className={cn(
-            "relative w-64 max-w-sm h-full flex flex-col z-10 shadow-2xl transition-transform duration-300 transform translate-x-0 border-r",
-            theme === 'dark' ? "bg-zinc-950 border-zinc-900 text-white" : "bg-white border-slate-150 text-black"
+            "relative w-72 max-w-sm h-full flex flex-col z-10 shadow-2xl transition-transform duration-300 border-r",
+            theme === 'dark' ? "bg-zinc-950 border-zinc-850 text-white" : "bg-white border-[#E2E8F0] text-[#0F172A]"
           )}>
             <button
-              onClick={() => setIsOpenMobile(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-900 cursor-pointer text-slate-400"
+              onClick={handleCloseMobile}
+              className="absolute top-4 right-4 p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-900 cursor-pointer text-slate-400"
             >
               <X size={18} />
             </button>
