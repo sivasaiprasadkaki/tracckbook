@@ -73,7 +73,9 @@ import {
   Mail,
   Lock,
   Merge,
-  Eye
+  Eye,
+  Fingerprint,
+  ScanFace
 } from 'lucide-react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -6809,9 +6811,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <span className="font-medium flex-1 text-left">Settings</span>
                       </button>
 
-                      {/* Mobile-Only TPIN Security Options */}
+                      {/* Mobile-Only Security Options */}
                       {isMobileSecurityActive && (
                         <>
+                          <button 
+                            onClick={() => { vibrate(); navigate('/biometric-security'); setIsProfileOpen(false); }}
+                            className={cn(
+                              "w-full flex items-center gap-3 p-3 rounded-xl transition-all",
+                              theme === 'dark' ? "hover:bg-zinc-900 text-slate-300" : "hover:bg-slate-50 text-black"
+                            )}
+                          >
+                            <Fingerprint size={18} className="text-indigo-500" />
+                            <span className="font-medium flex-1 text-left">Fingerprint & Face Lock</span>
+                          </button>
+
                           {!hasUserMpin ? (
                             <button 
                               onClick={() => { vibrate(); openMpinCreateModal(); setIsProfileOpen(false); }}

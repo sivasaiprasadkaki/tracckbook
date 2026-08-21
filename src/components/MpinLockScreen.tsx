@@ -228,7 +228,7 @@ export function MpinLockScreen({
                 <motion.div
                   key="merged-green-tick"
                   initial={{ scale: 0.6, opacity: 0 }}
-                  animate={{ scale: [0.6, 1.15, 1], opacity: 1 }}
+                  animate={{ scale: 1, opacity: 1 }}
                   transition={{ 
                     type: "spring", 
                     stiffness: 400, 

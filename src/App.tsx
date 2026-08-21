@@ -30,6 +30,7 @@ const ResetPassword = lazyWithRetry(() => import('./pages/ResetPassword'));
 const AdminPortal = lazyWithRetry(() => import('./pages/AdminPortal'));
 const AutomationMail = lazyWithRetry(() => import('./pages/AutomationMail'));
 const AcceptInvitePage = lazyWithRetry(() => import('./pages/AcceptInvitePage'));
+const BiometricSecurity = lazyWithRetry(() => import('./pages/BiometricSecurity'));
 
 function NavigationHandler({ 
   session, 
@@ -273,6 +274,18 @@ export default function App() {
               element={
                 session ? (
                   <AutomationMail session={session} theme={theme} setTheme={setTheme} />
+                ) : (
+                  loading ? suspenseFallback : <Navigate to="/login" replace />
+                )
+              } 
+            />
+
+            {/* Mobile Biometric Security Setting */}
+            <Route 
+              path="/biometric-security" 
+              element={
+                session ? (
+                  <BiometricSecurity session={session} theme={theme} setTheme={setTheme} />
                 ) : (
                   loading ? suspenseFallback : <Navigate to="/login" replace />
                 )
