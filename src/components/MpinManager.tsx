@@ -144,6 +144,36 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
     };
   }, [isMobile, hasMpin, userId]);
 
+  // Native Android Biometric Fallback & Success Bridge Listener (Mobile Only)
+  useEffect(() => {
+    if (!isMobile || !userId) return;
+
+    const handleBiometricFallback = () => {
+      console.log('[MPIN] Received trackbook-biometric-fallback event. Showing TPIN lock screen.');
+      clearSessionUnlocked(userId);
+      setIsUnlocked(false);
+      checkMpinStatus();
+    };
+
+    const handleBiometricSuccess = () => {
+      console.log('[MPIN] Received trackbook-biometric-success event. Unlocking TrackBook.');
+      markSessionUnlocked(userId);
+      setIsUnlocked(true);
+    };
+
+    window.addEventListener('trackbook-biometric-fallback', handleBiometricFallback);
+    window.addEventListener('trackbook-biometric-cancel', handleBiometricFallback);
+    window.addEventListener('trackbook-biometric-success', handleBiometricSuccess);
+    window.addEventListener('trackbook-biometric-unlock', handleBiometricSuccess);
+
+    return () => {
+      window.removeEventListener('trackbook-biometric-fallback', handleBiometricFallback);
+      window.removeEventListener('trackbook-biometric-cancel', handleBiometricFallback);
+      window.removeEventListener('trackbook-biometric-success', handleBiometricSuccess);
+      window.removeEventListener('trackbook-biometric-unlock', handleBiometricSuccess);
+    };
+  }, [isMobile, userId, checkMpinStatus]);
+
   const handleUnlock = () => {
     if (userId) {
       markSessionUnlocked(userId);
