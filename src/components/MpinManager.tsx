@@ -1,7 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { 
   hasConfiguredMpin, 
-  isMobileOrAndroidApp 
+  isMobileOrAndroidApp,
+  isSessionUnlocked,
+  markSessionUnlocked,
+  clearSessionUnlocked
 } from '../services/mpinSecurityService';
 import { MpinLockScreen } from './MpinLockScreen';
 import { CreateMpinModal, ChangeMpinModal, ForgotMpinModal } from './MpinModals';
@@ -42,7 +45,7 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
   const [isMobile, setIsMobile] = useState<boolean>(() => isMobileOrAndroidApp());
   const [hasMpin, setHasMpin] = useState<boolean>(false);
   const [isCheckingMpin, setIsCheckingMpin] = useState<boolean>(true);
-  const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
+  const [isUnlocked, setIsUnlocked] = useState<boolean>(() => isSessionUnlocked(userId));
 
   // Modals state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -84,8 +87,9 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
   // Handle User Change or Initial Load
   useEffect(() => {
     if (userId !== prevUserIdRef.current) {
-      // Account changed -> reset unlocked state
-      setIsUnlocked(false);
+      // If user is freshly authenticated via email/password, keep unlocked
+      const unlocked = isSessionUnlocked(userId);
+      setIsUnlocked(unlocked);
       prevUserIdRef.current = userId;
       setIsCheckingMpin(true);
       checkMpinStatus();
@@ -106,6 +110,7 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
           const elapsed = Date.now() - backgroundTimeRef.current;
           if (elapsed > GRACE_PERIOD_MS) {
             console.log(`[MPIN] App resumed after ${Math.round(elapsed / 1000)}s - locking app.`);
+            clearSessionUnlocked(userId);
             setIsUnlocked(false);
           }
           backgroundTimeRef.current = null;
@@ -121,6 +126,7 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
       if (backgroundTimeRef.current) {
         const elapsed = Date.now() - backgroundTimeRef.current;
         if (elapsed > GRACE_PERIOD_MS) {
+          clearSessionUnlocked(userId);
           setIsUnlocked(false);
         }
         backgroundTimeRef.current = null;
@@ -139,11 +145,17 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
   }, [isMobile, hasMpin, userId]);
 
   const handleUnlock = () => {
+    if (userId) {
+      markSessionUnlocked(userId);
+    }
     setIsUnlocked(true);
   };
 
   const handleMpinCreated = async () => {
     await checkMpinStatus();
+    if (userId) {
+      markSessionUnlocked(userId);
+    }
     setIsUnlocked(true);
   };
 
@@ -153,6 +165,9 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
 
   const handleMpinReset = async () => {
     await checkMpinStatus();
+    if (userId) {
+      markSessionUnlocked(userId);
+    }
     setIsUnlocked(true);
   };
 

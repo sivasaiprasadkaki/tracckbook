@@ -101,6 +101,7 @@ import ImageEditorModal from '../components/ImageEditorModal';
 import { CountryCodePicker, COUNTRIES, Country } from '../components/CountryCodePicker';
 import { PhoneComingSoonModal } from '../components/PhoneComingSoonModal';
 import { useMpinSecurity } from '../components/MpinManager';
+import { clearSessionUnlocked } from '../services/mpinSecurityService';
 import { ShareWhatsAppModal } from '../components/ShareWhatsAppModal';
 import { addPdfBrandingFooter } from '../utils/pdfBranding';
 
@@ -1708,13 +1709,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const currentTabName = tabName || 'entries';
 
   // Global State
-  const [userName, setUserName] = useState('Siva');
+  const currentUserId = session?.user?.id;
+  const initialUserName = session?.user?.user_metadata?.full_name || 
+                          session?.user?.user_metadata?.name || 
+                          session?.user?.email?.split('@')[0] || 
+                          '';
+
+  const [userName, setUserName] = useState(initialUserName);
   const [books, setBooks] = useState<Cashbook[]>(() => {
     try {
-      const saved = localStorage.getItem('trackbook_cached_books');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      localStorage.removeItem('trackbook_cached_books'); // Purge legacy unscoped cache
+      if (currentUserId) {
+        const saved = localStorage.getItem(`trackbook_cached_books_${currentUserId}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
       }
     } catch (e) {}
     return [];
@@ -1725,6 +1735,28 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   useEffect(() => {
     booksLengthRef.current = books.length;
   }, [books.length]);
+
+  const prevUserIdRef = useRef<string | null>(currentUserId || null);
+  useEffect(() => {
+    if (currentUserId !== prevUserIdRef.current) {
+      prevUserIdRef.current = currentUserId || null;
+      if (currentUserId) {
+        let cached: Cashbook[] = [];
+        try {
+          const saved = localStorage.getItem(`trackbook_cached_books_${currentUserId}`);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) cached = parsed;
+          }
+        } catch (e) {}
+        setBooks(cached);
+        setIsLoading(cached.length === 0);
+      } else {
+        setBooks([]);
+        setIsLoading(false);
+      }
+    }
+  }, [currentUserId]);
 
   const resolveUserDataForAttachments = async () => {
     if (!session?.user) return { id: null, name: "Unknown User", email: "" };
@@ -1781,10 +1813,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isLoading, setIsLoading] = useState(() => {
     try {
-      const saved = localStorage.getItem('trackbook_cached_books');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return false;
+      if (currentUserId) {
+        const saved = localStorage.getItem(`trackbook_cached_books_${currentUserId}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return false;
+        }
       }
     } catch (e) {}
     return true;
@@ -1984,7 +2018,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
   const [userAvatarUrl, setUserAvatarUrl] = useState<string | null>(() => {
     try {
-      return localStorage.getItem('trackbook_avatar') || null;
+      if (currentUserId) {
+        const saved = localStorage.getItem(`trackbook_avatar_${currentUserId}`);
+        if (saved) return saved;
+      }
+      return session?.user?.user_metadata?.avatar_url || session?.user?.user_metadata?.picture || null;
     } catch (e) {
       return null;
     }
@@ -3157,10 +3195,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           }
           if (data.avatar_url) {
             setUserAvatarUrl(data.avatar_url);
-            try { localStorage.setItem('trackbook_avatar', data.avatar_url); } catch (e) {}
+            try { 
+              localStorage.setItem(`trackbook_avatar_${session.user.id}`, data.avatar_url);
+              localStorage.removeItem('trackbook_avatar');
+            } catch (e) {}
           } else if (avatarFromMeta) {
             setUserAvatarUrl(avatarFromMeta);
-            try { localStorage.setItem('trackbook_avatar', avatarFromMeta); } catch (e) {}
+            try { 
+              localStorage.setItem(`trackbook_avatar_${session.user.id}`, avatarFromMeta);
+              localStorage.removeItem('trackbook_avatar');
+            } catch (e) {}
           }
         } else {
           setUserPhone(session.user.phone || null);
@@ -3171,7 +3215,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           }
           if (avatarFromMeta) {
             setUserAvatarUrl(avatarFromMeta);
-            try { localStorage.setItem('trackbook_avatar', avatarFromMeta); } catch (e) {}
+            try { 
+              localStorage.setItem(`trackbook_avatar_${session.user.id}`, avatarFromMeta);
+              localStorage.removeItem('trackbook_avatar');
+            } catch (e) {}
           }
         }
       } catch (err) {
@@ -3185,6 +3232,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         const avatarFromMeta = session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || null;
         if (avatarFromMeta) {
           setUserAvatarUrl(avatarFromMeta);
+          try {
+            localStorage.setItem(`trackbook_avatar_${session.user.id}`, avatarFromMeta);
+            localStorage.removeItem('trackbook_avatar');
+          } catch (e) {}
         }
       }
     };
@@ -3433,7 +3484,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         setBooks(mappedBooks);
         try {
-          localStorage.setItem('trackbook_cached_books', JSON.stringify(mappedBooks));
+          if (session?.user?.id) {
+            localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(mappedBooks));
+          }
+          localStorage.removeItem('trackbook_cached_books');
         } catch (e) {}
 
         // Solve loading delay by resolving activeBookId immediately if not set
@@ -6568,6 +6622,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const handleSignOut = async () => {
+    try {
+      clearSessionUnlocked();
+      localStorage.removeItem('trackbook_cached_books');
+      localStorage.removeItem('trackbook_avatar');
+    } catch (e) {}
     if (supabase) {
       await supabase.auth.signOut();
     }

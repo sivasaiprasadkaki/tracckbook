@@ -371,3 +371,40 @@ export function resetLockoutState(userId: string): void {
   if (!userId) return;
   localStorage.removeItem(getLockoutKey(userId));
 }
+
+// -------------------------------------------------------------
+// Active Session Credential Unlock Tracking
+// When a user logs in with email/password, OTP, or OAuth, they are already authenticated.
+// TPIN should not pop up immediately on fresh credential login.
+// -------------------------------------------------------------
+
+export function markSessionUnlocked(userId: string): void {
+  if (!userId || typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.setItem(`tb_auth_unlocked_${userId}`, 'true');
+    sessionStorage.setItem('tb_fresh_login_session', 'true');
+    sessionStorage.setItem('tb_last_active_user', userId);
+  } catch (e) {}
+}
+
+export function isSessionUnlocked(userId?: string): boolean {
+  if (!userId || typeof sessionStorage === 'undefined') return false;
+  try {
+    return (
+      sessionStorage.getItem(`tb_auth_unlocked_${userId}`) === 'true' ||
+      sessionStorage.getItem('tb_fresh_login_session') === 'true'
+    );
+  } catch (e) {
+    return false;
+  }
+}
+
+export function clearSessionUnlocked(userId?: string): void {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    if (userId) {
+      sessionStorage.removeItem(`tb_auth_unlocked_${userId}`);
+    }
+    sessionStorage.removeItem('tb_fresh_login_session');
+  } catch (e) {}
+}

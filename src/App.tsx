@@ -6,6 +6,7 @@ import { cn } from './lib/utils';
 import SmartUpdateManager from './components/SmartUpdateManager';
 import AutoLogoutManager from './components/AutoLogoutManager';
 import MpinManager from './components/MpinManager';
+import { markSessionUnlocked, clearSessionUnlocked } from './services/mpinSecurityService';
 
 function lazyWithRetry(componentImport: () => Promise<any>) {
   return lazy(() =>
@@ -125,6 +126,9 @@ function NavigationHandler({
           navigate('/reset-password' + currentSearch + currentHash, { replace: true });
         }
       } else if (event === 'SIGNED_IN') {
+        if (sessionVal?.user?.id) {
+          markSessionUnlocked(sessionVal.user.id);
+        }
         // If we are currently in recovery flow or on reset password page, stay on reset password page!
         if (isResetRoute || recoveryState.isRecovery) {
           console.log('[DEBUG] SIGNED_IN during recovery flow - maintaining reset password route');
@@ -134,6 +138,7 @@ function NavigationHandler({
           navigate('/cashbooks', { replace: true });
         }
       } else if (event === 'SIGNED_OUT') {
+        clearSessionUnlocked();
         // Only redirect to login if not intentionally on reset password page
         if (!isResetRoute) {
           navigate('/login', { replace: true });

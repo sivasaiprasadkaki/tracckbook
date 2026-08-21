@@ -20,6 +20,7 @@ import {
 import { cn } from '../lib/utils';
 import { CountryCodePicker, COUNTRIES, Country } from './CountryCodePicker';
 import { PhoneComingSoonModal } from './PhoneComingSoonModal';
+import { markSessionUnlocked } from '../services/mpinSecurityService';
 import DesktopSignIn from './DesktopSignIn';
 import DesktopSignUp from './DesktopSignUp';
 import DesktopForgot from './DesktopForgot';
@@ -262,6 +263,9 @@ export default function Auth({
         if (verifyError) throw verifyError;
 
         setSuccess('Logged in successfully!');
+        if (data?.user?.id) {
+          markSessionUnlocked(data.user.id);
+        }
         
         // Attempt profiles table sync
         if (data?.user) {
@@ -365,6 +369,10 @@ export default function Auth({
         }
       }
       setSuccess('Logged in successfully to demo session!');
+      const demoUserRes = await supabase.auth.getUser();
+      if (demoUserRes?.data?.user?.id) {
+        markSessionUnlocked(demoUserRes.data.user.id);
+      }
     } catch (err: any) {
       console.error('Demo login rescue failed:', err);
       setError(err.message || 'Demo login failed. Please try standard Sign Up instead.');
@@ -436,7 +444,7 @@ export default function Auth({
       }
       
       // Attempt login
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { error: signInError, data: signInData } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
@@ -448,6 +456,9 @@ export default function Auth({
           throw signInError;
         }
       } else {
+        if (signInData?.user?.id) {
+          markSessionUnlocked(signInData.user.id);
+        }
         setSuccess('Account registered and logged in successfully!');
       }
     } catch (err: any) {
@@ -584,6 +595,9 @@ export default function Auth({
             console.log('SignIn expected credential failure:', error.message);
           }
           throw error;
+        }
+        if (data?.user?.id) {
+          markSessionUnlocked(data.user.id);
         }
         console.log('SignIn Success:', data);
       } else if (mode === 'forgot') {
