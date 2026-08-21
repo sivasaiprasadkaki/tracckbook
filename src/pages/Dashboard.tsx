@@ -6725,7 +6725,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             
             {/* Left: Logo */}
             <div className="flex items-center shrink-0 select-none">
-              <span className="font-sans text-xs sm:text-sm tracking-[0.08em] uppercase font-medium text-indigo-600 dark:text-indigo-400">
+              <span className="font-sans text-[15px] sm:text-base tracking-[0.08em] uppercase font-semibold text-indigo-600 dark:text-indigo-400">
                 TRACKBOOK
               </span>
             </div>
