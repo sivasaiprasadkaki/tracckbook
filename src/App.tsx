@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { cn } from './lib/utils';
 import SmartUpdateManager from './components/SmartUpdateManager';
 import AutoLogoutManager from './components/AutoLogoutManager';
+import MpinManager from './components/MpinManager';
 
 function lazyWithRetry(componentImport: () => Promise<any>) {
   return lazy(() =>
@@ -228,146 +229,148 @@ export default function App() {
         setLoading={setLoading} 
       />
       
-      <Suspense fallback={suspenseFallback}>
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/login" element={<Login theme={theme} initialMode="signin" />} />
-          <Route path="/register" element={<Login theme={theme} initialMode="signup" />} />
-          <Route path="/forgot" element={<Login theme={theme} initialMode="forgot" />} />
-          <Route path="/signup" element={<Login theme={theme} initialMode="signup" />} />
-          <Route path="/reset-password" element={<ResetPassword theme={theme} />} />
-          <Route path="/resetpassword" element={<ResetPassword theme={theme} />} />
-          <Route path="/accept-invite" element={
-            <AcceptInvitePage 
-              theme={theme} 
-              currentUserEmail={session?.user?.email || 'owner@trackbook.app'} 
-              currentUserId={session?.user?.id || 'u_owner'}
-              currentUserName={session?.user?.user_metadata?.full_name || 'Logged User'}
-            />
-          } />
-          <Route path="/invitations/:token" element={
-            <AcceptInvitePage 
-              theme={theme} 
-              currentUserEmail={session?.user?.email || 'owner@trackbook.app'} 
-              currentUserId={session?.user?.id || 'u_owner'}
-              currentUserName={session?.user?.user_metadata?.full_name || 'Logged User'}
-            />
-          } />
-          <Route path="/admin" element={<AdminPortal />} />
+      <MpinManager session={session} theme={theme}>
+        <Suspense fallback={suspenseFallback}>
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/login" element={<Login theme={theme} initialMode="signin" />} />
+            <Route path="/register" element={<Login theme={theme} initialMode="signup" />} />
+            <Route path="/forgot" element={<Login theme={theme} initialMode="forgot" />} />
+            <Route path="/signup" element={<Login theme={theme} initialMode="signup" />} />
+            <Route path="/reset-password" element={<ResetPassword theme={theme} />} />
+            <Route path="/resetpassword" element={<ResetPassword theme={theme} />} />
+            <Route path="/accept-invite" element={
+              <AcceptInvitePage 
+                theme={theme} 
+                currentUserEmail={session?.user?.email || 'owner@trackbook.app'} 
+                currentUserId={session?.user?.id || 'u_owner'}
+                currentUserName={session?.user?.user_metadata?.full_name || 'Logged User'}
+              />
+            } />
+            <Route path="/invitations/:token" element={
+              <AcceptInvitePage 
+                theme={theme} 
+                currentUserEmail={session?.user?.email || 'owner@trackbook.app'} 
+                currentUserId={session?.user?.id || 'u_owner'}
+                currentUserName={session?.user?.user_metadata?.full_name || 'Logged User'}
+              />
+            } />
+            <Route path="/admin" element={<AdminPortal />} />
 
-          {/* Automation Mail Enterprise Module */}
-          <Route 
-            path="/automation-mail" 
-            element={
-              session ? (
-                <AutomationMail session={session} theme={theme} setTheme={setTheme} />
-              ) : (
-                loading ? suspenseFallback : <Navigate to="/login" replace />
-              )
-            } 
-          />
-          <Route 
-            path="/automation-mail/:stepName" 
-            element={
-              session ? (
-                <AutomationMail session={session} theme={theme} setTheme={setTheme} />
-              ) : (
-                loading ? suspenseFallback : <Navigate to="/login" replace />
-              )
-            } 
-          />
-
-          {/* Protected Routes */}
-          <Route 
-            path="/" 
-            element={
-              session ? (
-                // If there's an active recovery parameter in the URL, go to reset password
-                (typeof window !== 'undefined' && (window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery'))) ? (
-                  <Navigate to="/reset-password" replace />
+            {/* Automation Mail Enterprise Module */}
+            <Route 
+              path="/automation-mail" 
+              element={
+                session ? (
+                  <AutomationMail session={session} theme={theme} setTheme={setTheme} />
                 ) : (
-                  <Navigate to="/cashbooks" replace />
+                  loading ? suspenseFallback : <Navigate to="/login" replace />
                 )
-              ) : (
-                // If we are still loading initial session, show a loader
-                loading ? (
-                  <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
-                    <div className="flex flex-col items-center gap-4">
-                      <Loader2 className="animate-spin text-indigo-600" size={40} />
-                      <p className="text-sm font-medium text-slate-500 animate-pulse">Initializing app...</p>
-                    </div>
-                  </div>
+              } 
+            />
+            <Route 
+              path="/automation-mail/:stepName" 
+              element={
+                session ? (
+                  <AutomationMail session={session} theme={theme} setTheme={setTheme} />
                 ) : (
-                  (typeof window !== 'undefined' && (
-                    window.location.hash.includes('type=recovery') || 
-                    window.location.search.includes('type=recovery') || 
-                    window.location.hash.includes('error_code=otp_expired') ||
-                    window.location.search.includes('error_code=otp_expired')
-                  )) ? (
+                  loading ? suspenseFallback : <Navigate to="/login" replace />
+                )
+              } 
+            />
+
+            {/* Protected Routes */}
+            <Route 
+              path="/" 
+              element={
+                session ? (
+                  // If there's an active recovery parameter in the URL, go to reset password
+                  (typeof window !== 'undefined' && (window.location.hash.includes('type=recovery') || window.location.search.includes('type=recovery'))) ? (
                     <Navigate to="/reset-password" replace />
                   ) : (
-                    <Navigate to="/login" replace />
+                    <Navigate to="/cashbooks" replace />
+                  )
+                ) : (
+                  // If we are still loading initial session, show a loader
+                  loading ? (
+                    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
+                      <div className="flex flex-col items-center gap-4">
+                        <Loader2 className="animate-spin text-indigo-600" size={40} />
+                        <p className="text-sm font-medium text-slate-500 animate-pulse">Initializing app...</p>
+                      </div>
+                    </div>
+                  ) : (
+                    (typeof window !== 'undefined' && (
+                      window.location.hash.includes('type=recovery') || 
+                      window.location.search.includes('type=recovery') || 
+                      window.location.hash.includes('error_code=otp_expired') ||
+                      window.location.search.includes('error_code=otp_expired')
+                    )) ? (
+                      <Navigate to="/reset-password" replace />
+                    ) : (
+                      <Navigate to="/login" replace />
+                    )
                   )
                 )
-              )
-            } 
-          />
-          <Route 
-            path="/cashbooks" 
-            element={
-              session ? (
-                <Dashboard session={session} theme={theme} setTheme={setTheme} />
-              ) : (
-                loading ? (
-                  <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
-                    <div className="flex flex-col items-center gap-4">
-                      <Loader2 className="animate-spin text-indigo-600" size={40} />
-                      <p className="text-sm font-medium text-slate-500 animate-pulse">Initializing app...</p>
+              } 
+            />
+            <Route 
+              path="/cashbooks" 
+              element={
+                session ? (
+                  <Dashboard session={session} theme={theme} setTheme={setTheme} />
+                ) : (
+                  loading ? (
+                    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
+                      <div className="flex flex-col items-center gap-4">
+                        <Loader2 className="animate-spin text-indigo-600" size={40} />
+                        <p className="text-sm font-medium text-slate-500 animate-pulse">Initializing app...</p>
+                      </div>
                     </div>
-                  </div>
-                ) : <Navigate to="/login" replace />
-              )
-            } 
-          />
-          <Route 
-            path="/cashbooks/:bookSlug" 
-            element={
-              session ? (
-                <Dashboard session={session} theme={theme} setTheme={setTheme} />
-              ) : (
-                loading ? (
-                  <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
-                    <div className="flex flex-col items-center gap-4">
-                      <Loader2 className="animate-spin text-indigo-600" size={40} />
-                      <p className="text-sm font-medium text-slate-500 animate-pulse">Initializing app...</p>
+                  ) : <Navigate to="/login" replace />
+                )
+              } 
+            />
+            <Route 
+              path="/cashbooks/:bookSlug" 
+              element={
+                session ? (
+                  <Dashboard session={session} theme={theme} setTheme={setTheme} />
+                ) : (
+                  loading ? (
+                    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
+                      <div className="flex flex-col items-center gap-4">
+                        <Loader2 className="animate-spin text-indigo-600" size={40} />
+                        <p className="text-sm font-medium text-slate-500 animate-pulse">Initializing app...</p>
+                      </div>
                     </div>
-                  </div>
-                ) : <Navigate to="/login" replace />
-              )
-            } 
-          />
-          <Route 
-            path="/cashbooks/:bookSlug/:tabName" 
-            element={
-              session ? (
-                <Dashboard session={session} theme={theme} setTheme={setTheme} />
-              ) : (
-                loading ? (
-                  <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
-                    <div className="flex flex-col items-center gap-4">
-                      <Loader2 className="animate-spin text-indigo-600" size={40} />
-                      <p className="text-sm font-medium text-slate-500 animate-pulse">Initializing app...</p>
+                  ) : <Navigate to="/login" replace />
+                )
+              } 
+            />
+            <Route 
+              path="/cashbooks/:bookSlug/:tabName" 
+              element={
+                session ? (
+                  <Dashboard session={session} theme={theme} setTheme={setTheme} />
+                ) : (
+                  loading ? (
+                    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
+                      <div className="flex flex-col items-center gap-4">
+                        <Loader2 className="animate-spin text-indigo-600" size={40} />
+                        <p className="text-sm font-medium text-slate-500 animate-pulse">Initializing app...</p>
+                      </div>
                     </div>
-                  </div>
-                ) : <Navigate to="/login" replace />
-              )
-            } 
-          />
+                  ) : <Navigate to="/login" replace />
+                )
+              } 
+            />
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </MpinManager>
     </Router>
   );
 }

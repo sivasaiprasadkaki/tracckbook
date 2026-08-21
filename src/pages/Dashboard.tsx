@@ -63,6 +63,8 @@ import {
   Users,
   UserPlus,
   ShieldCheck,
+  Shield,
+  KeyRound,
   Camera,
   ImagePlus,
   Phone,
@@ -96,6 +98,7 @@ import MediaPickerSheet from '../components/MediaPickerSheet';
 import ImageEditorModal from '../components/ImageEditorModal';
 import { CountryCodePicker, COUNTRIES, Country } from '../components/CountryCodePicker';
 import { PhoneComingSoonModal } from '../components/PhoneComingSoonModal';
+import { useMpinSecurity } from '../components/MpinManager';
 import { ShareWhatsAppModal } from '../components/ShareWhatsAppModal';
 import { addPdfBrandingFooter } from '../utils/pdfBranding';
 
@@ -1795,6 +1798,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [showOfflineDialog, setShowOfflineDialog] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+
+  // Mobile MPIN Security
+  const { 
+    hasMpin: hasUserMpin, 
+    isMobile: isMobileSecurityActive, 
+    openCreateModal: openMpinCreateModal, 
+    openChangeModal: openMpinChangeModal, 
+    openForgotModal: openMpinForgotModal 
+  } = useMpinSecurity();
 
   // Network state observer
   useEffect(() => {
@@ -6796,6 +6808,47 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <Settings size={18} />
                         <span className="font-medium flex-1 text-left">Settings</span>
                       </button>
+
+                      {/* Mobile-Only MPIN Security Options */}
+                      {isMobileSecurityActive && (
+                        <>
+                          {!hasUserMpin ? (
+                            <button 
+                              onClick={() => { vibrate(); openMpinCreateModal(); setIsProfileOpen(false); }}
+                              className={cn(
+                                "w-full flex items-center gap-3 p-3 rounded-xl transition-all",
+                                theme === 'dark' ? "hover:bg-zinc-900 text-slate-300" : "hover:bg-slate-50 text-black"
+                              )}
+                            >
+                              <Shield size={18} className="text-indigo-500" />
+                              <span className="font-medium flex-1 text-left">Create your MPIN</span>
+                            </button>
+                          ) : (
+                            <>
+                              <button 
+                                onClick={() => { vibrate(); openMpinChangeModal(); setIsProfileOpen(false); }}
+                                className={cn(
+                                  "w-full flex items-center gap-3 p-3 rounded-xl transition-all",
+                                  theme === 'dark' ? "hover:bg-zinc-900 text-slate-300" : "hover:bg-slate-50 text-black"
+                                )}
+                              >
+                                <KeyRound size={18} className="text-indigo-500" />
+                                <span className="font-medium flex-1 text-left">Change your MPIN</span>
+                              </button>
+                              <button 
+                                onClick={() => { vibrate(); openMpinForgotModal(); setIsProfileOpen(false); }}
+                                className={cn(
+                                  "w-full flex items-center gap-3 p-3 rounded-xl transition-all",
+                                  theme === 'dark' ? "hover:bg-zinc-900 text-slate-300" : "hover:bg-slate-50 text-black"
+                                )}
+                              >
+                                <RefreshCw size={18} className="text-indigo-500" />
+                                <span className="font-medium flex-1 text-left">Forgot MPIN</span>
+                              </button>
+                            </>
+                          )}
+                        </>
+                      )}
 
                       <button 
                         onClick={handleSignOut}
