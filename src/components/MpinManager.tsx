@@ -87,9 +87,14 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
   // Handle User Change or Initial Load
   useEffect(() => {
     if (userId !== prevUserIdRef.current) {
-      // If user is freshly authenticated via email/password, keep unlocked
-      const unlocked = isSessionUnlocked(userId);
-      setIsUnlocked(unlocked);
+      const fallbackPending = typeof window !== 'undefined' && sessionStorage.getItem('tb_biometric_fallback_pending') === 'true';
+      if (fallbackPending) {
+        if (userId) clearSessionUnlocked(userId);
+        setIsUnlocked(false);
+      } else {
+        const unlocked = isSessionUnlocked(userId);
+        setIsUnlocked(unlocked);
+      }
       prevUserIdRef.current = userId;
       setIsCheckingMpin(true);
       checkMpinStatus();
@@ -146,18 +151,30 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
 
   // Native Android Biometric Fallback & Success Bridge Listener (Mobile Only)
   useEffect(() => {
-    if (!isMobile || !userId) return;
+    if (!isMobile) return;
 
     const handleBiometricFallback = () => {
-      console.log('[MPIN] Received trackbook-biometric-fallback event. Showing TPIN lock screen.');
-      clearSessionUnlocked(userId);
+      console.log('[MPIN] Received trackbook-biometric-fallback event. Locking session and showing TPIN lock screen.');
+      try {
+        sessionStorage.setItem('tb_biometric_fallback_pending', 'true');
+      } catch (e) {}
+      if (userId) {
+        clearSessionUnlocked(userId);
+      } else {
+        clearSessionUnlocked();
+      }
       setIsUnlocked(false);
       checkMpinStatus();
     };
 
     const handleBiometricSuccess = () => {
       console.log('[MPIN] Received trackbook-biometric-success event. Unlocking TrackBook.');
-      markSessionUnlocked(userId);
+      try {
+        sessionStorage.removeItem('tb_biometric_fallback_pending');
+      } catch (e) {}
+      if (userId) {
+        markSessionUnlocked(userId);
+      }
       setIsUnlocked(true);
     };
 
@@ -175,6 +192,9 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
   }, [isMobile, userId, checkMpinStatus]);
 
   const handleUnlock = () => {
+    try {
+      sessionStorage.removeItem('tb_biometric_fallback_pending');
+    } catch (e) {}
     if (userId) {
       markSessionUnlocked(userId);
     }
