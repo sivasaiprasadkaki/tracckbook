@@ -138,14 +138,83 @@ function generateSalt(): string {
 }
 
 /**
+ * Reliable Android WebView environment detector.
+ * Identifies whether TrackBook is running within the native Android wrapper / WebView.
+ * In this environment, native Android MainActivity is authoritative for app lock and biometric security.
+ */
+export function isAndroidWebView(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  // 1. Explicit native Android bridge objects injected by Android MainActivity / WebView
+  if (
+    Boolean(window.Android) ||
+    Boolean(window.AndroidBridge) ||
+    Boolean(window.TrackBookNative) ||
+    Boolean(window.TrackBookAndroid) ||
+    Boolean((window as any).TrackBookAndroidBridge)
+  ) {
+    return true;
+  }
+
+  // 2. Explicit JavaScript flags or session/local storage indicators
+  if (
+    (window as any).isAndroidWebView === true ||
+    (window as any).isAndroidApp === true ||
+    (window as any).isNativeAndroid === true
+  ) {
+    return true;
+  }
+
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (
+      urlParams.get('platform') === 'android' ||
+      urlParams.get('env') === 'android_webview' ||
+      urlParams.get('isAndroid') === 'true' ||
+      urlParams.get('source') === 'android_app'
+    ) {
+      return true;
+    }
+  } catch (e) {}
+
+  try {
+    if (
+      sessionStorage.getItem('tb_is_android_webview') === 'true' ||
+      localStorage.getItem('tb_is_android_webview') === 'true'
+    ) {
+      return true;
+    }
+  } catch (e) {}
+
+  // 3. User Agent pattern detection
+  const ua = navigator.userAgent || navigator.vendor || '';
+
+  // Custom TrackBook app signature in User Agent
+  if (/TrackBookAndroid|TrackBookApp|TrackBookNative|TrackBook\/Android/i.test(ua)) {
+    return true;
+  }
+
+  // Standard Android WebView tokens:
+  // Android WebViews usually contain "Android" AND ("Version/X.X" or "wv" or "; wv")
+  const isAndroid = /Android/i.test(ua);
+  const isWebViewToken = /;\s*wv\b|Android.*Version\/[0-9.]+|Version\/[0-9.]+\s+(?:Mobile\s+)?Safari/i.test(ua);
+
+  if (isAndroid && isWebViewToken) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Checks if the current environment is a Mobile / Android wrapper.
  * Returns false on Desktop web to guarantee Web App Isolation.
  */
 export function isMobileOrAndroidApp(): boolean {
   if (typeof window === 'undefined') return false;
 
-  // 1. Explicit native Android WebView bridges
-  if (window.Android || window.AndroidBridge || window.TrackBookNative) {
+  // 1. Explicit native Android WebView bridges or markers
+  if (isAndroidWebView()) {
     return true;
   }
 
@@ -389,6 +458,13 @@ export function markSessionUnlocked(userId: string): void {
 
 export function isSessionUnlocked(userId?: string): boolean {
   if (!userId || typeof sessionStorage === 'undefined') return false;
+  
+  // In Android WebView, native Android MainActivity is authoritative for app lock.
+  // The web app session is immediately unlocked upon valid user authentication.
+  if (isAndroidWebView()) {
+    return true;
+  }
+
   try {
     return (
       sessionStorage.getItem(`tb_auth_unlocked_${userId}`) === 'true' ||

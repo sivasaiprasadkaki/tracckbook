@@ -175,29 +175,28 @@ export async function openBiometricSettings(): Promise<void> {
 }
 
 // -------------------------------------------------------------
-// Native Mobile Biometric Fallback & Success Bridge Handlers
+// Native Mobile Biometric Bridge Handlers
+// (Fallback events neutralized - Native Android MainActivity manages app lock directly)
 // -------------------------------------------------------------
 
 /**
- * Dispatch the mobile biometric fallback event to trigger the TPIN lock screen.
- * Can be called by native Android WebView bridges or JavaScript.
+ * Neutralized fallback handler: Does NOT dispatch trackbook-biometric-fallback.
+ * Android MainActivity handles device authentication directly.
  */
 export function dispatchBiometricFallback(): void {
-  if (typeof window === 'undefined') return;
-  console.log('[BiometricService] Dispatching trackbook-biometric-fallback event');
-  window.dispatchEvent(new CustomEvent('trackbook-biometric-fallback'));
+  // No-op: Native Android MainActivity handles authentication fallback directly.
+  console.log('[BiometricService] Biometric fallback handled natively by Android MainActivity.');
 }
 
 /**
- * Dispatch the mobile biometric success event when Android biometric prompt succeeds.
+ * Dispatch the mobile biometric success event.
  */
 export function dispatchBiometricSuccess(): void {
   if (typeof window === 'undefined') return;
-  console.log('[BiometricService] Dispatching trackbook-biometric-success event');
-  window.dispatchEvent(new CustomEvent('trackbook-biometric-success'));
+  console.log('[BiometricService] Biometric authentication confirmed by native device.');
 }
 
-// Expose convenient global hook functions on window for Android WebViews to call
+// Expose safe global hook functions on window for backwards-compatible Android WebView calls
 if (typeof window !== 'undefined') {
   (window as any).trackbookBiometricFallback = dispatchBiometricFallback;
   (window as any).onBiometricFallback = dispatchBiometricFallback;

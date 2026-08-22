@@ -36,45 +36,13 @@ export function MpinLockScreen({
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-focus input on mobile / mount
+  // Auto-focus input on mount
   useEffect(() => {
     const timer = setTimeout(() => {
       inputRef.current?.focus();
     }, 200);
     return () => clearTimeout(timer);
   }, []);
-
-  // Biometric fallback & success listener while LockScreen is mounted
-  useEffect(() => {
-    const handleFallback = () => {
-      setError(null);
-      setPinValue('');
-      setIsVerifying(false);
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 100);
-    };
-
-    const handleSuccess = () => {
-      setIsSuccess(true);
-      triggerHaptic([30, 60]);
-      setTimeout(() => {
-        onUnlock();
-      }, 400);
-    };
-
-    window.addEventListener('trackbook-biometric-fallback', handleFallback);
-    window.addEventListener('trackbook-biometric-cancel', handleFallback);
-    window.addEventListener('trackbook-biometric-success', handleSuccess);
-    window.addEventListener('trackbook-biometric-unlock', handleSuccess);
-
-    return () => {
-      window.removeEventListener('trackbook-biometric-fallback', handleFallback);
-      window.removeEventListener('trackbook-biometric-cancel', handleFallback);
-      window.removeEventListener('trackbook-biometric-success', handleSuccess);
-      window.removeEventListener('trackbook-biometric-unlock', handleSuccess);
-    };
-  }, [onUnlock]);
 
   // Check lockout countdown
   useEffect(() => {

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { 
   hasConfiguredMpin, 
   isMobileOrAndroidApp,
+  isAndroidWebView,
   isSessionUnlocked,
   markSessionUnlocked,
   clearSessionUnlocked
@@ -35,7 +36,7 @@ interface MpinManagerProps {
   children: React.ReactNode;
 }
 
-const GRACE_PERIOD_MS = 20000; // 20 seconds grace period for quick app switcher, camera/photo picker
+const GRACE_PERIOD_MS = 20000; // 20 seconds grace period for non-Android quick app switchers
 
 export default function MpinManager({ session, theme = 'light', children }: MpinManagerProps) {
   const userId = session?.user?.id;
@@ -54,6 +55,16 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
 
   const backgroundTimeRef = useRef<number | null>(null);
   const prevUserIdRef = useRef<string | null>(null);
+
+  // Clean up legacy fallback/force flags on mount
+  useEffect(() => {
+    try {
+      localStorage.removeItem('trackbook_force_tpin');
+      sessionStorage.removeItem('trackbook_force_tpin');
+      localStorage.removeItem('tb_biometric_fallback_pending');
+      sessionStorage.removeItem('tb_biometric_fallback_pending');
+    } catch (e) {}
+  }, []);
 
   // Re-check mobile environment on resize
   useEffect(() => {
@@ -87,10 +98,9 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
   // Handle User Change or Initial Load
   useEffect(() => {
     if (userId !== prevUserIdRef.current) {
-      const fallbackPending = typeof window !== 'undefined' && sessionStorage.getItem('tb_biometric_fallback_pending') === 'true';
-      if (fallbackPending) {
-        if (userId) clearSessionUnlocked(userId);
-        setIsUnlocked(false);
+      // In Android WebView, native Android MainActivity is authoritative for app lock.
+      if (isAndroidWebView()) {
+        setIsUnlocked(true);
       } else {
         const unlocked = isSessionUnlocked(userId);
         setIsUnlocked(unlocked);
@@ -101,9 +111,10 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
     }
   }, [userId, checkMpinStatus]);
 
-  // App Background / Resume Lock Handling (Mobile Only)
+  // App Background / Resume Lock Handling (Non-Android Web Only)
+  // Disabled in Android WebView because native MainActivity handles lifecycle lock
   useEffect(() => {
-    if (!isMobile || !hasMpin || !userId) return;
+    if (isAndroidWebView() || !isMobile || !hasMpin || !userId) return;
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
@@ -114,7 +125,7 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
         if (backgroundTimeRef.current) {
           const elapsed = Date.now() - backgroundTimeRef.current;
           if (elapsed > GRACE_PERIOD_MS) {
-            console.log(`[MPIN] App resumed after ${Math.round(elapsed / 1000)}s - locking app.`);
+            console.log(`[MPIN] Web session resumed after ${Math.round(elapsed / 1000)}s - locking web view.`);
             clearSessionUnlocked(userId);
             setIsUnlocked(false);
           }
@@ -149,48 +160,6 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
     };
   }, [isMobile, hasMpin, userId]);
 
-  // Native Android Biometric Fallback & Success Bridge Listener (Mobile Only)
-  useEffect(() => {
-    if (!isMobile) return;
-
-    const handleBiometricFallback = () => {
-      console.log('[MPIN] Received trackbook-biometric-fallback event. Locking session and showing TPIN lock screen.');
-      try {
-        sessionStorage.setItem('tb_biometric_fallback_pending', 'true');
-      } catch (e) {}
-      if (userId) {
-        clearSessionUnlocked(userId);
-      } else {
-        clearSessionUnlocked();
-      }
-      setIsUnlocked(false);
-      checkMpinStatus();
-    };
-
-    const handleBiometricSuccess = () => {
-      console.log('[MPIN] Received trackbook-biometric-success event. Unlocking TrackBook.');
-      try {
-        sessionStorage.removeItem('tb_biometric_fallback_pending');
-      } catch (e) {}
-      if (userId) {
-        markSessionUnlocked(userId);
-      }
-      setIsUnlocked(true);
-    };
-
-    window.addEventListener('trackbook-biometric-fallback', handleBiometricFallback);
-    window.addEventListener('trackbook-biometric-cancel', handleBiometricFallback);
-    window.addEventListener('trackbook-biometric-success', handleBiometricSuccess);
-    window.addEventListener('trackbook-biometric-unlock', handleBiometricSuccess);
-
-    return () => {
-      window.removeEventListener('trackbook-biometric-fallback', handleBiometricFallback);
-      window.removeEventListener('trackbook-biometric-cancel', handleBiometricFallback);
-      window.removeEventListener('trackbook-biometric-success', handleBiometricSuccess);
-      window.removeEventListener('trackbook-biometric-unlock', handleBiometricSuccess);
-    };
-  }, [isMobile, userId, checkMpinStatus]);
-
   const handleUnlock = () => {
     try {
       sessionStorage.removeItem('tb_biometric_fallback_pending');
@@ -222,12 +191,15 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
   };
 
   // Determine if full-screen lock should be shown:
-  // 1. Must have an active authenticated session
-  // 2. Must be Mobile or Android wrapper
-  // 3. User must have an MPIN configured
-  // 4. App is not yet unlocked
-  // 5. Not still performing initial MPIN existence check
+  // 1. Must NOT be running inside the TrackBook Android WebView (Native MainActivity handles lock)
+  // 2. Must have an active authenticated session
+  // 3. Must be Mobile or standalone container
+  // 4. User must have an MPIN configured
+  // 5. App is not yet unlocked
+  // 6. Not still performing initial MPIN existence check
+  const isAndroid = isAndroidWebView();
   const shouldShowLockScreen = Boolean(
+    !isAndroid &&
     session &&
     isMobile &&
     hasMpin &&
