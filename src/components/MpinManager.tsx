@@ -1,14 +1,26 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  hasConfiguredMpin, 
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef
+} from 'react';
+
+import {
+  hasConfiguredMpin,
   isMobileOrAndroidApp,
-  isAndroidWebView,
   isSessionUnlocked,
   markSessionUnlocked,
   clearSessionUnlocked
 } from '../services/mpinSecurityService';
+
 import { MpinLockScreen } from './MpinLockScreen';
-import { CreateMpinModal, ChangeMpinModal, ForgotMpinModal } from './MpinModals';
+import {
+  CreateMpinModal,
+  ChangeMpinModal,
+  ForgotMpinModal
+} from './MpinModals';
 
 interface MpinContextType {
   hasMpin: boolean;
@@ -25,7 +37,7 @@ const MpinContext = createContext<MpinContextType>({
   openCreateModal: () => {},
   openChangeModal: () => {},
   openForgotModal: () => {},
-  refreshMpinStatus: async () => {},
+  refreshMpinStatus: async () => {}
 });
 
 export const useMpinSecurity = () => useContext(MpinContext);
@@ -36,186 +48,448 @@ interface MpinManagerProps {
   children: React.ReactNode;
 }
 
-const GRACE_PERIOD_MS = 20000; // 20 seconds grace period for non-Android quick app switchers
+const GRACE_PERIOD_MS = 20000;
 
-export default function MpinManager({ session, theme = 'light', children }: MpinManagerProps) {
+export default function MpinManager({
+  session,
+  theme = 'light',
+  children
+}: MpinManagerProps) {
   const userId = session?.user?.id;
-  const userEmail = session?.user?.email || '';
-  const userName = session?.user?.user_metadata?.full_name || userEmail?.split('@')[0] || '';
 
-  const [isMobile, setIsMobile] = useState<boolean>(() => isMobileOrAndroidApp());
-  const [hasMpin, setHasMpin] = useState<boolean>(false);
-  const [isCheckingMpin, setIsCheckingMpin] = useState<boolean>(true);
-  const [isUnlocked, setIsUnlocked] = useState<boolean>(() => isSessionUnlocked(userId));
+  const userEmail =
+    session?.user?.email || '';
 
-  // Modals state
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isChangeOpen, setIsChangeOpen] = useState(false);
-  const [isForgotOpen, setIsForgotOpen] = useState(false);
+  const userName =
+    session?.user?.user_metadata?.full_name ||
+    userEmail?.split('@')[0] ||
+    '';
 
-  const backgroundTimeRef = useRef<number | null>(null);
-  const prevUserIdRef = useRef<string | null>(null);
+  const [isMobile, setIsMobile] =
+    useState<boolean>(() => isMobileOrAndroidApp());
 
-  // Clean up legacy fallback/force flags on mount
+  const [hasMpin, setHasMpin] =
+    useState<boolean>(false);
+
+  const [isCheckingMpin, setIsCheckingMpin] =
+    useState<boolean>(true);
+
+  const [isUnlocked, setIsUnlocked] =
+    useState<boolean>(() => isSessionUnlocked(userId));
+
+  const [isCreateOpen, setIsCreateOpen] =
+    useState(false);
+
+  const [isChangeOpen, setIsChangeOpen] =
+    useState(false);
+
+  const [isForgotOpen, setIsForgotOpen] =
+    useState(false);
+
+  const backgroundTimeRef =
+    useRef<number | null>(null);
+
+  const prevUserIdRef =
+    useRef<string | null>(null);
+
+  /*
+   * Legacy biometric flags cleanup.
+   * Fingerprint is no longer responsible
+   * for TrackBook MPIN unlocking.
+   */
   useEffect(() => {
     try {
-      localStorage.removeItem('trackbook_force_tpin');
-      sessionStorage.removeItem('trackbook_force_tpin');
-      localStorage.removeItem('tb_biometric_fallback_pending');
-      sessionStorage.removeItem('tb_biometric_fallback_pending');
-    } catch (e) {}
+      localStorage.removeItem(
+        'trackbook_force_tpin'
+      );
+
+      sessionStorage.removeItem(
+        'trackbook_force_tpin'
+      );
+
+      localStorage.removeItem(
+        'tb_biometric_fallback_pending'
+      );
+
+      sessionStorage.removeItem(
+        'tb_biometric_fallback_pending'
+      );
+    } catch (_) {}
   }, []);
 
-  // Re-check mobile environment on resize
+  /*
+   * Keep mobile detection updated.
+   */
   useEffect(() => {
     const handleResize = () => {
-      setIsMobile(isMobileOrAndroidApp());
+      setIsMobile(
+        isMobileOrAndroidApp()
+      );
     };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+
+    window.addEventListener(
+      'resize',
+      handleResize
+    );
+
+    return () => {
+      window.removeEventListener(
+        'resize',
+        handleResize
+      );
+    };
   }, []);
 
-  // Check MPIN configuration for current user
-  const checkMpinStatus = useCallback(async () => {
-    if (!userId) {
-      setHasMpin(false);
+  /*
+   * Check whether current user has configured MPIN.
+   */
+  const checkMpinStatus =
+    useCallback(async () => {
+      if (!userId) {
+        setHasMpin(false);
+        setIsUnlocked(false);
+        setIsCheckingMpin(false);
+        return;
+      }
+
+      try {
+        const configured =
+          await hasConfiguredMpin(userId);
+
+        setHasMpin(configured);
+      } catch (error) {
+        console.error(
+          '[MPIN] Failed to check MPIN status:',
+          error
+        );
+
+        setHasMpin(false);
+      } finally {
+        setIsCheckingMpin(false);
+      }
+    }, [userId]);
+
+  /*
+   * Initial user/session handling.
+   *
+   * IMPORTANT:
+   * Android WebView is NOT automatically
+   * marked as unlocked anymore.
+   */
+  useEffect(() => {
+    if (
+      userId !==
+      prevUserIdRef.current
+    ) {
+      const unlocked =
+        isSessionUnlocked(userId);
+
+      setIsUnlocked(unlocked);
+
+      prevUserIdRef.current =
+        userId;
+
+      setIsCheckingMpin(true);
+
+      checkMpinStatus();
+    }
+  }, [
+    userId,
+    checkMpinStatus
+  ]);
+
+  /*
+   * NATIVE ANDROID LOCK EVENT LISTENER
+   *
+   * MainActivity dispatches:
+   *
+   * trackbook-force-tpin
+   *
+   * whenever the Android app must be locked.
+   *
+   * This immediately removes the unlocked
+   * state and forces the MPIN screen.
+   */
+  useEffect(() => {
+    const forceLock = () => {
+      if (!userId) return;
+
+      console.log(
+        '[MPIN] Native lock request received.'
+      );
+
+      try {
+        clearSessionUnlocked(userId);
+      } catch (_) {}
+
       setIsUnlocked(false);
-      setIsCheckingMpin(false);
+    };
+
+    window.addEventListener(
+      'trackbook-force-tpin',
+      forceLock
+    );
+
+    document.addEventListener(
+      'trackbook-force-tpin',
+      forceLock
+    );
+
+    return () => {
+      window.removeEventListener(
+        'trackbook-force-tpin',
+        forceLock
+      );
+
+      document.removeEventListener(
+        'trackbook-force-tpin',
+        forceLock
+      );
+    };
+  }, [userId]);
+
+  /*
+   * Legacy biometric events are treated
+   * as MPIN lock requests only.
+   *
+   * They can never unlock the app.
+   */
+  useEffect(() => {
+    const forceLock = () => {
+      if (!userId) return;
+
+      try {
+        clearSessionUnlocked(userId);
+      } catch (_) {}
+
+      setIsUnlocked(false);
+    };
+
+    window.addEventListener(
+      'trackbook-biometric-fallback',
+      forceLock
+    );
+
+    document.addEventListener(
+      'trackbook-biometric-fallback',
+      forceLock
+    );
+
+    window.addEventListener(
+      'trackbook-biometric-cancel',
+      forceLock
+    );
+
+    document.addEventListener(
+      'trackbook-biometric-cancel',
+      forceLock
+    );
+
+    return () => {
+      window.removeEventListener(
+        'trackbook-biometric-fallback',
+        forceLock
+      );
+
+      document.removeEventListener(
+        'trackbook-biometric-fallback',
+        forceLock
+      );
+
+      window.removeEventListener(
+        'trackbook-biometric-cancel',
+        forceLock
+      );
+
+      document.removeEventListener(
+        'trackbook-biometric-cancel',
+        forceLock
+      );
+    };
+  }, [userId]);
+
+  /*
+   * Standard mobile/browser lifecycle lock.
+   *
+   * Android native lifecycle is also handled
+   * by MainActivity. This web listener remains
+   * safe as an additional lock layer.
+   */
+  useEffect(() => {
+    if (
+      !isMobile ||
+      !hasMpin ||
+      !userId
+    ) {
       return;
     }
 
-    try {
-      const configured = await hasConfiguredMpin(userId);
-      setHasMpin(configured);
-    } catch (e) {
-      console.error('Failed to check MPIN status:', e);
-      setHasMpin(false);
-    } finally {
-      setIsCheckingMpin(false);
-    }
-  }, [userId]);
+    const lockImmediately = () => {
+      backgroundTimeRef.current =
+        Date.now();
 
-  // Handle User Change or Initial Load
-  useEffect(() => {
-    if (userId !== prevUserIdRef.current) {
-      // In Android WebView, native Android MainActivity is authoritative for app lock.
-      if (isAndroidWebView()) {
-        setIsUnlocked(true);
-      } else {
-        const unlocked = isSessionUnlocked(userId);
-        setIsUnlocked(unlocked);
-      }
-      prevUserIdRef.current = userId;
-      setIsCheckingMpin(true);
-      checkMpinStatus();
-    }
-  }, [userId, checkMpinStatus]);
+      try {
+        clearSessionUnlocked(userId);
+      } catch (_) {}
 
-  // App Background / Resume Lock Handling (Non-Android Web Only)
-  // Disabled in Android WebView because native MainActivity handles lifecycle lock
-  useEffect(() => {
-    if (isAndroidWebView() || !isMobile || !hasMpin || !userId) return;
+      setIsUnlocked(false);
+    };
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        // App sent to background
-        backgroundTimeRef.current = Date.now();
+        lockImmediately();
       } else {
-        // App returned to foreground
-        if (backgroundTimeRef.current) {
-          const elapsed = Date.now() - backgroundTimeRef.current;
-          if (elapsed > GRACE_PERIOD_MS) {
-            console.log(`[MPIN] Web session resumed after ${Math.round(elapsed / 1000)}s - locking web view.`);
-            clearSessionUnlocked(userId);
-            setIsUnlocked(false);
-          }
-          backgroundTimeRef.current = null;
-        }
-      }
-    };
-
-    const handlePageHide = () => {
-      backgroundTimeRef.current = Date.now();
-    };
-
-    const handlePageShow = () => {
-      if (backgroundTimeRef.current) {
-        const elapsed = Date.now() - backgroundTimeRef.current;
-        if (elapsed > GRACE_PERIOD_MS) {
-          clearSessionUnlocked(userId);
-          setIsUnlocked(false);
-        }
         backgroundTimeRef.current = null;
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('pagehide', handlePageHide);
-    window.addEventListener('pageshow', handlePageShow);
+    const handlePageHide = () => {
+      lockImmediately();
+    };
+
+    document.addEventListener(
+      'visibilitychange',
+      handleVisibilityChange
+    );
+
+    window.addEventListener(
+      'pagehide',
+      handlePageHide
+    );
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('pagehide', handlePageHide);
-      window.removeEventListener('pageshow', handlePageShow);
+      document.removeEventListener(
+        'visibilitychange',
+        handleVisibilityChange
+      );
+
+      window.removeEventListener(
+        'pagehide',
+        handlePageHide
+      );
     };
-  }, [isMobile, hasMpin, userId]);
+  }, [
+    isMobile,
+    hasMpin,
+    userId
+  ]);
 
+  /*
+   * Correct MPIN entered.
+   */
   const handleUnlock = () => {
+    if (!userId) return;
+
     try {
-      sessionStorage.removeItem('tb_biometric_fallback_pending');
-    } catch (e) {}
-    if (userId) {
+      sessionStorage.removeItem(
+        'tb_biometric_fallback_pending'
+      );
+
       markSessionUnlocked(userId);
-    }
+    } catch (_) {}
+
     setIsUnlocked(true);
-  };
 
-  const handleMpinCreated = async () => {
-    await checkMpinStatus();
-    if (userId) {
-      markSessionUnlocked(userId);
+    /*
+     * Notify native MainActivity that the
+     * MPIN verification succeeded.
+     */
+    try {
+      const androidBridge =
+        (window as any).TrackBookAndroid;
+
+      if (
+        androidBridge &&
+        typeof androidBridge.notifyTpinUnlocked ===
+          'function'
+      ) {
+        androidBridge.notifyTpinUnlocked();
+      }
+    } catch (error) {
+      console.error(
+        '[MPIN] Failed to notify Android:',
+        error
+      );
     }
-    setIsUnlocked(true);
   };
 
-  const handleMpinChanged = async () => {
-    await checkMpinStatus();
-  };
+  /*
+   * New MPIN created.
+   */
+  const handleMpinCreated =
+    async () => {
+      await checkMpinStatus();
 
-  const handleMpinReset = async () => {
-    await checkMpinStatus();
-    if (userId) {
-      markSessionUnlocked(userId);
-    }
-    setIsUnlocked(true);
-  };
+      if (userId) {
+        try {
+          markSessionUnlocked(userId);
+        } catch (_) {}
+      }
 
-  // Determine if full-screen lock should be shown:
-  // 1. Must NOT be running inside the TrackBook Android WebView (Native MainActivity handles lock)
-  // 2. Must have an active authenticated session
-  // 3. Must be Mobile or standalone container
-  // 4. User must have an MPIN configured
-  // 5. App is not yet unlocked
-  // 6. Not still performing initial MPIN existence check
-  const isAndroid = isAndroidWebView();
-  const shouldShowLockScreen = Boolean(
-    !isAndroid &&
-    session &&
-    isMobile &&
-    hasMpin &&
-    !isUnlocked &&
-    !isCheckingMpin
-  );
+      setIsUnlocked(true);
+    };
+
+  /*
+   * Existing MPIN changed.
+   */
+  const handleMpinChanged =
+    async () => {
+      await checkMpinStatus();
+    };
+
+  /*
+   * Forgot/reset MPIN completed.
+   *
+   * Existing behavior retained.
+   */
+  const handleMpinReset =
+    async () => {
+      await checkMpinStatus();
+
+      if (userId) {
+        try {
+          markSessionUnlocked(userId);
+        } catch (_) {}
+      }
+
+      setIsUnlocked(true);
+    };
+
+  /*
+   * Full-screen MPIN lock decision.
+   *
+   * IMPORTANT:
+   * There is NO Android bypass here.
+   *
+   * Android WebView also shows the MPIN
+   * screen when MainActivity requests it.
+   */
+  const shouldShowLockScreen =
+    Boolean(
+      session &&
+      isMobile &&
+      hasMpin &&
+      !isUnlocked &&
+      !isCheckingMpin
+    );
 
   return (
     <MpinContext.Provider
       value={{
         hasMpin,
         isMobile,
-        openCreateModal: () => setIsCreateOpen(true),
-        openChangeModal: () => setIsChangeOpen(true),
-        openForgotModal: () => setIsForgotOpen(true),
-        refreshMpinStatus: checkMpinStatus,
+
+        openCreateModal: () =>
+          setIsCreateOpen(true),
+
+        openChangeModal: () =>
+          setIsChangeOpen(true),
+
+        openForgotModal: () =>
+          setIsForgotOpen(true),
+
+        refreshMpinStatus:
+          checkMpinStatus
       }}
     >
       {shouldShowLockScreen ? (
@@ -230,33 +504,46 @@ export default function MpinManager({ session, theme = 'light', children }: Mpin
         children
       )}
 
-      {/* Profile/App Modals */}
       {userId && (
         <>
           <CreateMpinModal
             isOpen={isCreateOpen}
-            onClose={() => setIsCreateOpen(false)}
+            onClose={() =>
+              setIsCreateOpen(false)
+            }
             userId={userId}
-            onSuccess={handleMpinCreated}
+            onSuccess={
+              handleMpinCreated
+            }
             theme={theme}
           />
+
           <ChangeMpinModal
             isOpen={isChangeOpen}
-            onClose={() => setIsChangeOpen(false)}
+            onClose={() =>
+              setIsChangeOpen(false)
+            }
             userId={userId}
-            onSuccess={handleMpinChanged}
+            onSuccess={
+              handleMpinChanged
+            }
             onOpenForgotMpin={() => {
               setIsChangeOpen(false);
               setIsForgotOpen(true);
             }}
             theme={theme}
           />
+
           <ForgotMpinModal
             isOpen={isForgotOpen}
-            onClose={() => setIsForgotOpen(false)}
+            onClose={() =>
+              setIsForgotOpen(false)
+            }
             userEmail={userEmail}
             userId={userId}
-            onSuccess={handleMpinReset}
+            onSuccess={
+              handleMpinReset
+            }
             theme={theme}
           />
         </>
