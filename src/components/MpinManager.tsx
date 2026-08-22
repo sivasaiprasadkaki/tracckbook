@@ -4,22 +4,23 @@ import React, {
   useState,
   useEffect,
   useCallback,
-  useRef
+  useRef,
 } from 'react';
 
 import {
   hasConfiguredMpin,
   isMobileOrAndroidApp,
+  isAndroidWebView,
   isSessionUnlocked,
   markSessionUnlocked,
-  clearSessionUnlocked
+  clearSessionUnlocked,
 } from '../services/mpinSecurityService';
 
 import { MpinLockScreen } from './MpinLockScreen';
 import {
   CreateMpinModal,
   ChangeMpinModal,
-  ForgotMpinModal
+  ForgotMpinModal,
 } from './MpinModals';
 
 interface MpinContextType {
@@ -37,7 +38,7 @@ const MpinContext = createContext<MpinContextType>({
   openCreateModal: () => {},
   openChangeModal: () => {},
   openForgotModal: () => {},
-  refreshMpinStatus: async () => {}
+  refreshMpinStatus: async () => {},
 });
 
 export const useMpinSecurity = () => useContext(MpinContext);
@@ -48,12 +49,10 @@ interface MpinManagerProps {
   children: React.ReactNode;
 }
 
-const GRACE_PERIOD_MS = 20000;
-
 export default function MpinManager({
   session,
   theme = 'light',
-  children
+  children,
 }: MpinManagerProps) {
   const userId = session?.user?.id;
 
@@ -92,59 +91,79 @@ export default function MpinManager({
   const prevUserIdRef =
     useRef<string | null>(null);
 
-  /*
-   * Legacy biometric flags cleanup.
-   * Fingerprint is no longer responsible
-   * for TrackBook MPIN unlocking.
-   */
+  const isAndroidRef =
+    useRef<boolean>(isAndroidWebView());
+
+  // ============================================================
+  // ENVIRONMENT
+  // ============================================================
+
   useEffect(() => {
-    try {
-      localStorage.removeItem(
-        'trackbook_force_tpin'
-      );
-
-      sessionStorage.removeItem(
-        'trackbook_force_tpin'
-      );
-
-      localStorage.removeItem(
-        'tb_biometric_fallback_pending'
-      );
-
-      sessionStorage.removeItem(
-        'tb_biometric_fallback_pending'
-      );
-    } catch (_) {}
-  }, []);
-
-  /*
-   * Keep mobile detection updated.
-   */
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(
-        isMobileOrAndroidApp()
-      );
+    const updateEnvironment = () => {
+      isAndroidRef.current = isAndroidWebView();
+      setIsMobile(isMobileOrAndroidApp());
     };
+
+    updateEnvironment();
 
     window.addEventListener(
       'resize',
-      handleResize
+      updateEnvironment
     );
 
     return () => {
       window.removeEventListener(
         'resize',
-        handleResize
+        updateEnvironment
       );
     };
   }, []);
 
-  /*
-   * Check whether current user has configured MPIN.
-   */
-  const checkMpinStatus =
-    useCallback(async () => {
+  // ============================================================
+  // CHECK MPIN
+  // ============================================================
+
+  const checkMpinStatus = useCallback(async () => {
+    if (!userId) {
+      setHasMpin(false);
+      setIsUnlocked(false);
+      setIsCheckingMpin(false);
+      return;
+    }
+
+    setIsCheckingMpin(true);
+
+    try {
+      const configured =
+        await hasConfiguredMpin(userId);
+
+      setHasMpin(configured);
+
+      // If user has no MPIN, do not lock.
+      if (!configured) {
+        setIsUnlocked(true);
+      }
+    } catch (error) {
+      console.error(
+        '[MPIN] Failed to check MPIN status:',
+        error
+      );
+
+      setHasMpin(false);
+      setIsUnlocked(true);
+    } finally {
+      setIsCheckingMpin(false);
+    }
+  }, [userId]);
+
+  // ============================================================
+  // INITIAL USER / SESSION
+  // ============================================================
+
+  useEffect(() => {
+    if (userId !== prevUserIdRef.current) {
+      prevUserIdRef.current = userId || null;
+
       if (!userId) {
         setHasMpin(false);
         setIsUnlocked(false);
@@ -152,171 +171,131 @@ export default function MpinManager({
         return;
       }
 
-      try {
-        const configured =
-          await hasConfiguredMpin(userId);
-
-        setHasMpin(configured);
-      } catch (error) {
-        console.error(
-          '[MPIN] Failed to check MPIN status:',
-          error
-        );
-
-        setHasMpin(false);
-      } finally {
-        setIsCheckingMpin(false);
-      }
-    }, [userId]);
-
-  /*
-   * Initial user/session handling.
-   *
-   * IMPORTANT:
-   * Android WebView is NOT automatically
-   * marked as unlocked anymore.
-   */
-  useEffect(() => {
-    if (
-      userId !==
-      prevUserIdRef.current
-    ) {
-      const unlocked =
-        isSessionUnlocked(userId);
-
-      setIsUnlocked(unlocked);
-
-      prevUserIdRef.current =
-        userId;
-
-      setIsCheckingMpin(true);
+      /*
+       * Fresh credential login remains unlocked.
+       * Native Android lifecycle events will explicitly lock it
+       * after app goes to background / opens again.
+       */
+      setIsUnlocked(isSessionUnlocked(userId));
 
       checkMpinStatus();
     }
-  }, [
-    userId,
-    checkMpinStatus
-  ]);
+  }, [userId, checkMpinStatus]);
 
-  /*
-   * NATIVE ANDROID LOCK EVENT LISTENER
-   *
-   * MainActivity dispatches:
-   *
-   * trackbook-force-tpin
-   *
-   * whenever the Android app must be locked.
-   *
-   * This immediately removes the unlocked
-   * state and forces the MPIN screen.
-   */
+  // ============================================================
+  // NATIVE ANDROID -> WEB MPIN LOCK
+  // ============================================================
+  //
+  // MainActivity sends:
+  //   trackbook-force-tpin
+  //
+  // IMPORTANT:
+  // Do NOT ignore this event in Android WebView.
+  // Android controls WHEN to lock.
+  // Web React layer controls WHICH MPIN UI is displayed.
+  //
+
   useEffect(() => {
-    const forceLock = () => {
+    const forceMpinLock = () => {
       if (!userId) return;
 
       console.log(
-        '[MPIN] Native lock request received.'
+        '[MPIN] Native Android requested immediate lock.'
       );
 
-      try {
-        clearSessionUnlocked(userId);
-      } catch (_) {}
-
+      clearSessionUnlocked(userId);
       setIsUnlocked(false);
     };
 
+    const handleForceTpin =
+      () => forceMpinLock();
+
+    const handleBiometricFallback =
+      () => forceMpinLock();
+
     window.addEventListener(
       'trackbook-force-tpin',
-      forceLock
+      handleForceTpin
     );
 
     document.addEventListener(
       'trackbook-force-tpin',
-      forceLock
+      handleForceTpin
     );
-
-    return () => {
-      window.removeEventListener(
-        'trackbook-force-tpin',
-        forceLock
-      );
-
-      document.removeEventListener(
-        'trackbook-force-tpin',
-        forceLock
-      );
-    };
-  }, [userId]);
-
-  /*
-   * Legacy biometric events are treated
-   * as MPIN lock requests only.
-   *
-   * They can never unlock the app.
-   */
-  useEffect(() => {
-    const forceLock = () => {
-      if (!userId) return;
-
-      try {
-        clearSessionUnlocked(userId);
-      } catch (_) {}
-
-      setIsUnlocked(false);
-    };
 
     window.addEventListener(
       'trackbook-biometric-fallback',
-      forceLock
+      handleBiometricFallback
     );
 
     document.addEventListener(
       'trackbook-biometric-fallback',
-      forceLock
+      handleBiometricFallback
     );
 
-    window.addEventListener(
-      'trackbook-biometric-cancel',
-      forceLock
-    );
+    /*
+     * Critical race-condition fix:
+     *
+     * Native MainActivity may set this localStorage value BEFORE
+     * React MpinManager mounts.
+     *
+     * Therefore check it immediately on mount as well.
+     */
+    try {
+      const forceLock =
+        localStorage.getItem(
+          'trackbook_force_tpin'
+        );
 
-    document.addEventListener(
-      'trackbook-biometric-cancel',
-      forceLock
-    );
+      if (forceLock === '1' && userId) {
+        console.log(
+          '[MPIN] Pending native lock detected on startup.'
+        );
+
+        clearSessionUnlocked(userId);
+        setIsUnlocked(false);
+      }
+    } catch (error) {
+      console.warn(
+        '[MPIN] Unable to read native lock state:',
+        error
+      );
+    }
 
     return () => {
       window.removeEventListener(
-        'trackbook-biometric-fallback',
-        forceLock
+        'trackbook-force-tpin',
+        handleForceTpin
       );
 
       document.removeEventListener(
-        'trackbook-biometric-fallback',
-        forceLock
+        'trackbook-force-tpin',
+        handleForceTpin
       );
 
       window.removeEventListener(
-        'trackbook-biometric-cancel',
-        forceLock
+        'trackbook-biometric-fallback',
+        handleBiometricFallback
       );
 
       document.removeEventListener(
-        'trackbook-biometric-cancel',
-        forceLock
+        'trackbook-biometric-fallback',
+        handleBiometricFallback
       );
     };
   }, [userId]);
 
-  /*
-   * Standard mobile/browser lifecycle lock.
-   *
-   * Android native lifecycle is also handled
-   * by MainActivity. This web listener remains
-   * safe as an additional lock layer.
-   */
+  // ============================================================
+  // NON-ANDROID MOBILE / WEB APP LOCK
+  // ============================================================
+  //
+  // No grace period.
+  // The instant the app/page goes to background, lock it.
+  //
+
   useEffect(() => {
     if (
+      isAndroidWebView() ||
       !isMobile ||
       !hasMpin ||
       !userId
@@ -325,25 +304,19 @@ export default function MpinManager({
     }
 
     const lockImmediately = () => {
-      backgroundTimeRef.current =
-        Date.now();
-
-      try {
-        clearSessionUnlocked(userId);
-      } catch (_) {}
-
+      clearSessionUnlocked(userId);
       setIsUnlocked(false);
     };
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
+        backgroundTimeRef.current = Date.now();
         lockImmediately();
-      } else {
-        backgroundTimeRef.current = null;
       }
     };
 
     const handlePageHide = () => {
+      backgroundTimeRef.current = Date.now();
       lockImmediately();
     };
 
@@ -371,107 +344,148 @@ export default function MpinManager({
   }, [
     isMobile,
     hasMpin,
-    userId
+    userId,
   ]);
 
-  /*
-   * Correct MPIN entered.
-   */
-  const handleUnlock = () => {
+  // ============================================================
+  // SUCCESSFUL MPIN UNLOCK
+  // ============================================================
+
+  const notifyNativeTpinUnlocked =
+    useCallback(() => {
+      try {
+        const nativeBridge =
+          (window as any).TrackBookAndroid;
+
+        if (
+          nativeBridge &&
+          typeof nativeBridge.notifyTpinUnlocked ===
+            'function'
+        ) {
+          nativeBridge.notifyTpinUnlocked();
+        }
+      } catch (error) {
+        console.warn(
+          '[MPIN] Native unlock notification failed:',
+          error
+        );
+      }
+    }, []);
+
+  const handleUnlock = useCallback(() => {
     if (!userId) return;
 
+    console.log(
+      '[MPIN] TPIN verified successfully.'
+    );
+
     try {
+      localStorage.removeItem(
+        'trackbook_force_tpin'
+      );
+
       sessionStorage.removeItem(
         'tb_biometric_fallback_pending'
       );
+    } catch (error) {}
 
-      markSessionUnlocked(userId);
-    } catch (_) {}
-
+    markSessionUnlocked(userId);
     setIsUnlocked(true);
 
-    /*
-     * Notify native MainActivity that the
-     * MPIN verification succeeded.
-     */
-    try {
-      const androidBridge =
-        (window as any).TrackBookAndroid;
+    // Tell MainActivity that TPIN was successfully verified.
+    notifyNativeTpinUnlocked();
+  }, [
+    userId,
+    notifyNativeTpinUnlocked,
+  ]);
 
-      if (
-        androidBridge &&
-        typeof androidBridge.notifyTpinUnlocked ===
-          'function'
-      ) {
-        androidBridge.notifyTpinUnlocked();
-      }
-    } catch (error) {
-      console.error(
-        '[MPIN] Failed to notify Android:',
-        error
-      );
-    }
-  };
+  // ============================================================
+  // MPIN CREATED
+  // ============================================================
 
-  /*
-   * New MPIN created.
-   */
   const handleMpinCreated =
-    async () => {
+    useCallback(async () => {
       await checkMpinStatus();
 
       if (userId) {
-        try {
-          markSessionUnlocked(userId);
-        } catch (_) {}
+        markSessionUnlocked(userId);
       }
 
-      setIsUnlocked(true);
-    };
+      try {
+        localStorage.removeItem(
+          'trackbook_force_tpin'
+        );
+      } catch (error) {}
 
-  /*
-   * Existing MPIN changed.
-   */
+      setIsUnlocked(true);
+      notifyNativeTpinUnlocked();
+    }, [
+      checkMpinStatus,
+      userId,
+      notifyNativeTpinUnlocked,
+    ]);
+
+  // ============================================================
+  // MPIN CHANGED
+  // ============================================================
+
   const handleMpinChanged =
-    async () => {
+    useCallback(async () => {
       await checkMpinStatus();
-    };
+    }, [
+      checkMpinStatus,
+    ]);
 
-  /*
-   * Forgot/reset MPIN completed.
-   *
-   * Existing behavior retained.
-   */
+  // ============================================================
+  // MPIN RESET
+  // ============================================================
+
   const handleMpinReset =
-    async () => {
+    useCallback(async () => {
       await checkMpinStatus();
 
       if (userId) {
-        try {
-          markSessionUnlocked(userId);
-        } catch (_) {}
+        markSessionUnlocked(userId);
       }
 
+      try {
+        localStorage.removeItem(
+          'trackbook_force_tpin'
+        );
+      } catch (error) {}
+
       setIsUnlocked(true);
-    };
+      notifyNativeTpinUnlocked();
+    }, [
+      checkMpinStatus,
+      userId,
+      notifyNativeTpinUnlocked,
+    ]);
+
+  // ============================================================
+  // LOCK SCREEN DECISION
+  // ============================================================
 
   /*
-   * Full-screen MPIN lock decision.
-   *
    * IMPORTANT:
-   * There is NO Android bypass here.
    *
-   * Android WebView also shows the MPIN
-   * screen when MainActivity requests it.
+   * Removed:
+   *
+   *   !isAndroid &&
+   *
+   * Android MUST also be able to display the MPIN screen.
+   *
+   * Native MainActivity decides WHEN app should lock.
+   * MpinManager decides how to display the MPIN lock screen.
    */
-  const shouldShowLockScreen =
-    Boolean(
-      session &&
-      isMobile &&
-      hasMpin &&
-      !isUnlocked &&
-      !isCheckingMpin
-    );
+
+  const shouldShowLockScreen = Boolean(
+    session &&
+    isMobile &&
+    hasMpin &&
+    !isUnlocked &&
+    !isCheckingMpin
+  );
 
   return (
     <MpinContext.Provider
@@ -479,17 +493,20 @@ export default function MpinManager({
         hasMpin,
         isMobile,
 
-        openCreateModal: () =>
-          setIsCreateOpen(true),
+        openCreateModal: () => {
+          setIsCreateOpen(true);
+        },
 
-        openChangeModal: () =>
-          setIsChangeOpen(true),
+        openChangeModal: () => {
+          setIsChangeOpen(true);
+        },
 
-        openForgotModal: () =>
-          setIsForgotOpen(true),
+        openForgotModal: () => {
+          setIsForgotOpen(true);
+        },
 
         refreshMpinStatus:
-          checkMpinStatus
+          checkMpinStatus,
       }}
     >
       {shouldShowLockScreen ? (
@@ -508,9 +525,9 @@ export default function MpinManager({
         <>
           <CreateMpinModal
             isOpen={isCreateOpen}
-            onClose={() =>
-              setIsCreateOpen(false)
-            }
+            onClose={() => {
+              setIsCreateOpen(false);
+            }}
             userId={userId}
             onSuccess={
               handleMpinCreated
@@ -520,9 +537,9 @@ export default function MpinManager({
 
           <ChangeMpinModal
             isOpen={isChangeOpen}
-            onClose={() =>
-              setIsChangeOpen(false)
-            }
+            onClose={() => {
+              setIsChangeOpen(false);
+            }}
             userId={userId}
             onSuccess={
               handleMpinChanged
@@ -536,9 +553,9 @@ export default function MpinManager({
 
           <ForgotMpinModal
             isOpen={isForgotOpen}
-            onClose={() =>
-              setIsForgotOpen(false)
-            }
+            onClose={() => {
+              setIsForgotOpen(false);
+            }}
             userEmail={userEmail}
             userId={userId}
             onSuccess={
