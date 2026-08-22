@@ -1,14 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Shield, Lock, KeyRound, X, CheckCircle2, AlertCircle, Eye, EyeOff, Loader2, RefreshCw } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  X,
+  ShieldCheck,
+  KeyRound,
+  LockKeyhole,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+} from 'lucide-react';
 import { cn } from '../lib/utils';
-import { supabase } from '../lib/supabase';
-import { 
-  validateMpinStrength, 
-  saveUserMpin, 
-  verifyUserMpin, 
-  resetLockoutState 
+import {
+  saveUserMpin,
+  verifyUserMpin,
+  validateMpinStrength,
+  resetLockoutState,
 } from '../services/mpinSecurityService';
+import { supabase } from '../integrations/supabase/client';
 
 interface CreateMpinModalProps {
   isOpen: boolean;
@@ -18,224 +28,208 @@ interface CreateMpinModalProps {
   theme?: 'light' | 'dark';
 }
 
-/**
- * Modal for creating a new 6-digit MPIN
- */
-export function CreateMpinModal({ isOpen, onClose, userId, onSuccess, theme = 'light' }: CreateMpinModalProps) {
+export function CreateMpinModal({
+  isOpen,
+  onClose,
+  userId,
+  onSuccess,
+  theme = 'light',
+}: CreateMpinModalProps) {
   const [mpin, setMpin] = useState('');
   const [confirmMpin, setConfirmMpin] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen) {
       setMpin('');
       setConfirmMpin('');
       setError(null);
-      setSuccess(null);
       setLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 150);
     }
   }, [isOpen]);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleDigitInput =
+    (setter: (value: string) => void) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+      setter(value);
+
+      if (error) {
+        setError(null);
+      }
+    };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (mpin.length !== 6) {
-      setError('Please enter a full 6-digit TPIN.');
-      return;
-    }
-
-    if (confirmMpin.length !== 6) {
-      setError('Please confirm your 6-digit TPIN.');
+    if (mpin.length !== 6 || confirmMpin.length !== 6) {
+      setError('Please enter and confirm a 6-digit TPIN.');
       return;
     }
 
     if (mpin !== confirmMpin) {
-      setError('TPIN and Confirm TPIN do not match.');
+      setError('TPIN and confirmation do not match.');
       return;
     }
 
     const validation = validateMpinStrength(mpin);
+
     if (!validation.isValid) {
-      setError(validation.error || 'Invalid TPIN strength.');
+      setError(validation.error || 'Please choose a stronger TPIN.');
       return;
     }
 
     setLoading(true);
+
     try {
-      const res = await saveUserMpin(userId, mpin);
-      if (!res.success) {
-        setError(res.error || 'Failed to save TPIN.');
-      } else {
-        setSuccess('TPIN created successfully');
-        setTimeout(() => {
-          onSuccess();
-          onClose();
-        }, 1200);
+      const result = await saveUserMpin(userId, mpin);
+
+      if (!result.success) {
+        setError(result.error || 'Failed to create TPIN.');
+        return;
       }
+
+      onSuccess();
+      onClose();
     } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred.');
+      setError(err?.message || 'Failed to create TPIN.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDigitInput = (setter: (val: string) => void, currentVal: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-    setter(val);
-    if (error) setError(null);
-  };
-
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className={cn(
-          "fixed inset-0 z-[120] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
-          theme === 'dark' ? "bg-black/75" : "bg-slate-900/50"
-        )}>
+        <div
+          className={cn(
+            'fixed inset-0 z-[130] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300',
+            theme === 'dark' ? 'bg-black/80' : 'bg-slate-900/60'
+          )}
+        >
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             className={cn(
-              "w-full max-w-sm p-6 shadow-2xl transition-colors duration-300 relative border",
-              theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
+              'w-full max-w-sm p-6 shadow-2xl transition-colors duration-300 relative border',
+              theme === 'dark'
+                ? 'bg-zinc-950 border-zinc-800'
+                : 'bg-white border-slate-200'
             )}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-zinc-900 mb-5">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 bg-indigo-600 flex items-center justify-center text-white shrink-0">
-                  <Shield size={18} />
-                </div>
-                <div>
-                  <h3 className="text-base font-extrabold tracking-tight">Create your TPIN</h3>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-medium">6-digit mobile security PIN</p>
-                </div>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-5">
+              <div className="p-2.5 bg-indigo-600 text-white">
+                <ShieldCheck size={22} />
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={loading}
-                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors"
-              >
-                <X size={18} />
-              </button>
+
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  Create TPIN
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                  Create a secure 6-digit TPIN
+                </p>
+              </div>
             </div>
 
-            {/* Error / Success Feedback */}
-            <AnimatePresence mode="wait">
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-start gap-2"
-                >
-                  <AlertCircle size={15} className="shrink-0 mt-0.5 text-rose-500" />
-                  <span>{error}</span>
-                </motion.div>
-              )}
-              {success && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2"
-                >
-                  <CheckCircle2 size={16} className="shrink-0 text-emerald-500" />
-                  <span>{success}</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {error && (
+              <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-start gap-2">
+                <AlertCircle
+                  size={15}
+                  className="shrink-0 mt-0.5 text-rose-500"
+                />
+                <span>{error}</span>
+              </div>
+            )}
 
-            <form onSubmit={handleCreate} className="space-y-4">
-              {/* TPIN input */}
+            <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
-                  TPIN (6 Digits)
+                  Create TPIN
                 </label>
-                <div className="relative">
-                  <input
-                    ref={inputRef}
-                    type="password"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    value={mpin}
-                    onChange={handleDigitInput(setMpin, mpin)}
-                    placeholder="••••••"
-                    autoComplete="off"
-                    className={cn(
-                      "w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none",
-                      theme === 'dark' 
-                        ? "bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500" 
-                        : "bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600"
-                    )}
-                  />
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
-                    {mpin.length}/6
-                  </div>
-                </div>
+
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={mpin}
+                  onChange={handleDigitInput(setMpin)}
+                  placeholder="••••••"
+                  autoComplete="off"
+                  className={cn(
+                    'w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none',
+                    theme === 'dark'
+                      ? 'bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500'
+                      : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600'
+                  )}
+                />
               </div>
 
-              {/* Confirm TPIN input */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
                   Confirm TPIN
                 </label>
-                <div className="relative">
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    value={confirmMpin}
-                    onChange={handleDigitInput(setConfirmMpin, confirmMpin)}
-                    placeholder="••••••"
-                    autoComplete="off"
-                    className={cn(
-                      "w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none",
-                      theme === 'dark' 
-                        ? "bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500" 
-                        : "bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600"
-                    )}
-                  />
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
-                    {confirmMpin.length}/6
-                  </div>
-                </div>
+
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={confirmMpin}
+                  onChange={handleDigitInput(setConfirmMpin)}
+                  placeholder="••••••"
+                  autoComplete="off"
+                  className={cn(
+                    'w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none',
+                    theme === 'dark'
+                      ? 'bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500'
+                      : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600'
+                  )}
+                />
               </div>
 
-              <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-medium">
-                Avoid simple combinations like 123456, 000000, or repeating digits.
-              </p>
-
-              {/* Actions */}
               <div className="flex items-center gap-2.5 pt-2">
                 <button
                   type="button"
                   onClick={onClose}
                   disabled={loading}
                   className={cn(
-                    "flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider border transition-colors",
-                    theme === 'dark' 
-                      ? "border-zinc-800 hover:bg-zinc-900 text-zinc-300" 
-                      : "border-slate-300 hover:bg-slate-100 text-slate-700"
+                    'flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider border transition-colors',
+                    theme === 'dark'
+                      ? 'border-zinc-800 hover:bg-zinc-900 text-zinc-300'
+                      : 'border-slate-300 hover:bg-slate-100 text-slate-700'
                   )}
                 >
                   Cancel
                 </button>
+
                 <button
                   type="submit"
-                  disabled={loading || mpin.length !== 6 || confirmMpin.length !== 6}
+                  disabled={
+                    loading ||
+                    mpin.length !== 6 ||
+                    confirmMpin.length !== 6
+                  }
                   className="flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                 >
-                  {loading ? <Loader2 size={16} className="animate-spin" /> : "Create TPIN"}
+                  {loading ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    'Create TPIN'
+                  )}
                 </button>
               </div>
             </form>
@@ -251,26 +245,22 @@ interface ChangeMpinModalProps {
   onClose: () => void;
   userId: string;
   onSuccess: () => void;
-  onOpenForgotMpin?: () => void;
+  onOpenForgotMpin: () => void;
   theme?: 'light' | 'dark';
 }
 
-/**
- * Modal for changing an existing MPIN
- */
-export function ChangeMpinModal({ 
-  isOpen, 
-  onClose, 
-  userId, 
-  onSuccess, 
+export function ChangeMpinModal({
+  isOpen,
+  onClose,
+  userId,
+  onSuccess,
   onOpenForgotMpin,
-  theme = 'light' 
+  theme = 'light',
 }: ChangeMpinModalProps) {
   const [currentMpin, setCurrentMpin] = useState('');
   const [newMpin, setNewMpin] = useState('');
   const [confirmNewMpin, setConfirmNewMpin] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -279,163 +269,133 @@ export function ChangeMpinModal({
       setNewMpin('');
       setConfirmNewMpin('');
       setError(null);
-      setSuccess(null);
       setLoading(false);
     }
   }, [isOpen]);
 
-  const handleChange = async (e: React.FormEvent) => {
+  const handleDigitInput =
+    (setter: (value: string) => void) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+      setter(value);
+
+      if (error) {
+        setError(null);
+      }
+    };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (currentMpin.length !== 6) {
-      setError('Please enter your 6-digit Current TPIN.');
-      return;
-    }
-
-    if (newMpin.length !== 6) {
-      setError('Please enter your 6-digit New TPIN.');
-      return;
-    }
-
-    if (confirmNewMpin.length !== 6) {
-      setError('Please confirm your 6-digit New TPIN.');
+    if (
+      currentMpin.length !== 6 ||
+      newMpin.length !== 6 ||
+      confirmNewMpin.length !== 6
+    ) {
+      setError('Please enter all 6-digit TPIN fields.');
       return;
     }
 
     if (newMpin !== confirmNewMpin) {
-      setError('New TPIN and Confirmation do not match.');
+      setError('New TPIN and confirmation do not match.');
       return;
     }
 
-    if (currentMpin === newMpin) {
-      setError('New TPIN cannot be the same as your Current TPIN.');
+    const validCurrent = await verifyUserMpin(userId, currentMpin);
+
+    if (!validCurrent.success) {
+      setError(validCurrent.error || 'Current TPIN is incorrect.');
       return;
     }
 
     const validation = validateMpinStrength(newMpin);
+
     if (!validation.isValid) {
-      setError(validation.error || 'Invalid New TPIN strength.');
+      setError(validation.error || 'Please choose a stronger TPIN.');
       return;
     }
 
     setLoading(true);
+
     try {
-      // 1. Verify Current TPIN
-      const verifyRes = await verifyUserMpin(userId, currentMpin);
-      if (!verifyRes.success) {
-        setError(verifyRes.error || 'Current TPIN is incorrect.');
-        setLoading(false);
+      const result = await saveUserMpin(userId, newMpin);
+
+      if (!result.success) {
+        setError(result.error || 'Failed to update TPIN.');
         return;
       }
 
-      // 2. Save New TPIN
-      const saveRes = await saveUserMpin(userId, newMpin);
-      if (!saveRes.success) {
-        setError(saveRes.error || 'Failed to update TPIN.');
-      } else {
-        setSuccess('TPIN changed successfully');
-        setTimeout(() => {
-          onSuccess();
-          onClose();
-        }, 1200);
-      }
+      resetLockoutState(userId);
+      onSuccess();
+      onClose();
     } catch (err: any) {
-      setError(err.message || 'An error occurred while changing TPIN.');
+      setError(err?.message || 'Failed to update TPIN.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDigitInput = (setter: (val: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-    setter(val);
-    if (error) setError(null);
-  };
-
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className={cn(
-          "fixed inset-0 z-[120] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
-          theme === 'dark' ? "bg-black/75" : "bg-slate-900/50"
-        )}>
+        <div
+          className={cn(
+            'fixed inset-0 z-[130] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300',
+            theme === 'dark' ? 'bg-black/80' : 'bg-slate-900/60'
+          )}
+        >
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             className={cn(
-              "w-full max-w-sm p-6 shadow-2xl transition-colors duration-300 relative border",
-              theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
+              'w-full max-w-sm p-6 shadow-2xl transition-colors duration-300 relative border',
+              theme === 'dark'
+                ? 'bg-zinc-950 border-zinc-800'
+                : 'bg-white border-slate-200'
             )}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-zinc-900 mb-5">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 bg-indigo-600 flex items-center justify-center text-white shrink-0">
-                  <KeyRound size={18} />
-                </div>
-                <div>
-                  <h3 className="text-base font-extrabold tracking-tight">Change your TPIN</h3>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-medium">Update existing 6-digit security PIN</p>
-                </div>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-5">
+              <div className="p-2.5 bg-indigo-600 text-white">
+                <KeyRound size={22} />
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={loading}
-                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors"
-              >
-                <X size={18} />
-              </button>
+
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  Change TPIN
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                  Update your 6-digit TPIN
+                </p>
+              </div>
             </div>
 
-            {/* Error / Success Feedback */}
-            <AnimatePresence mode="wait">
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-start gap-2"
-                >
-                  <AlertCircle size={15} className="shrink-0 mt-0.5 text-rose-500" />
-                  <span>{error}</span>
-                </motion.div>
-              )}
-              {success && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2"
-                >
-                  <CheckCircle2 size={16} className="shrink-0 text-emerald-500" />
-                  <span>{success}</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {error && (
+              <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-start gap-2">
+                <AlertCircle
+                  size={15}
+                  className="shrink-0 mt-0.5 text-rose-500"
+                />
+                <span>{error}</span>
+              </div>
+            )}
 
-            <form onSubmit={handleChange} className="space-y-3.5">
-              {/* Current TPIN */}
+            <form onSubmit={handleSubmit} className="space-y-3.5">
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">
-                    Current TPIN
-                  </label>
-                  {onOpenForgotMpin && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenForgotMpin();
-                      }}
-                      className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
-                    >
-                      Forgot TPIN?
-                    </button>
-                  )}
-                </div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
+                  Current TPIN
+                </label>
+
                 <input
                   type="password"
                   inputMode="numeric"
@@ -446,19 +406,30 @@ export function ChangeMpinModal({
                   placeholder="••••••"
                   autoComplete="off"
                   className={cn(
-                    "w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none",
-                    theme === 'dark' 
-                      ? "bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500" 
-                      : "bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600"
+                    'w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none',
+                    theme === 'dark'
+                      ? 'bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500'
+                      : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600'
                   )}
                 />
               </div>
 
-              {/* New TPIN */}
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenForgotMpin();
+                }}
+                className="text-xs font-bold text-indigo-600 hover:text-indigo-700"
+              >
+                Forgot TPIN?
+              </button>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
                   New TPIN
                 </label>
+
                 <input
                   type="password"
                   inputMode="numeric"
@@ -469,19 +440,19 @@ export function ChangeMpinModal({
                   placeholder="••••••"
                   autoComplete="off"
                   className={cn(
-                    "w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none",
-                    theme === 'dark' 
-                      ? "bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500" 
-                      : "bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600"
+                    'w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none',
+                    theme === 'dark'
+                      ? 'bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500'
+                      : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600'
                   )}
                 />
               </div>
 
-              {/* Confirm New TPIN */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
                   Confirm New TPIN
                 </label>
+
                 <input
                   type="password"
                   inputMode="numeric"
@@ -492,35 +463,44 @@ export function ChangeMpinModal({
                   placeholder="••••••"
                   autoComplete="off"
                   className={cn(
-                    "w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none",
-                    theme === 'dark' 
-                      ? "bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500" 
-                      : "bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600"
+                    'w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none',
+                    theme === 'dark'
+                      ? 'bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500'
+                      : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600'
                   )}
                 />
               </div>
 
-              {/* Actions */}
               <div className="flex items-center gap-2.5 pt-3">
                 <button
                   type="button"
                   onClick={onClose}
                   disabled={loading}
                   className={cn(
-                    "flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider border transition-colors",
-                    theme === 'dark' 
-                      ? "border-zinc-800 hover:bg-zinc-900 text-zinc-300" 
-                      : "border-slate-300 hover:bg-slate-100 text-slate-700"
+                    'flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider border transition-colors',
+                    theme === 'dark'
+                      ? 'border-zinc-800 hover:bg-zinc-900 text-zinc-300'
+                      : 'border-slate-300 hover:bg-slate-100 text-slate-700'
                   )}
                 >
                   Cancel
                 </button>
+
                 <button
                   type="submit"
-                  disabled={loading || currentMpin.length !== 6 || newMpin.length !== 6 || confirmNewMpin.length !== 6}
+                  disabled={
+                    loading ||
+                    currentMpin.length !== 6 ||
+                    newMpin.length !== 6 ||
+                    confirmNewMpin.length !== 6
+                  }
                   className="flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                 >
-                  {loading ? <Loader2 size={16} className="animate-spin" /> : "Save Changes"}
+                  {loading ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    'Save Changes'
+                  )}
                 </button>
               </div>
             </form>
@@ -540,16 +520,13 @@ interface ForgotMpinModalProps {
   theme?: 'light' | 'dark';
 }
 
-/**
- * Modal for resetting MPIN after proving account ownership via existing TrackBook login credentials
- */
 export function ForgotMpinModal({
   isOpen,
   onClose,
   userEmail,
   userId,
   onSuccess,
-  theme = 'light'
+  theme = 'light',
 }: ForgotMpinModalProps) {
   const [step, setStep] = useState<'verify' | 'create_new'>('verify');
   const [password, setPassword] = useState('');
@@ -583,23 +560,29 @@ export function ForgotMpinModal({
     }
 
     setLoading(true);
+
     try {
-      // Re-authenticate user with Supabase Auth
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: userEmail,
-        password: password,
-      });
+      const { error: authError } =
+        await supabase.auth.signInWithPassword({
+          email: userEmail,
+          password,
+        });
 
       if (authError) {
-        setError(authError.message || 'Incorrect password. Verification failed.');
+        setError(
+          authError.message ||
+            'Incorrect password. Verification failed.'
+        );
       } else {
-        // Verification succeeded!
         resetLockoutState(userId);
         setStep('create_new');
         setError(null);
       }
     } catch (err: any) {
-      setError(err.message || 'Verification failed. Please try again.');
+      setError(
+        err?.message ||
+          'Verification failed. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
@@ -609,89 +592,121 @@ export function ForgotMpinModal({
     e.preventDefault();
     setError(null);
 
-    if (newMpin.length !== 6 || confirmNewMpin.length !== 6) {
+    if (
+      newMpin.length !== 6 ||
+      confirmNewMpin.length !== 6
+    ) {
       setError('Please provide and confirm a 6-digit TPIN.');
       return;
     }
 
     if (newMpin !== confirmNewMpin) {
-      setError('TPIN and Confirmation do not match.');
+      setError('TPIN and confirmation do not match.');
       return;
     }
 
     const validation = validateMpinStrength(newMpin);
+
     if (!validation.isValid) {
       setError(validation.error || 'Weak TPIN choice.');
       return;
     }
 
     setLoading(true);
+
     try {
-      const res = await saveUserMpin(userId, newMpin);
-      if (!res.success) {
-        setError(res.error || 'Failed to save new TPIN.');
+      const result = await saveUserMpin(userId, newMpin);
+
+      if (!result.success) {
+        setError(
+          result.error ||
+            'Failed to save new TPIN.'
+        );
       } else {
         setSuccess('TPIN reset successfully');
+
         setTimeout(() => {
           onSuccess();
           onClose();
         }, 1200);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to update TPIN.');
+      setError(
+        err?.message ||
+          'Failed to update TPIN.'
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDigitInput = (setter: (val: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-    setter(val);
-    if (error) setError(null);
-  };
+  const handleDigitInput =
+    (setter: (value: string) => void) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value
+        .replace(/\D/g, '')
+        .slice(0, 6);
+
+      setter(value);
+
+      if (error) {
+        setError(null);
+      }
+    };
 
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className={cn(
-          "fixed inset-0 z-[130] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
-          theme === 'dark' ? "bg-black/80" : "bg-slate-900/60"
-        )}>
+        <div
+          className={cn(
+            'fixed inset-0 z-[130] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300',
+            theme === 'dark' ? 'bg-black/80' : 'bg-slate-900/60'
+          )}
+        >
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             className={cn(
-              "w-full max-w-sm p-6 shadow-2xl transition-colors duration-300 relative border",
-              theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
+              'w-full max-w-sm p-6 shadow-2xl transition-colors duration-300 relative border',
+              theme === 'dark'
+                ? 'bg-zinc-950 border-zinc-800'
+                : 'bg-white border-slate-200'
             )}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-zinc-900 mb-5">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 bg-indigo-600 flex items-center justify-center text-white shrink-0">
-                  <RefreshCw size={18} />
-                </div>
-                <div>
-                  <h3 className="text-base font-extrabold tracking-tight">
-                    {step === 'verify' ? 'Forgot TPIN' : 'Set New TPIN'}
-                  </h3>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-medium">
-                    {step === 'verify' ? 'Verify TrackBook Account' : 'Choose 6-digit TPIN'}
-                  </p>
-                </div>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-5">
+              <div className="p-2.5 bg-indigo-600 text-white">
+                {step === 'verify' ? (
+                  <LockKeyhole size={22} />
+                ) : (
+                  <ShieldCheck size={22} />
+                )}
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={loading}
-                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors"
-              >
-                <X size={18} />
-              </button>
+
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  {step === 'verify'
+                    ? 'Forgot TPIN'
+                    : 'Create New TPIN'}
+                </h2>
+
+                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                  {step === 'verify'
+                    ? 'Verify your account ownership'
+                    : 'Create your new 6-digit TPIN'}
+                </p>
+              </div>
             </div>
 
-            {/* Error / Success Feedback */}
             <AnimatePresence mode="wait">
               {error && (
                 <motion.div
@@ -700,10 +715,14 @@ export function ForgotMpinModal({
                   exit={{ opacity: 0, y: -6 }}
                   className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-start gap-2"
                 >
-                  <AlertCircle size={15} className="shrink-0 mt-0.5 text-rose-500" />
+                  <AlertCircle
+                    size={15}
+                    className="shrink-0 mt-0.5 text-rose-500"
+                  />
                   <span>{error}</span>
                 </motion.div>
               )}
+
               {success && (
                 <motion.div
                   initial={{ opacity: 0, y: -6 }}
@@ -711,45 +730,73 @@ export function ForgotMpinModal({
                   exit={{ opacity: 0, y: -6 }}
                   className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2"
                 >
-                  <CheckCircle2 size={16} className="shrink-0 text-emerald-500" />
+                  <CheckCircle2
+                    size={16}
+                    className="shrink-0 text-emerald-500"
+                  />
                   <span>{success}</span>
                 </motion.div>
               )}
             </AnimatePresence>
 
             {step === 'verify' ? (
-              <form onSubmit={handleVerifyAccount} className="space-y-4">
+              <form
+                onSubmit={handleVerifyAccount}
+                className="space-y-4"
+              >
                 <div className="p-3 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-xs font-medium text-slate-600 dark:text-zinc-300">
-                  To reset your TPIN, please enter your password for account: <strong className="text-slate-900 dark:text-white block mt-0.5">{userEmail}</strong>
+                  To reset your TPIN, please enter your password for account:
+                  <strong className="text-slate-900 dark:text-white block mt-0.5">
+                    {userEmail}
+                  </strong>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
                     Account Password
                   </label>
+
                   <div className="relative">
                     <input
-                      type={showPassword ? 'text' : 'password'}
+                      type={
+                        showPassword
+                          ? 'text'
+                          : 'password'
+                      }
+                      inputMode="text"
+                      enterKeyHint="done"
+                      autoCapitalize="none"
+                      spellCheck={false}
                       value={password}
                       onChange={(e) => {
                         setPassword(e.target.value);
-                        if (error) setError(null);
+
+                        if (error) {
+                          setError(null);
+                        }
                       }}
                       placeholder="Enter account password"
                       autoComplete="current-password"
                       className={cn(
-                        "w-full pl-3.5 pr-10 py-2.5 text-sm border transition-colors outline-none",
-                        theme === 'dark' 
-                          ? "bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500" 
-                          : "bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600"
+                        'w-full pl-3.5 pr-10 py-2.5 text-sm border transition-colors outline-none',
+                        theme === 'dark'
+                          ? 'bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500'
+                          : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600'
                       )}
                     />
+
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      onClick={() =>
+                        setShowPassword(!showPassword)
+                      }
                       className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 p-1"
                     >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showPassword ? (
+                        <EyeOff size={16} />
+                      ) : (
+                        <Eye size={16} />
+                      )}
                     </button>
                   </div>
                 </div>
@@ -760,29 +807,41 @@ export function ForgotMpinModal({
                     onClick={onClose}
                     disabled={loading}
                     className={cn(
-                      "flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider border transition-colors",
-                      theme === 'dark' 
-                        ? "border-zinc-800 hover:bg-zinc-900 text-zinc-300" 
-                        : "border-slate-300 hover:bg-slate-100 text-slate-700"
+                      'flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider border transition-colors',
+                      theme === 'dark'
+                        ? 'border-zinc-800 hover:bg-zinc-900 text-zinc-300'
+                        : 'border-slate-300 hover:bg-slate-100 text-slate-700'
                     )}
                   >
                     Cancel
                   </button>
+
                   <button
                     type="submit"
                     disabled={loading || !password}
                     className="flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                   >
-                    {loading ? <Loader2 size={16} className="animate-spin" /> : "Verify Ownership"}
+                    {loading ? (
+                      <Loader2
+                        size={16}
+                        className="animate-spin"
+                      />
+                    ) : (
+                      'Verify Ownership'
+                    )}
                   </button>
                 </div>
               </form>
             ) : (
-              <form onSubmit={handleSaveNewMpin} className="space-y-3.5">
+              <form
+                onSubmit={handleSaveNewMpin}
+                className="space-y-3.5"
+              >
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
-                    New TPIN (6 Digits)
+                    New TPIN
                   </label>
+
                   <input
                     type="password"
                     inputMode="numeric"
@@ -793,10 +852,10 @@ export function ForgotMpinModal({
                     placeholder="••••••"
                     autoComplete="off"
                     className={cn(
-                      "w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none",
-                      theme === 'dark' 
-                        ? "bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500" 
-                        : "bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600"
+                      'w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none',
+                      theme === 'dark'
+                        ? 'bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500'
+                        : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600'
                     )}
                   />
                 </div>
@@ -805,6 +864,7 @@ export function ForgotMpinModal({
                   <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
                     Confirm New TPIN
                   </label>
+
                   <input
                     type="password"
                     inputMode="numeric"
@@ -815,10 +875,10 @@ export function ForgotMpinModal({
                     placeholder="••••••"
                     autoComplete="off"
                     className={cn(
-                      "w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none",
-                      theme === 'dark' 
-                        ? "bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500" 
-                        : "bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600"
+                      'w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none',
+                      theme === 'dark'
+                        ? 'bg-zinc-900 border-zinc-800 text-white focus:border-indigo-500'
+                        : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-indigo-600'
                     )}
                   />
                 </div>
@@ -829,20 +889,32 @@ export function ForgotMpinModal({
                     onClick={onClose}
                     disabled={loading}
                     className={cn(
-                      "flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider border transition-colors",
-                      theme === 'dark' 
-                        ? "border-zinc-800 hover:bg-zinc-900 text-zinc-300" 
-                        : "border-slate-300 hover:bg-slate-100 text-slate-700"
+                      'flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider border transition-colors',
+                      theme === 'dark'
+                        ? 'border-zinc-800 hover:bg-zinc-900 text-zinc-300'
+                        : 'border-slate-300 hover:bg-slate-100 text-slate-700'
                     )}
                   >
                     Cancel
                   </button>
+
                   <button
                     type="submit"
-                    disabled={loading || newMpin.length !== 6 || confirmNewMpin.length !== 6}
+                    disabled={
+                      loading ||
+                      newMpin.length !== 6 ||
+                      confirmNewMpin.length !== 6
+                    }
                     className="flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                   >
-                    {loading ? <Loader2 size={16} className="animate-spin" /> : "Save New TPIN"}
+                    {loading ? (
+                      <Loader2
+                        size={16}
+                        className="animate-spin"
+                      />
+                    ) : (
+                      'Reset TPIN'
+                    )}
                   </button>
                 </div>
               </form>
