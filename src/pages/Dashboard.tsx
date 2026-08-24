@@ -5568,6 +5568,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       showOfflineDialog,
       showQuitDialog,
       activeBookId,
+      currentTabName,
+      activeBook,
     };
   });
 
@@ -5648,13 +5650,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         return;
       }
 
-      // 4. If user is inside a cashbook (/cashbooks/:slug), go back to cashbooks home list
+      // 4. If user is inside a cashbook and on a tab other than 'entries' (e.g. reports), go back to entries page!
+      if (state.activeBookId && state.currentTabName && state.currentTabName !== 'entries') {
+        const slug = getBookSlug(state.activeBook?.name || '', state.activeBook?.id || state.activeBookId);
+        navigate(`/cashbooks/${slug}/entries`);
+        return;
+      }
+
+      // 5. If user is inside a cashbook on 'entries' tab, go back to cashbooks home list
       if (state.activeBookId) {
         handleSelectBook(null);
         return;
       }
 
-      // 5. If user is on the Home screen (books list), show Quit Confirmation Dialog!
+      // 6. If user is on the Home screen (books list), show Quit Confirmation Dialog!
       if (!state.activeBookId) {
         setShowQuitDialog(true);
         // Push state back so app doesn't exit immediately on first back press
@@ -9092,7 +9101,32 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             )}
 
             {currentTabName === 'reports' && (
-              <div className="space-y-6 max-w-4xl mx-auto py-6 px-4 pb-20">
+              <div className="space-y-6 max-w-4xl mx-auto py-4 sm:py-6 px-4 pb-20">
+                {/* Back to Entries Navigation Header */}
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      vibrate();
+                      const slug = getBookSlug(activeBook?.name || '', activeBook?.id || '');
+                      navigate(`/cashbooks/${slug}/entries`);
+                    }}
+                    className={cn(
+                      "flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-xs cursor-pointer active:scale-95",
+                      theme === 'dark'
+                        ? "bg-zinc-900 border-zinc-800 text-slate-300 hover:bg-zinc-800 hover:text-white"
+                        : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-black"
+                    )}
+                  >
+                    <ArrowLeft size={15} />
+                    <span>Back to Entries</span>
+                  </button>
+
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                    Reports & Analytics
+                  </span>
+                </div>
+
                 {/* Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className={cn(
