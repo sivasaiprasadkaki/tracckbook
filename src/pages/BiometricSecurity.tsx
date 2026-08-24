@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   ArrowLeft, 
   Fingerprint, 
-  ScanFace, 
   Shield, 
   ShieldCheck, 
   ShieldAlert, 
@@ -14,6 +13,8 @@ import {
   ExternalLink,
   Loader2,
   Lock,
+  KeyRound,
+  RefreshCw,
   Smartphone
 } from 'lucide-react';
 import { cn, vibrate } from '../lib/utils';
@@ -24,6 +25,7 @@ import {
   disableBiometric, 
   openBiometricSettings 
 } from '../services/biometricSecurityService';
+import { useMpinSecurity } from '../components/MpinManager';
 
 interface BiometricSecurityProps {
   session?: any;
@@ -36,6 +38,7 @@ export default function BiometricSecurity({
   theme = 'light',
 }: BiometricSecurityProps) {
   const navigate = useNavigate();
+  const { hasMpin, openCreateModal, openChangeModal, openForgotModal, openDisableModal } = useMpinSecurity();
 
   const [isEnabled, setIsEnabled] = useState<boolean>(false);
   const [isSupported, setIsSupported] = useState<boolean>(true);
@@ -87,19 +90,18 @@ export default function BiometricSecurity({
         const res = await disableBiometric();
         if (res.success) {
           setIsEnabled(false);
-          setSuccessMessage('Biometric lock disabled.');
+          setSuccessMessage('Fingerprint lock disabled.');
           vibrate([20, 20]);
         } else {
-          setErrorMessage(res.error || 'Failed to disable biometric lock.');
+          setErrorMessage(res.error || 'Failed to disable fingerprint lock.');
           vibrate([40, 40]);
         }
       } else {
         // Enable Flow
-        // Check hardware support first
         const supported = await isBiometricSupported();
         if (!supported) {
           setIsSupported(false);
-          setErrorMessage('Biometric authentication is not available on this device.');
+          setErrorMessage('Fingerprint authentication is not available on this device.');
           vibrate([40, 40, 40]);
           setIsProcessing(false);
           return;
@@ -108,13 +110,13 @@ export default function BiometricSecurity({
         const res = await enableBiometric();
         if (res.success) {
           setIsEnabled(true);
-          setSuccessMessage('Fingerprint / Face Lock enabled successfully.');
+          setSuccessMessage('Fingerprint lock enabled successfully.');
           vibrate([30, 50]);
         } else {
           if (res.isUnsupported) {
             setIsSupported(false);
           }
-          setErrorMessage(res.error || 'Biometric authentication failed.');
+          setErrorMessage(res.error || 'Fingerprint authentication failed.');
           vibrate([40, 40]);
         }
       }
@@ -157,7 +159,7 @@ export default function BiometricSecurity({
         </button>
 
         <h1 className="text-base font-bold tracking-tight text-center flex-1 pr-6">
-          Biometric Security
+          Security & Lock
         </h1>
       </header>
 
@@ -165,7 +167,7 @@ export default function BiometricSecurity({
       <main className="flex-1 w-full max-w-md mx-auto px-4 py-6 flex flex-col justify-between">
         <div className="flex flex-col items-center">
           
-          {/* Top Section: TrackBook Logo / Security Icon */}
+          {/* Top Section: Fingerprint Icon */}
           <div className="flex flex-col items-center text-center mt-2 mb-6">
             <motion.div 
               initial={{ scale: 0.8, opacity: 0 }}
@@ -173,10 +175,7 @@ export default function BiometricSecurity({
               transition={{ duration: 0.35, ease: "easeOut" }}
               className="relative w-20 h-20 rounded-3xl bg-gradient-to-tr from-indigo-600 to-indigo-500 flex items-center justify-center text-white shadow-xl shadow-indigo-500/20 mb-4 border border-indigo-400/30"
             >
-              <div className="flex items-center justify-center gap-1">
-                <Fingerprint size={32} className="stroke-[2.2] text-white" />
-                <ScanFace size={24} className="stroke-[2.2] text-indigo-200" />
-              </div>
+              <Fingerprint size={36} className="stroke-[2.2] text-white" />
 
               {/* Status Indicator Dot */}
               <div className={cn(
@@ -189,13 +188,13 @@ export default function BiometricSecurity({
             </motion.div>
 
             <h2 className="text-xl font-extrabold tracking-tight mb-1.5">
-              Biometric Security
+              Fingerprint & TPIN Lock
             </h2>
             <p className={cn(
               "text-xs leading-relaxed max-w-xs",
               theme === 'dark' ? "text-zinc-400" : "text-slate-500"
             )}>
-              Use your fingerprint or face to unlock TrackBook faster.
+              Manage biometric fingerprint authentication and 6-digit TPIN security for your account.
             </p>
           </div>
 
@@ -226,19 +225,19 @@ export default function BiometricSecurity({
             )}
           </AnimatePresence>
 
-          {/* Main Card */}
+          {/* Card 1: Fingerprint Security */}
           <div className={cn(
-            "w-full rounded-2xl p-5 border transition-all duration-200 shadow-sm",
+            "w-full rounded-2xl p-5 border transition-all duration-200 shadow-sm mb-4",
             theme === 'dark' ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-slate-200"
           )}>
             <div className="flex items-start justify-between gap-3 mb-3">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                  <ShieldCheck size={22} />
+                  <Fingerprint size={22} />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold tracking-tight">
-                    Fingerprint & Face Unlock
+                    Fingerprint Lock
                   </h3>
                   <span className="text-[11px] font-medium text-slate-400 dark:text-zinc-500">
                     Device Authentication
@@ -267,10 +266,10 @@ export default function BiometricSecurity({
             </div>
 
             <p className={cn(
-              "text-xs leading-relaxed mb-5",
+              "text-xs leading-relaxed mb-4",
               theme === 'dark' ? "text-zinc-400" : "text-slate-600"
             )}>
-              Unlock TrackBook using the biometric security already configured on your device.
+              Unlock TrackBook instantly using your device's fingerprint sensor.
             </p>
 
             {/* Unsupported Hardware Warning Card */}
@@ -278,10 +277,10 @@ export default function BiometricSecurity({
               <div className="w-full bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 mb-4 text-xs">
                 <div className="flex items-start gap-2.5 text-amber-700 dark:text-amber-400 font-bold mb-1">
                   <ShieldAlert size={16} className="shrink-0 mt-0.5 text-amber-500" />
-                  <span>Biometric authentication is not available on this device.</span>
+                  <span>Fingerprint hardware not found or registered.</span>
                 </div>
                 <p className="text-slate-600 dark:text-zinc-400 text-[11px] leading-relaxed mb-3">
-                  Please set up fingerprint or face authentication in your Android device security settings.
+                  Please register a fingerprint in your device security settings first.
                 </p>
                 <button
                   type="button"
@@ -301,7 +300,7 @@ export default function BiometricSecurity({
               onClick={handleToggleBiometric}
               disabled={isLoading || isProcessing}
               className={cn(
-                "w-full py-3.5 px-4 font-bold text-xs uppercase tracking-wider rounded-xl transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50 disabled:cursor-not-allowed",
+                "w-full py-3 px-4 font-bold text-xs uppercase tracking-wider rounded-xl transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50 disabled:cursor-not-allowed",
                 isEnabled
                   ? "bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 hover:bg-rose-100 dark:hover:bg-rose-900/40 active:scale-[0.99]"
                   : "bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white shadow-indigo-600/25 active:scale-[0.99]"
@@ -315,40 +314,148 @@ export default function BiometricSecurity({
               ) : isEnabled ? (
                 <>
                   <Lock size={16} />
-                  <span>Disable Fingerprint / Face Lock</span>
+                  <span>Disable Fingerprint Lock</span>
                 </>
               ) : (
                 <>
                   <Fingerprint size={16} />
-                  <span>Enable Fingerprint / Face Lock</span>
+                  <span>Enable Fingerprint Lock</span>
                 </>
               )}
             </button>
           </div>
+
+          {/* Card 2: TPIN Security */}
+          <div className={cn(
+            "w-full rounded-2xl p-5 border transition-all duration-200 shadow-sm",
+            theme === 'dark' ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-slate-200"
+          )}>
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                  <ShieldCheck size={22} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold tracking-tight">
+                    TPIN Security
+                  </h3>
+                  <span className="text-[11px] font-medium text-slate-400 dark:text-zinc-500">
+                    6-Digit Passcode
+                  </span>
+                </div>
+              </div>
+
+              {/* Status Badge */}
+              <div className="shrink-0">
+                {hasMpin ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[11px] font-extrabold tracking-wide uppercase">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Enabled
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 text-[11px] font-bold tracking-wide uppercase border border-slate-200 dark:border-zinc-700">
+                    Disabled
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <p className={cn(
+              "text-xs leading-relaxed mb-4",
+              theme === 'dark' ? "text-zinc-400" : "text-slate-600"
+            )}>
+              {hasMpin 
+                ? "Your 6-digit TPIN protects your app and serves as the primary or fallback security key."
+                : "Set up a 6-digit TPIN to protect your account and transaction data."
+              }
+            </p>
+
+            {/* TPIN Action Buttons */}
+            {hasMpin ? (
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    vibrate(5);
+                    openDisableModal();
+                  }}
+                  className={cn(
+                    "w-full py-3 px-4 font-bold text-xs uppercase tracking-wider rounded-xl transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer border",
+                    "bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/50 hover:bg-rose-100 dark:hover:bg-rose-900/40 active:scale-[0.99]"
+                  )}
+                >
+                  <Lock size={15} />
+                  <span>Disable TPIN</span>
+                </button>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      vibrate(5);
+                      openChangeModal();
+                    }}
+                    className={cn(
+                      "py-2.5 px-3 font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5 border",
+                      theme === 'dark'
+                        ? "bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700"
+                        : "bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200"
+                    )}
+                  >
+                    <KeyRound size={14} />
+                    <span>Change TPIN</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      vibrate(5);
+                      openForgotModal();
+                    }}
+                    className={cn(
+                      "py-2.5 px-3 font-bold text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-1.5 border",
+                      theme === 'dark'
+                        ? "bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700"
+                        : "bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200"
+                    )}
+                  >
+                    <RefreshCw size={14} />
+                    <span>Forgot TPIN</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  vibrate(5);
+                  openCreateModal();
+                }}
+                className="w-full py-3 px-4 font-bold text-xs uppercase tracking-wider rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white shadow-md shadow-indigo-600/25 active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <ShieldCheck size={16} />
+                <span>Enable TPIN</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Bottom Help Text */}
-        <div className="w-full mt-8 pt-6 border-t border-slate-200/80 dark:border-zinc-800/80 flex flex-col gap-2.5 text-center">
+        <div className="w-full mt-8 pt-6 border-t border-slate-200/80 dark:border-zinc-800/80 flex flex-col gap-2 text-center">
           <div className="flex items-center justify-center gap-1.5 text-slate-400 dark:text-zinc-500 text-[11px]">
             <Smartphone size={13} className="shrink-0" />
-            <span>Native Android Biometric Security</span>
+            <span>Encrypted Device Security</span>
           </div>
 
           <p className={cn(
             "text-[11px] leading-relaxed",
             theme === 'dark' ? "text-zinc-400" : "text-slate-500"
           )}>
-            Your fingerprint and face data are never stored by TrackBook. Android securely handles biometric authentication on your device.
-          </p>
-
-          <p className={cn(
-            "text-[11px] font-semibold",
-            theme === 'dark' ? "text-zinc-300" : "text-slate-700"
-          )}>
-            MPIN remains available as a fallback.
+            Fingerprint authentication and 6-digit TPIN protect your financial records securely.
           </p>
         </div>
       </main>
     </div>
   );
 }
+

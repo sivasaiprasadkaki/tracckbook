@@ -56,13 +56,63 @@ export class TrackBookOfflineDB {
 }
 
 export class NetworkMonitor {
-  public state: NetworkState = 'good';
+  public state: NetworkState = typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'good';
   private listeners: ((state: NetworkState) => void)[] = [];
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        this.updateState('good');
+      });
+      window.addEventListener('offline', () => {
+        this.updateState('offline');
+      });
+      if (!navigator.onLine) {
+        this.state = 'offline';
+      }
+    }
+  }
+
+  public updateState(newState: NetworkState) {
+    this.state = newState;
+    this.listeners.forEach(l => {
+      try {
+        l(newState);
+      } catch (err) {
+        console.error('[NetworkMonitor] listener error:', err);
+      }
+    });
+  }
+
+  public async checkConnection(): Promise<boolean> {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      this.updateState('offline');
+      return false;
+    }
+    try {
+      // Lightweight cache-busting check
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(`/api/health?t=${Date.now()}`, { 
+        method: 'GET', 
+        cache: 'no-store',
+        signal: controller.signal 
+      }).catch(() => null);
+      clearTimeout(timeout);
+      
+      const isOnline = res !== null && res.status < 500;
+      this.updateState(isOnline ? 'good' : 'offline');
+      return isOnline;
+    } catch {
+      this.updateState('offline');
+      return false;
+    }
+  }
 
   subscribe(listener: (state: NetworkState) => void) {
     this.listeners.push(listener);
-    // Immediately trigger with 'good'
-    listener('good');
+    // Trigger immediately with current state
+    listener(this.state);
     return () => {
       this.listeners = this.listeners.filter(l => l !== listener);
     };

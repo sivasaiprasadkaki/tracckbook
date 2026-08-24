@@ -64,6 +64,7 @@ import {
   UserPlus,
   ShieldCheck,
   Shield,
+  ShieldOff,
   KeyRound,
   Camera,
   ImagePlus,
@@ -75,7 +76,9 @@ import {
   Merge,
   Eye,
   Fingerprint,
-  ScanFace
+  ScanFace,
+  WifiOff,
+  Wifi
 } from 'lucide-react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -104,6 +107,7 @@ import { useMpinSecurity } from '../components/MpinManager';
 import { clearSessionUnlocked } from '../services/mpinSecurityService';
 import { ShareWhatsAppModal } from '../components/ShareWhatsAppModal';
 import { addPdfBrandingFooter } from '../utils/pdfBranding';
+import { exitNativeApp } from '../services/biometricSecurityService';
 
 interface TimelineStep {
   id: string;
@@ -918,8 +922,9 @@ const MobileTransactionRow = React.memo(({
       transition={
         isJustEdited
           ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
-          : { duration: 0.2, ease: "easeOut" }
+          : { duration: 0.15, ease: "easeOut" }
       }
+      whileTap={canSelect && !isCurrentlyDeleting ? { scale: 0.982 } : undefined}
       onMouseDown={() => canSelect && onTouchStart(t.id)}
       onMouseUp={canSelect ? onTouchEnd : undefined}
       onTouchStart={() => canSelect && onTouchStart(t.id)}
@@ -1832,8 +1837,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   });
   const [isEntriesLoading, setIsEntriesLoading] = useState(false);
   const [showOfflineDialog, setShowOfflineDialog] = useState(false);
-  const [isOffline, setIsOffline] = useState(false);
+  const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && !navigator.onLine);
+  const [isRetryingNetwork, setIsRetryingNetwork] = useState(false);
+  const [reconnectedToast, setReconnectedToast] = useState<string | null>(null);
+  const [showQuitDialog, setShowQuitDialog] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const isClosingModalFromUiRef = useRef(false);
 
   // Mobile MPIN Security
   const { 
@@ -1841,21 +1850,49 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     isMobile: isMobileSecurityActive, 
     openCreateModal: openMpinCreateModal, 
     openChangeModal: openMpinChangeModal, 
-    openForgotModal: openMpinForgotModal 
+    openForgotModal: openMpinForgotModal,
+    openDisableModal: openMpinDisableModal
   } = useMpinSecurity();
 
   // Network state observer
   useEffect(() => {
     const handleNetworkChange = (state: any) => {
       const offline = state === 'offline';
-      setIsOffline(offline);
-      if (offline && booksLengthRef.current === 0) {
-        setShowOfflineDialog(true);
-      }
+      setIsOffline(prev => {
+        if (!prev && offline) {
+          setShowOfflineDialog(true);
+        } else if (prev && !offline) {
+          setShowOfflineDialog(false);
+          setReconnectedToast('Internet connection restored! Synced.');
+          setTimeout(() => setReconnectedToast(null), 3500);
+        }
+        return offline;
+      });
     };
     const unsubscribe = syncManager.network.subscribe(handleNetworkChange);
     return () => unsubscribe();
   }, []);
+
+  const handleRetryConnection = async () => {
+    vibrate();
+    setIsRetryingNetwork(true);
+    try {
+      const isOnline = await syncManager.network.checkConnection();
+      if (isOnline) {
+        setIsOffline(false);
+        setShowOfflineDialog(false);
+        setReconnectedToast('Internet connection restored! Synced.');
+        setTimeout(() => setReconnectedToast(null), 3500);
+      } else {
+        setIsOffline(true);
+        setShowOfflineDialog(true);
+      }
+    } catch {
+      setIsOffline(true);
+    } finally {
+      setIsRetryingNetwork(false);
+    }
+  };
 
   const setActiveBookId = (id: string | null) => {
     setActiveBookIdState(id);
@@ -5500,7 +5537,135 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setTransactionCategoryFilter('All');
     setTransactionSearchQuery('');
     setIsSubmitting(false);
+
+    // If history was pushed for modal, pop it cleanly
+    if (typeof window !== 'undefined' && window.history.state?.tbModalOpen) {
+      isClosingModalFromUiRef.current = true;
+      window.history.back();
+    }
   };
+
+  // Fresh modal state tracking ref for hardware / browser back button popstate
+  const modalStateRef = useRef<any>({});
+  useEffect(() => {
+    modalStateRef.current = {
+      showForm,
+      isCreatingBook,
+      showAiWarning,
+      aiConstructionModal,
+      showGroupSizeModal,
+      showFullScreenPreview,
+      showShareModal,
+      showImportModal,
+      showPhoneSecurityModal,
+      showPhoneLinkingComingSoon,
+      showDownloadCenter,
+      showWhatsAppModal,
+      isProfileOpen,
+      showBulkDeleteConfirm,
+      showBulkTransactionDeleteConfirm,
+      deleteConfirmId,
+      showOfflineDialog,
+      showQuitDialog,
+      activeBookId,
+    };
+  });
+
+  const isAnyModalOpen = Boolean(
+    showForm ||
+    isCreatingBook ||
+    showAiWarning ||
+    aiConstructionModal ||
+    showGroupSizeModal ||
+    showFullScreenPreview ||
+    showShareModal ||
+    showImportModal ||
+    showPhoneSecurityModal ||
+    showPhoneLinkingComingSoon ||
+    showDownloadCenter ||
+    showWhatsAppModal ||
+    isProfileOpen ||
+    showBulkDeleteConfirm ||
+    showBulkTransactionDeleteConfirm ||
+    deleteConfirmId ||
+    showOfflineDialog ||
+    showQuitDialog
+  );
+
+  // Push history state whenever a modal opens
+  useEffect(() => {
+    if (isAnyModalOpen) {
+      if (typeof window !== 'undefined' && !window.history.state?.tbModalOpen) {
+        window.history.pushState({ ...window.history.state, tbModalOpen: true }, '');
+      }
+    }
+  }, [isAnyModalOpen]);
+
+  // Handle hardware & browser back button
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !window.history.state) {
+      window.history.replaceState({ tbPage: 'app' }, '');
+    }
+
+    const handlePopState = () => {
+      if (isClosingModalFromUiRef.current) {
+        isClosingModalFromUiRef.current = false;
+        return;
+      }
+
+      const state = modalStateRef.current;
+
+      // 1. If Cash In / Cash Out form is open, close it!
+      if (state.showForm) {
+        resetForm();
+        return;
+      }
+
+      // 2. If any other modal / drawer is open, close it!
+      if (state.showAiWarning) { setShowAiWarning(false); return; }
+      if (state.aiConstructionModal) { setAiConstructionModal(null); return; }
+      if (state.showGroupSizeModal) { setShowGroupSizeModal(false); return; }
+      if (state.showFullScreenPreview) { setShowFullScreenPreview(false); return; }
+      if (state.showShareModal) { setShowShareModal(false); return; }
+      if (state.showImportModal) { setShowImportModal(false); return; }
+      if (state.showPhoneSecurityModal) { setShowPhoneSecurityModal(false); return; }
+      if (state.showPhoneLinkingComingSoon) { setShowPhoneLinkingComingSoon(false); return; }
+      if (state.showDownloadCenter) { setShowDownloadCenter(false); return; }
+      if (state.showWhatsAppModal) { setShowWhatsAppModal(false); return; }
+      if (state.isCreatingBook) { setIsCreatingBook(false); return; }
+      if (state.isProfileOpen) { setIsProfileOpen(false); return; }
+      if (state.deleteConfirmId) { setDeleteConfirmId(null); return; }
+      if (state.showBulkDeleteConfirm || state.showBulkTransactionDeleteConfirm) { 
+        setShowBulkDeleteConfirm(false); 
+        setShowBulkTransactionDeleteConfirm(false); 
+        return; 
+      }
+      if (state.showOfflineDialog) { setShowOfflineDialog(false); return; }
+
+      // 3. If quit confirmation dialog was open, dismiss it
+      if (state.showQuitDialog) {
+        setShowQuitDialog(false);
+        return;
+      }
+
+      // 4. If user is inside a cashbook (/cashbooks/:slug), go back to cashbooks home list
+      if (state.activeBookId) {
+        handleSelectBook(null);
+        return;
+      }
+
+      // 5. If user is on the Home screen (books list), show Quit Confirmation Dialog!
+      if (!state.activeBookId) {
+        setShowQuitDialog(true);
+        // Push state back so app doesn't exit immediately on first back press
+        window.history.pushState({ tbPage: 'home' }, '');
+        return;
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -6647,30 +6812,158 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       "min-h-screen transition-colors duration-300 overflow-x-clip",
       theme === 'dark' ? "bg-black text-slate-100" : "bg-slate-50 text-black"
     )}>
-      {showOfflineDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className={cn(
-            "w-full max-w-md p-6 rounded-3xl shadow-xl space-y-4 text-center border transition-all duration-300 transform scale-100",
-            theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-white border-slate-150 text-slate-900"
-          )}>
-            <div className="mx-auto w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-950 flex items-center justify-center text-amber-500">
-              <CloudOff size={24} />
+      {/* Sticky Offline Banner */}
+      <AnimatePresence>
+        {isOffline && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="fixed top-0 left-0 right-0 z-[105] bg-amber-500 text-black px-4 py-2 text-xs font-bold flex items-center justify-between shadow-lg"
+          >
+            <div className="flex items-center gap-2.5 truncate">
+              <div className="p-1 rounded-full bg-black/10 text-black">
+                <WifiOff size={14} className="animate-pulse" />
+              </div>
+              <span className="truncate">
+                Internet connection ledu (Offline) • Entries will sync automatically
+              </span>
             </div>
-            <h3 className="text-lg font-black tracking-tight">You're Offline</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
-              We couldn't sync your latest data because your device is offline.
-              You can continue creating entries normally.
-              Everything will automatically sync once your internet connection is restored.
-            </p>
-            <button
-              onClick={() => setShowOfflineDialog(false)}
-              className="w-full py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/10 active:scale-98"
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleRetryConnection}
+                disabled={isRetryingNetwork}
+                className="px-3 py-1 rounded-lg bg-black text-white hover:bg-black/80 font-black text-[11px] transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-50 cursor-pointer"
+              >
+                {isRetryingNetwork ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" />
+                    <span>Checking...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={12} />
+                    <span>Retry</span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowOfflineDialog(true)}
+                className="p-1 rounded-lg hover:bg-black/10 text-black text-[11px] font-bold underline cursor-pointer"
+              >
+                Details
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Reconnected Toast Notification */}
+      <AnimatePresence>
+        {reconnectedToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-5 py-2.5 rounded-full text-xs font-black flex items-center gap-2.5 z-[120] shadow-2xl border border-emerald-400/30 tracking-wide"
+          >
+            <CheckCircle2 size={16} />
+            <span>{reconnectedToast}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Detailed Offline Modal with Visual Illustration */}
+      <AnimatePresence>
+        {showOfflineDialog && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 20 }}
+              className={cn(
+                "w-full max-w-md p-6 sm:p-7 rounded-3xl shadow-2xl text-center border transition-all duration-300 relative overflow-hidden",
+                theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
+              )}
             >
-              Continue Offline
-            </button>
+              {/* Close icon in top corner */}
+              <button
+                type="button"
+                onClick={() => setShowOfflineDialog(false)}
+                className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-500/10 text-slate-400 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+
+              {/* Offline Vector / Visual Illustration Image */}
+              <div className="relative mx-auto w-28 h-28 sm:w-32 sm:h-32 mb-4 flex items-center justify-center">
+                <div className="absolute inset-0 rounded-full bg-amber-500/10 dark:bg-amber-500/15 animate-pulse" />
+                <svg viewBox="0 0 160 160" className="w-full h-full" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="80" cy="80" r="65" stroke="currentColor" strokeWidth="2" strokeDasharray="6 6" className="text-amber-500/30" />
+                  <path d="M45 95C45 83 55 73 67 73C70 60 82 50 96 50C111 50 123 61 125 76C134 78 140 85 140 95C140 106 131 115 120 115H50C39 115 30 106 30 95C30 85 37 77 47 75" fill="currentColor" className="text-amber-500/15" />
+                  <path d="M48 95C48 85 56 77 66 77C69 66 79 58 91 58C104 58 114 67 116 79C124 81 130 87 130 95C130 104 122 112 112 112H52C43 112 36 104 36 95" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500" />
+                  <circle cx="80" cy="95" r="4" fill="currentColor" className="text-rose-500" />
+                  <path d="M68 83C75 76 85 76 92 83" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="text-rose-400" />
+                  <path d="M58 73C70 61 90 61 102 73" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="text-rose-400/60" />
+                  <path d="M35 35L125 125" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="text-rose-500" />
+                </svg>
+              </div>
+
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[11px] font-black uppercase tracking-wider mb-2">
+                <WifiOff size={13} />
+                <span>Offline Mode • ఇంటర్నెట్ లేదు</span>
+              </div>
+
+              <h3 className="text-xl sm:text-2xl font-black tracking-tight mt-1 mb-2">
+                Internet Connection Ledu
+              </h3>
+              
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium leading-relaxed max-w-sm mx-auto mb-6">
+                You are currently offline. Please check your Wi-Fi or mobile data. You can continue viewing and adding cash entries normally — everything will automatically sync once your internet connection is back.
+              </p>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  type="button"
+                  onClick={handleRetryConnection}
+                  disabled={isRetryingNetwork}
+                  className="flex-1 py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-black transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 cursor-pointer"
+                >
+                  {isRetryingNetwork ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Checking Connection...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={16} />
+                      <span>Retry Connection</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    vibrate();
+                    setShowOfflineDialog(false);
+                  }}
+                  className={cn(
+                    "py-3 px-4 rounded-2xl text-xs font-bold transition-all border cursor-pointer",
+                    theme === 'dark'
+                      ? "bg-zinc-900 border-zinc-800 text-slate-300 hover:bg-zinc-800"
+                      : "bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200"
+                  )}
+                >
+                  Continue Offline
+                </button>
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
       {/* Error Alert */}
       <AnimatePresence>
@@ -6862,17 +7155,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       {/* Mobile-Only Security Options */}
                       {isMobileSecurityActive && (
                         <>
-                          <button 
-                            onClick={() => { vibrate(); navigate('/biometric-security'); setIsProfileOpen(false); }}
-                            className={cn(
-                              "w-full flex items-center gap-3 p-3 rounded-xl transition-all",
-                              theme === 'dark' ? "hover:bg-zinc-900 text-slate-300" : "hover:bg-slate-50 text-black"
-                            )}
-                          >
-                            <Fingerprint size={18} className="text-indigo-500" />
-                            <span className="font-medium flex-1 text-left">Fingerprint & Face Lock</span>
-                          </button>
-
                           {!hasUserMpin ? (
                             <button 
                               onClick={() => { vibrate(); openMpinCreateModal(); setIsProfileOpen(false); }}
@@ -6882,10 +7164,19 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                               )}
                             >
                               <Shield size={18} className="text-indigo-500" />
-                              <span className="font-medium flex-1 text-left">Create your TPIN</span>
+                              <span className="font-medium flex-1 text-left">Enable TPIN</span>
                             </button>
                           ) : (
                             <>
+                              <button 
+                                onClick={() => { vibrate(); openMpinDisableModal(); setIsProfileOpen(false); }}
+                                className={cn(
+                                  "w-full flex items-center gap-3 p-3 rounded-xl transition-all text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
+                                )}
+                              >
+                                <ShieldOff size={18} className="text-rose-500" />
+                                <span className="font-medium flex-1 text-left">Disable TPIN</span>
+                              </button>
                               <button 
                                 onClick={() => { vibrate(); openMpinChangeModal(); setIsProfileOpen(false); }}
                                 className={cn(
@@ -6979,9 +7270,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           /* PAGE 1: HOME / BOOKS LIST */
           <motion.div
             key="home"
-            initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: -20 }}
+            initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: -8 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.16, ease: "easeOut" }}
             className="space-y-6"
           >
               {/* User Welcome Section */}
@@ -7196,9 +7487,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               /* PAGE 2: INDIVIDUAL CASHBOOK VIEW */
             <motion.div
               key={activeBookId}
-              initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: 20 }}
+              initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: 8 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+              transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.16, ease: "easeOut" }}
               className="w-full space-y-4 sm:space-y-6 pb-[180px] lg:pb-0"
             >
               {/* STICKY TOP CONTROLS SECTION */}
@@ -7383,47 +7674,58 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             {currentTabName === 'entries' && (
               <>
                 {/* Mobile Summary Card (Reference Image Style) */}
-              <div className={cn(
-                "lg:hidden rounded-2xl border shadow-sm overflow-hidden transition-colors duration-300",
-                theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
-              )}>
-                <div className="p-3 px-4 space-y-2.5">
+              <div
+                className={cn(
+                  "lg:hidden rounded-2xl border shadow-sm relative overflow-hidden transition-colors duration-300",
+                  theme === 'dark' ? "bg-zinc-950/90 border-zinc-800/80 backdrop-blur-md" : "bg-white/90 border-slate-200/80 backdrop-blur-md"
+                )}
+              >
+                <div className="p-3.5 px-4 space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <h3 className={cn(
-                      "text-sm font-bold transition-colors duration-300",
-                      theme === 'dark' ? "text-slate-100" : "text-black"
-                    )}>Net Balance</h3>
+                    <div className="flex items-center gap-1.5">
+                      <Wallet size={15} className="text-indigo-500 shrink-0" />
+                      <h3 className={cn(
+                        "text-sm font-bold transition-colors duration-300",
+                        theme === 'dark' ? "text-slate-100" : "text-black"
+                      )}>Net Balance</h3>
+                    </div>
                     <p className={cn(
-                      "font-black transition-colors duration-300",
+                      "font-black transition-colors duration-300 tracking-tight",
                       theme === 'dark' ? "text-slate-100" : "text-black",
-                      "text-sm"
+                      "text-base"
                     )}>
                       {formatCurrency(totals.net)}
                     </p>
                   </div>
                   
                   <div className={cn(
-                    "space-y-1.5 pt-1.5 border-t transition-colors duration-300",
-                    theme === 'dark' ? "border-zinc-800" : "border-slate-50"
+                    "space-y-1.5 pt-2 border-t transition-colors duration-300",
+                    theme === 'dark' ? "border-zinc-800/70" : "border-slate-100"
                   )}>
                     <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        <p className={cn(
+                          "text-xs font-bold transition-colors duration-300",
+                          theme === 'dark' ? "text-slate-400" : "text-slate-500"
+                        )}>Total In (+)</p>
+                      </div>
                       <p className={cn(
-                        "text-xs font-bold transition-colors duration-300",
-                        theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                      )}>Total In (+)</p>
-                      <p className={cn(
-                        "font-black text-emerald-600",
-                        "text-xs"
+                        "font-black text-emerald-600 dark:text-emerald-400",
+                        "text-xs font-mono"
                       )}>{formatCurrency(totals.in)}</p>
                     </div>
                     <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                        <p className={cn(
+                          "text-xs font-bold transition-colors duration-300",
+                          theme === 'dark' ? "text-slate-400" : "text-slate-500"
+                        )}>Total Out (-)</p>
+                      </div>
                       <p className={cn(
-                        "text-xs font-bold transition-colors duration-300",
-                        theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                      )}>Total Out (-)</p>
-                      <p className={cn(
-                        "font-black text-rose-600",
-                        "text-xs"
+                        "font-black text-rose-600 dark:text-rose-400",
+                        "text-xs font-mono"
                       )}>{formatCurrency(totals.out)}</p>
                     </div>
                   </div>
@@ -8012,55 +8314,71 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               {/* Mobile Sticky Bottom Buttons */}
               {canAddEntries(currentUserRole) && (
-                <div className={cn(
-                  "lg:hidden fixed bottom-0 left-0 right-0 p-4 pb-6 backdrop-blur-lg border-t z-40 transition-colors duration-300",
-                  theme === 'dark' ? "bg-slate-900/80 border-slate-800" : "bg-white/80 border-slate-100"
-                )}>
+                <div
+                  className={cn(
+                    "lg:hidden fixed bottom-0 left-0 right-0 p-4 pb-6 backdrop-blur-xl border-t z-40 transition-colors duration-300 shadow-[0_-10px_35px_rgba(0,0,0,0.08)] dark:shadow-[0_-10px_35px_rgba(0,0,0,0.4)]",
+                    theme === 'dark' ? "bg-slate-950/85 border-zinc-800/80" : "bg-white/85 border-slate-200/80"
+                  )}
+                >
                   <div className="w-full font-sans">
                     <div className="flex flex-col gap-3 w-full">
                       {/* Row 1: AI UPLOAD */}
-                      <button
+                      <motion.button
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.96 }}
+                        transition={{ duration: 0.12 }}
                         onClick={() => { 
                           vibrate(); 
                           setShowAiWarning(true);
                         }}
                         className={cn(
-                          "w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
+                          "relative w-full flex items-center justify-center gap-2.5 py-3.5 rounded-2xl font-black shadow-sm cursor-pointer text-xs sm:text-sm border transition-colors duration-200",
                           theme === 'dark' 
-                            ? "bg-indigo-950/25 text-indigo-400 border-indigo-900/50 hover:bg-indigo-950/40" 
-                            : "bg-white border-indigo-200 text-indigo-650 shadow-sm shadow-indigo-100/30 hover:bg-indigo-50"
+                            ? "bg-indigo-950/35 text-indigo-300 border-indigo-800/60 hover:bg-indigo-900/45 hover:border-indigo-700" 
+                            : "bg-indigo-50/80 border-indigo-200 text-indigo-700 hover:bg-indigo-100/70"
                         )}
                       >
-                        <Upload size={18} className="shrink-0" />
-                        AI UPLOAD
-                      </button>
+                        <Upload size={18} className="shrink-0 text-indigo-500" />
+                        <span className="tracking-wide">AI UPLOAD</span>
+                      </motion.button>
 
                       {/* Row 2: CASH IN & CASH OUT */}
                       <div className="grid grid-cols-2 gap-3">
-                        <button
+                        <motion.button
+                          whileHover={{ scale: 1.015 }}
+                          whileTap={{ scale: 0.95 }}
+                          transition={{ duration: 0.12 }}
                           onClick={() => { vibrate(); vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
                           className={cn(
-                            "flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
+                            "relative flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm cursor-pointer text-xs sm:text-sm border transition-colors duration-200",
                             theme === 'dark' 
-                              ? "bg-emerald-950/20 text-emerald-400 border-emerald-900/40 shadow-none hover:bg-emerald-950/35" 
-                              : "bg-white border-emerald-200 text-emerald-700 shadow-sm shadow-emerald-100/30 hover:bg-emerald-50"
+                              ? "bg-emerald-950/30 text-emerald-300 border-emerald-800/60 hover:bg-emerald-900/40 hover:border-emerald-600/70" 
+                              : "bg-emerald-50/90 border-emerald-200/90 text-emerald-700 hover:bg-emerald-100/70"
                           )}
                         >
-                          <Plus size={16} />
-                          CASH IN
-                        </button>
-                        <button
+                          <div className="p-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                            <Plus size={15} className="stroke-[3]" />
+                          </div>
+                          <span className="tracking-wide">CASH IN</span>
+                        </motion.button>
+
+                        <motion.button
+                          whileHover={{ scale: 1.015 }}
+                          whileTap={{ scale: 0.95 }}
+                          transition={{ duration: 0.12 }}
                           onClick={() => { vibrate(); vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
                           className={cn(
-                            "flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
+                            "relative flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm cursor-pointer text-xs sm:text-sm border transition-colors duration-200",
                             theme === 'dark' 
-                              ? "bg-rose-950/20 text-rose-400 border-rose-900/40 shadow-none hover:bg-rose-950/35" 
-                              : "bg-white border-rose-200 text-rose-700 shadow-sm shadow-rose-100/30 hover:bg-rose-50"
+                              ? "bg-rose-950/30 text-rose-300 border-rose-800/60 hover:bg-rose-900/40 hover:border-rose-600/70" 
+                              : "bg-rose-50/90 border-rose-200/90 text-rose-700 hover:bg-rose-100/70"
                           )}
                         >
-                          <Minus size={16} />
-                          CASH OUT
-                        </button>
+                          <div className="p-1 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400">
+                            <Minus size={15} className="stroke-[3]" />
+                          </div>
+                          <span className="tracking-wide">CASH OUT</span>
+                        </motion.button>
                       </div>
                     </div>
                   </div>
@@ -13474,6 +13792,64 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         filteredTransactions={filteredTransactions}
         theme={theme}
       />
+
+      {/* Quit App Confirmation Dialog Modal */}
+      <AnimatePresence>
+        {showQuitDialog && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 20 }}
+              className={cn(
+                "w-full max-w-sm p-6 rounded-3xl shadow-2xl space-y-5 text-center border transition-all duration-300",
+                theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
+              )}
+            >
+              <div className="mx-auto w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center border border-rose-500/20 shadow-inner">
+                <LogOut size={26} className="stroke-[2.5]" />
+              </div>
+              
+              <div className="space-y-1.5">
+                <h3 className="text-xl font-black tracking-tight">Quit TrackBook?</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                  Are you sure you want to quit the app?
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    vibrate();
+                    setShowQuitDialog(false);
+                  }}
+                  className={cn(
+                    "w-full py-3 rounded-xl font-bold text-xs transition-all border cursor-pointer",
+                    theme === 'dark' 
+                      ? "bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-slate-300" 
+                      : "bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700"
+                  )}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    vibrate();
+                    setShowQuitDialog(false);
+                    exitNativeApp();
+                  }}
+                  className="w-full py-3 rounded-xl font-black text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-600/25 active:scale-95 transition-all cursor-pointer"
+                >
+                  Yes, Quit
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

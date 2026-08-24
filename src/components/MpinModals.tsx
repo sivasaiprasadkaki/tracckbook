@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
   ShieldCheck,
@@ -17,8 +17,9 @@ import {
   verifyUserMpin,
   validateMpinStrength,
   resetLockoutState,
+  removeUserMpin,
 } from '../services/mpinSecurityService';
-import { supabase } from '../integrations/supabase/client';
+import { supabase } from '../lib/supabase';
 
 interface CreateMpinModalProps {
   isOpen: boolean;
@@ -919,6 +920,202 @@ export function ForgotMpinModal({
                 </div>
               </form>
             )}
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+interface DisableMpinModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  userId: string;
+  onSuccess: () => void;
+  onOpenForgotMpin?: () => void;
+  theme?: 'light' | 'dark';
+}
+
+export function DisableMpinModal({
+  isOpen,
+  onClose,
+  userId,
+  onSuccess,
+  onOpenForgotMpin,
+  theme = 'light',
+}: DisableMpinModalProps) {
+  const [currentMpin, setCurrentMpin] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setCurrentMpin('');
+      setError(null);
+      setLoading(false);
+    }
+  }, [isOpen]);
+
+  const handleDigitInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+    setCurrentMpin(value);
+    if (error) {
+      setError(null);
+    }
+  };
+
+  const handleDisable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    if (currentMpin.length !== 6) {
+      setError('Please enter your 6-digit TPIN to confirm disabling.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const valid = await verifyUserMpin(userId, currentMpin);
+      if (!valid.success) {
+        setError(valid.error || 'Incorrect TPIN. Could not disable.');
+        return;
+      }
+
+      removeUserMpin(userId);
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to disable TPIN.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div
+          className={cn(
+            'fixed inset-0 z-[130] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300',
+            theme === 'dark' ? 'bg-black/80' : 'bg-slate-900/60'
+          )}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            className={cn(
+              'w-full max-w-sm p-6 shadow-2xl transition-colors duration-300 relative border',
+              theme === 'dark'
+                ? 'bg-zinc-950 border-zinc-800'
+                : 'bg-white border-slate-200'
+            )}
+          >
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-5">
+              <div className="p-2.5 bg-rose-600 text-white">
+                <LockKeyhole size={22} />
+              </div>
+
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  Disable TPIN
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                  Turn off 6-digit TPIN security
+                </p>
+              </div>
+            </div>
+
+            {error && (
+              <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-start gap-2">
+                <AlertCircle
+                  size={15}
+                  className="shrink-0 mt-0.5 text-rose-500"
+                />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleDisable} className="space-y-4">
+              <div className="p-3 bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 text-xs text-rose-700 dark:text-rose-300">
+                Enter your current 6-digit TPIN to turn off TPIN protection for this account.
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300 mb-1.5 uppercase tracking-wider">
+                  Current TPIN
+                </label>
+
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={currentMpin}
+                  onChange={handleDigitInput}
+                  placeholder="••••••"
+                  autoComplete="off"
+                  autoFocus
+                  className={cn(
+                    'w-full px-3.5 py-2.5 text-base tracking-[0.35em] text-center font-mono border transition-colors outline-none',
+                    theme === 'dark'
+                      ? 'bg-zinc-900 border-zinc-800 text-white focus:border-rose-500'
+                      : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-rose-600'
+                  )}
+                />
+              </div>
+
+              {onOpenForgotMpin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenForgotMpin();
+                  }}
+                  className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                  Forgot TPIN?
+                </button>
+              )}
+
+              <div className="flex items-center gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={loading}
+                  className={cn(
+                    'flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider border transition-colors',
+                    theme === 'dark'
+                      ? 'border-zinc-800 hover:bg-zinc-900 text-zinc-300'
+                      : 'border-slate-300 hover:bg-slate-100 text-slate-700'
+                  )}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={loading || currentMpin.length !== 6}
+                  className="flex-1 py-2.5 px-4 font-bold text-xs uppercase tracking-wider bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                >
+                  {loading ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    'Disable TPIN'
+                  )}
+                </button>
+              </div>
+            </form>
           </motion.div>
         </div>
       )}

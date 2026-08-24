@@ -17,11 +17,35 @@ export interface TrackBookAndroidBridge {
   enableBiometric?: () => boolean | Promise<boolean | { success: boolean; error?: string }>;
   disableBiometric?: () => boolean | Promise<boolean | { success: boolean; error?: string }>;
   openBiometricSettings?: () => void | Promise<void>;
+  exitApp?: () => void | Promise<void>;
 }
 
 declare global {
   interface Window {
     TrackBookAndroid?: TrackBookAndroidBridge;
+  }
+}
+
+/**
+ * Exit native Android app or close window if supported.
+ */
+export function exitNativeApp(): void {
+  try {
+    if (typeof window !== 'undefined') {
+      if (window.TrackBookAndroid && typeof window.TrackBookAndroid.exitApp === 'function') {
+        window.TrackBookAndroid.exitApp();
+        return;
+      }
+      if ((window as any).navigator?.app && typeof (window as any).navigator.app.exitApp === 'function') {
+        (window as any).navigator.app.exitApp();
+        return;
+      }
+      if (typeof window.close === 'function') {
+        window.close();
+      }
+    }
+  } catch (err) {
+    console.warn('[BiometricService] exitApp error:', err);
   }
 }
 

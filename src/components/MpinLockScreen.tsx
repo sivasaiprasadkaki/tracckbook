@@ -36,13 +36,17 @@ export function MpinLockScreen({
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-focus input on mount
+  // Auto-focus input on mount and when forgot modal closes
   useEffect(() => {
-    const timer = setTimeout(() => {
-      inputRef.current?.focus();
-    }, 200);
-    return () => clearTimeout(timer);
-  }, []);
+    if (!isForgotModalOpen && lockoutRemaining === 0 && !isVerifying && !isSuccess) {
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 200);
+      return () => clearTimeout(timer);
+    } else if (isForgotModalOpen) {
+      inputRef.current?.blur();
+    }
+  }, [isForgotModalOpen, lockoutRemaining, isVerifying, isSuccess]);
 
   // Check lockout countdown
   useEffect(() => {
@@ -161,7 +165,7 @@ export function MpinLockScreen({
         onBlur={() => setIsInputFocused(false)}
         autoComplete="one-time-code"
         className="absolute opacity-0 pointer-events-none -top-96 left-0 w-1 h-1"
-        disabled={lockoutRemaining > 0 || isVerifying || isSuccess}
+        disabled={lockoutRemaining > 0 || isVerifying || isSuccess || isForgotModalOpen}
       />
 
       {/* Top Header */}
@@ -405,6 +409,7 @@ export function MpinLockScreen({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
+            inputRef.current?.blur();
             setIsForgotModalOpen(true);
           }}
           className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline inline-flex items-center gap-1.5 p-2 cursor-pointer"

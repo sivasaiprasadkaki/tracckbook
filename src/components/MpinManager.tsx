@@ -21,6 +21,7 @@ import {
   CreateMpinModal,
   ChangeMpinModal,
   ForgotMpinModal,
+  DisableMpinModal,
 } from './MpinModals';
 
 interface MpinContextType {
@@ -29,6 +30,7 @@ interface MpinContextType {
   openCreateModal: () => void;
   openChangeModal: () => void;
   openForgotModal: () => void;
+  openDisableModal: () => void;
   refreshMpinStatus: () => Promise<void>;
 }
 
@@ -38,6 +40,7 @@ const MpinContext = createContext<MpinContextType>({
   openCreateModal: () => {},
   openChangeModal: () => {},
   openForgotModal: () => {},
+  openDisableModal: () => {},
   refreshMpinStatus: async () => {},
 });
 
@@ -83,6 +86,9 @@ export default function MpinManager({
     useState(false);
 
   const [isForgotOpen, setIsForgotOpen] =
+    useState(false);
+
+  const [isDisableOpen, setIsDisableOpen] =
     useState(false);
 
   const backgroundTimeRef =
@@ -463,6 +469,20 @@ export default function MpinManager({
     ]);
 
   // ============================================================
+  // MPIN DISABLED
+  // ============================================================
+
+  const handleMpinDisabled =
+    useCallback(async () => {
+      await checkMpinStatus();
+      setIsUnlocked(true);
+      notifyNativeTpinUnlocked();
+    }, [
+      checkMpinStatus,
+      notifyNativeTpinUnlocked,
+    ]);
+
+  // ============================================================
   // LOCK SCREEN DECISION
   // ============================================================
 
@@ -503,6 +523,10 @@ export default function MpinManager({
 
         openForgotModal: () => {
           setIsForgotOpen(true);
+        },
+
+        openDisableModal: () => {
+          setIsDisableOpen(true);
         },
 
         refreshMpinStatus:
@@ -561,6 +585,22 @@ export default function MpinManager({
             onSuccess={
               handleMpinReset
             }
+            theme={theme}
+          />
+
+          <DisableMpinModal
+            isOpen={isDisableOpen}
+            onClose={() => {
+              setIsDisableOpen(false);
+            }}
+            userId={userId}
+            onSuccess={
+              handleMpinDisabled
+            }
+            onOpenForgotMpin={() => {
+              setIsDisableOpen(false);
+              setIsForgotOpen(true);
+            }}
             theme={theme}
           />
         </>
