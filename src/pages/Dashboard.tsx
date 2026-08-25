@@ -7526,7 +7526,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             >
               {/* STICKY TOP CONTROLS SECTION */}
               <div className={cn(
-                "lg:sticky lg:top-0 z-30 transition-colors duration-300 border-b",
+                "relative z-30 lg:sticky lg:top-0 transition-colors duration-300 border-b",
                 "-mt-2 pt-2 -mx-6 px-6 pb-3 mb-2",
                 "sm:-mt-4 sm:pt-4 sm:pb-4 sm:mb-4",
                 "md:-mt-6 md:pt-6 md:-mx-8 md:px-8 md:pb-5 md:mb-5",
@@ -7943,7 +7943,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <div className="lg:hidden w-full flex flex-col gap-2.5">
 
                   {/* ROW 3: [All Types] [All] */}
-                  <div className="grid grid-cols-2 gap-2.5 w-full">
+                  <div className="grid grid-cols-2 gap-2.5 w-full relative z-20">
                     <div className="relative w-full">
                       <InAppSelect
                         id="filter-transaction-type-mobile"

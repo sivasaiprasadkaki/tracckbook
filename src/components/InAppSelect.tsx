@@ -148,7 +148,11 @@ export const InAppSelect: React.FC<InAppSelectProps> = ({
   return (
     <div
       ref={containerRef}
-      className={cn('relative w-full text-left select-none', className)}
+      className={cn(
+        'relative w-full text-left select-none transition-none',
+        isOpen ? 'z-[100]' : 'z-auto',
+        className
+      )}
       id={`in-app-select-container-${selectId}`}
     >
       {label && (
