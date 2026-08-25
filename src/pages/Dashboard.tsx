@@ -2045,6 +2045,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [showDownloadCenter, setShowDownloadCenter] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
+  const [showAvatarPreviewModal, setShowAvatarPreviewModal] = useState(false);
   const [isCreatingBook, setIsCreatingBook] = useState(false);
 
   // Phone linking states
@@ -5574,6 +5575,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     modalStateRef.current = {
       showForm,
       isCreatingBook,
+      isEditingName,
+      showAvatarPreviewModal,
       showAiWarning,
       aiConstructionModal,
       showGroupSizeModal,
@@ -5599,6 +5602,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const isAnyModalOpen = Boolean(
     showForm ||
     isCreatingBook ||
+    isEditingName ||
+    showAvatarPreviewModal ||
     showAiWarning ||
     aiConstructionModal ||
     showGroupSizeModal ||
@@ -5638,6 +5643,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       }
 
       // 2. If any other modal / drawer is open, close it!
+      if (state.showAvatarPreviewModal) { setShowAvatarPreviewModal(false); return "HANDLED"; }
+      if (state.isEditingName) { setIsEditingName(false); return "HANDLED"; }
       if (state.showAiWarning) { setShowAiWarning(false); return "HANDLED"; }
       if (state.aiConstructionModal) { setAiConstructionModal(null); return "HANDLED"; }
       if (state.showGroupSizeModal) { setShowGroupSizeModal(false); return "HANDLED"; }
@@ -11039,33 +11046,47 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         )}>
                           {/* Round WhatsApp DP Avatar */}
                           <div className="relative group shrink-0">
-                            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full ring-4 ring-indigo-500/20 overflow-hidden bg-indigo-600 flex items-center justify-center text-white font-black text-xl sm:text-2xl shadow-md relative aspect-square">
-                              {avatarPreview || userAvatarUrl ? (
-                                <img 
-                                  src={avatarPreview || userAvatarUrl || ''} 
-                                  alt="Profile Avatar" 
-                                  className="w-full h-full object-cover rounded-full"
-                                  referrerPolicy="no-referrer"
-                                />
-                              ) : (
-                                <span className="select-none">{userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}</span>
+                            <div 
+                              onClick={() => {
+                                if (avatarPreview || userAvatarUrl) {
+                                  setShowAvatarPreviewModal(true);
+                                }
+                              }}
+                              className={cn(
+                                "w-16 h-16 sm:w-20 sm:h-20 rounded-full ring-4 ring-indigo-500/20 overflow-hidden bg-indigo-600 flex items-center justify-center text-white font-black text-xl sm:text-2xl shadow-md relative aspect-square group/avatar transition-all select-none",
+                                (avatarPreview || userAvatarUrl) ? "cursor-pointer hover:ring-indigo-500/50 hover:shadow-indigo-500/20" : ""
                               )}
-                              
-                              {/* Hover Overlay */}
-                              <label 
-                                htmlFor="profile-avatar-input"
-                                className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white text-[10px] font-bold cursor-pointer transition-opacity backdrop-blur-[1px] rounded-full"
-                              >
-                                <Camera size={18} className="mb-0.5" />
-                                <span>Change</span>
-                              </label>
+                              title={avatarPreview || userAvatarUrl ? "Click to view photo preview" : "Click to upload photo"}
+                            >
+                              {avatarPreview || userAvatarUrl ? (
+                                <>
+                                  <img 
+                                    src={avatarPreview || userAvatarUrl || ''} 
+                                    alt="Profile Avatar" 
+                                    className="w-full h-full object-cover rounded-full transition-transform duration-300 group-hover/avatar:scale-105"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                  {/* Hover Overlay to view preview */}
+                                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/avatar:opacity-100 flex flex-col items-center justify-center text-white text-[10px] font-bold transition-opacity backdrop-blur-[1px] rounded-full">
+                                    <Eye size={18} className="mb-0.5" />
+                                    <span>View</span>
+                                  </div>
+                                </>
+                              ) : (
+                                <label
+                                  htmlFor="profile-avatar-input"
+                                  className="w-full h-full flex flex-col items-center justify-center cursor-pointer select-none"
+                                >
+                                  <span>{userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}</span>
+                                </label>
+                              )}
                             </div>
                             
                             {/* Floating camera button (WhatsApp style badge) */}
                             <label
                               htmlFor="profile-avatar-input"
-                              className="absolute bottom-0 right-0 p-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-full shadow-lg border-2 border-white dark:border-slate-900 cursor-pointer transition-all"
-                              title="Upload profile picture"
+                              className="absolute bottom-0 right-0 p-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-full shadow-lg border-2 border-white dark:border-slate-900 cursor-pointer transition-all z-10"
+                              title={avatarPreview || userAvatarUrl ? "Change Photo" : "Upload profile picture"}
                             >
                               <Camera size={13} />
                             </label>
@@ -11090,19 +11111,29 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
                               <label
                                 htmlFor="profile-avatar-input"
-                                className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl text-[11px] font-bold cursor-pointer transition-all inline-flex items-center gap-1.5 border border-indigo-200/50 dark:border-indigo-800/40 select-none"
+                                className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl text-[11px] font-bold cursor-pointer transition-all inline-flex items-center gap-1.5 border border-indigo-200/50 dark:border-indigo-800/40 select-none shadow-sm"
                               >
                                 <ImagePlus size={13} />
                                 <span>{avatarPreview || userAvatarUrl ? 'Change Photo' : 'Add an image'}</span>
                               </label>
                               {(avatarPreview || userAvatarUrl) && (
-                                <button
-                                  type="button"
-                                  onClick={handleRemoveAvatar}
-                                  className="px-2.5 py-1.5 text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl text-[11px] font-bold transition-all cursor-pointer select-none"
-                                >
-                                  Remove
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowAvatarPreviewModal(true)}
+                                    className="px-2.5 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-[11px] font-bold transition-all cursor-pointer select-none inline-flex items-center gap-1 border border-slate-200/60 dark:border-slate-800"
+                                  >
+                                    <Eye size={12} />
+                                    <span>Preview</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleRemoveAvatar}
+                                    className="px-2.5 py-1.5 text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl text-[11px] font-bold transition-all cursor-pointer select-none"
+                                  >
+                                    Remove
+                                  </button>
+                                </>
                               )}
                             </div>
                           </div>
@@ -11361,6 +11392,104 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           </AnimatePresence>
         );
       })()}
+
+      {/* Profile Photo Fullscreen Preview Modal */}
+      <AnimatePresence>
+        {showAvatarPreviewModal && (avatarPreview || userAvatarUrl) && (
+          <div 
+            className="fixed inset-0 z-[250] bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-4 select-none"
+            onClick={() => setShowAvatarPreviewModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.85 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="relative max-w-sm sm:max-w-md w-full bg-slate-900/95 border border-slate-800 rounded-3xl p-5 shadow-2xl flex flex-col items-center text-white"
+            >
+              {/* Header with Title and Actions */}
+              <div className="w-full flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-black text-xs shrink-0 ring-2 ring-indigo-500/30">
+                    {userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white truncate">Profile Photo Preview</p>
+                    <p className="text-[11px] text-slate-400 truncate">{userName || 'User Profile'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = avatarPreview || userAvatarUrl;
+                      if (url) {
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `${userName ? userName.toLowerCase().replace(/\s+/g, '_') : 'profile'}_dp.jpg`;
+                        link.target = '_blank';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                      }
+                    }}
+                    className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                    title="Download Photo"
+                  >
+                    <Download size={18} />
+                  </button>
+                  <label
+                    htmlFor="profile-avatar-input"
+                    onClick={() => setShowAvatarPreviewModal(false)}
+                    className="p-2 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/40 rounded-xl transition-colors cursor-pointer"
+                    title="Change Photo"
+                  >
+                    <ImagePlus size={18} />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAvatarPreviewModal(false)}
+                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                    title="Close"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Large Photo Preview */}
+              <div className="w-56 h-56 sm:w-72 sm:h-72 rounded-full overflow-hidden border-4 border-indigo-500/40 shadow-2xl bg-black/50 flex items-center justify-center my-3 ring-8 ring-indigo-500/10 shrink-0 aspect-square">
+                <img
+                  src={avatarPreview || userAvatarUrl || ''}
+                  alt={userName || "Profile Preview"}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              {/* Footer Action Buttons */}
+              <div className="w-full mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-3">
+                <label
+                  htmlFor="profile-avatar-input"
+                  onClick={() => setShowAvatarPreviewModal(false)}
+                  className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white rounded-xl text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25"
+                >
+                  <Camera size={15} />
+                  <span>Change Photo</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowAvatarPreviewModal(false)}
+                  className="py-2.5 px-5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Mobile Linking Coming Soon Modal */}
       <AnimatePresence>
