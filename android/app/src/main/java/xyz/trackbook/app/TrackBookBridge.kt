@@ -395,8 +395,18 @@ class TrackBookBridge(
     }
 
     // =========================================================================
-    // 4. APP CONTROLS
+    // 4. APP CONTROLS & ENVIRONMENT
     // =========================================================================
+
+    @JavascriptInterface
+    fun isNativeApp(): Boolean {
+        return true
+    }
+
+    @JavascriptInterface
+    fun getPlatform(): String {
+        return "android"
+    }
 
     @JavascriptInterface
     fun exitApp() {

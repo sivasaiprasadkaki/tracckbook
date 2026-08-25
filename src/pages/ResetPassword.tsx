@@ -35,15 +35,28 @@ export default function ResetPassword() {
       if (!session) {
         // If no session, they might have accessed this page directly without a recovery token
         // Or the token might have expired.
-        // We can check the URL for recovery tokens too, but Supabase usually handles this.
-        const hash = window.location.hash;
-        if (!hash.includes('type=recovery') && !hash.includes('access_token=')) {
-           setError('Invalid or expired reset link. Please request a new one.');
+        const hash = window.location.hash || '';
+        const search = window.location.search || '';
+        if (
+          !hash.includes('type=recovery') && 
+          !hash.includes('access_token=') && 
+          !search.includes('type=recovery') && 
+          !search.includes('code=')
+        ) {
+          setError('Invalid or expired reset link. Please request a new one.');
         }
       }
       setChecking(false);
     };
     checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
+        setError(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const handleResetPassword = async (e: React.FormEvent) => {

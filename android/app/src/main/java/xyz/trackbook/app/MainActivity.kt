@@ -95,8 +95,66 @@ class MainActivity : AppCompatActivity() {
         setupBackNavigation()
         requestAppPermissions()
 
-        val targetUrl = intent?.dataString ?: defaultAppUrl
+        val targetUrl = resolveAppUrl(intent?.dataString)
         webView.loadUrl(targetUrl)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val dataUrl = intent?.dataString
+        if (!dataUrl.isNullOrBlank()) {
+            val resolvedUrl = resolveAppUrl(dataUrl)
+            webView.loadUrl(resolvedUrl)
+        }
+    }
+
+    /**
+     * Resolves deep links (e.g. trackbook://reset-password#access_token=... or trackbook://resetpassword)
+     * into loadable WebView URLs preserving all hashes, tokens, and query parameters.
+     */
+    private fun resolveAppUrl(uriString: String?): String {
+        if (uriString.isNullOrBlank()) return defaultAppUrl
+        val uri = try {
+            Uri.parse(uriString)
+        } catch (e: Exception) {
+            return defaultAppUrl
+        }
+
+        if (uri.scheme.equals("trackbook", ignoreCase = true)) {
+            val baseUrl = try {
+                val current = if (::webView.isInitialized) webView.url else null
+                if (!current.isNullOrBlank() && (current.startsWith("http://") || current.startsWith("https://"))) {
+                    val currentUri = Uri.parse(current)
+                    "${currentUri.scheme}://${currentUri.authority}"
+                } else {
+                    defaultAppUrl
+                }
+            } catch (e: Exception) {
+                defaultAppUrl
+            }
+
+            val host = uri.host ?: ""
+            val path = uri.path ?: ""
+            val fullPath = if (host.isNotEmpty() && !host.contains(".")) {
+                "/$host$path"
+            } else {
+                path.ifEmpty { "/" }
+            }
+
+            val normalizedPath = when {
+                fullPath.contains("reset-password", ignoreCase = true) || fullPath.contains("resetpassword", ignoreCase = true) -> "/reset-password"
+                fullPath.isEmpty() || fullPath == "/" -> ""
+                else -> fullPath
+            }
+
+            val query = if (!uri.query.isNullOrEmpty()) "?${uri.query}" else ""
+            val fragment = if (!uri.fragment.isNullOrEmpty()) "#${uri.fragment}" else ""
+
+            return "$baseUrl$normalizedPath$query$fragment"
+        }
+
+        return uriString
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -140,6 +198,13 @@ class MainActivity : AppCompatActivity() {
                     url.startsWith("http://localhost") || 
                     url.startsWith("https://ais-")) {
                     return false
+                }
+
+                // Handle custom trackbook:// deep links internally
+                if (url.startsWith("trackbook://")) {
+                    val resolved = resolveAppUrl(url)
+                    view?.loadUrl(resolved)
+                    return true
                 }
 
                 // Handle external links (WhatsApp, Phone, Mail)

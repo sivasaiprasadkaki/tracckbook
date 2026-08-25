@@ -24,7 +24,7 @@ import { markSessionUnlocked } from '../services/mpinSecurityService';
 import DesktopSignIn from './DesktopSignIn';
 import DesktopSignUp from './DesktopSignUp';
 import DesktopForgot from './DesktopForgot';
-import { handleUniversalGoogleLogin } from '../services/nativeGoogleAuthService';
+import { handleUniversalGoogleLogin, isNativeAndroidApp } from '../services/nativeGoogleAuthService';
 
 type AuthMode = 'signin' | 'signup' | 'forgot';
 
@@ -601,9 +601,15 @@ export default function Auth({
         }
         console.log('SignIn Success:', data);
       } else if (mode === 'forgot') {
-        console.log('Current Origin:', window.location.origin);
+        const isAndroid = isNativeAndroidApp();
+        const redirectTo = isAndroid 
+          ? 'trackbook://reset-password' 
+          : `${window.location.origin}/resetpassword`;
+
+        console.log('[Auth] Password Reset - Platform:', isAndroid ? 'Android Native' : 'Web/Desktop', 'RedirectTo:', redirectTo);
+
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/resetpassword`
+          redirectTo
         });
 
         if (error) {
