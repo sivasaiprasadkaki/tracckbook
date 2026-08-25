@@ -322,58 +322,47 @@ export default function App() {
     };
   });
 
-  // Mobile / Hardware Back Button Navigation Handler
+  // Global Hardware Back Navigation Bridge for Android Native App & Web View
   useEffect(() => {
-    // Push an initial history entry once on mount so popstate events are reliably received
-    if (typeof window !== 'undefined') {
-      window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-    }
-
-    const handlePopState = () => {
+    (window as any).TrackBookHandleHardwareBack = function(): string {
       const state = uiNavStateRef.current;
 
       // 1. If Exit Confirm dialog is open, pressing back closes the dialog
       if (state.showExitConfirm) {
         setShowExitConfirm(false);
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
 
       // 2. If Image Preview modal is open, close it and return to the entries view
       if (state.previewImages) {
         setPreviewImages(null);
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
 
       // 3. If AI Help drawer/modal is open, close it
       if (state.isHelpOpen) {
         setIsHelpOpen(false);
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
 
       // 4. If Cash In / Cash Out form modal is open, close it and return to entries view
       if (state.showForm) {
         setShowForm(null);
         setEditingTransaction(null);
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
 
       // 5. If AI Warning modal is open, close it
       if (state.showAiWarning) {
         setShowAiWarning(false);
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
 
       // 6. If Create Book or Edit Book modal is open, close it
       if (state.isCreatingBook || state.isEditingBook) {
         setIsCreatingBook(false);
         setIsEditingBook(null);
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
 
       // 7. If any delete confirmation modal is open, close it
@@ -387,53 +376,44 @@ export default function App() {
         setTransactionToDelete(null);
         setShowBulkDeleteConfirm(false);
         setShowBulkTransactionDeleteConfirm(false);
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
 
       // 8. If profile popup or mobile search bar is open, close it
       if (state.isProfileOpen || state.isSearchExpanded) {
         setIsProfileOpen(false);
         setIsSearchExpanded(false);
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
 
       // 9. If multi-select mode is active, cancel selection
       if (state.selectedTransactionsCount > 0) {
         setSelectedTransactions(new Set());
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
       if (state.selectedBooksCount > 0) {
         setSelectedBooks(new Set());
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
 
       // 10. If Reports menu was opened inside Entries page, close Reports and return to Entries
       if (state.showReportsMenu) {
         setShowReportsMenu(false);
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
 
       // 11. If user is on Entries page (activeBookId is set), navigate back to Home screen (Books list)
       if (state.activeBookId) {
         setActiveBookId(null);
-        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
-        return;
+        return "HANDLED";
       }
 
-      // 12. Only when on the Home screen with no open views/modals, show Exit App confirmation dialog!
-      setShowExitConfirm(true);
-      window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+      // 12. Truly on the Home screen with no open views/modals/overlays
+      return "HOME";
     };
 
-    window.addEventListener('popstate', handlePopState);
-
     return () => {
-      window.removeEventListener('popstate', handlePopState);
+      delete (window as any).TrackBookHandleHardwareBack;
     };
   }, []);
 

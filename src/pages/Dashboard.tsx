@@ -5626,77 +5626,64 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
   }, [isAnyModalOpen]);
 
-  // Handle hardware & browser back button
+  // Global Hardware Back Navigation Bridge for Android Native App & Web View
   useEffect(() => {
-    if (typeof window !== 'undefined' && !window.history.state) {
-      window.history.replaceState({ tbPage: 'app' }, '');
-    }
-
-    const handlePopState = () => {
-      if (isClosingModalFromUiRef.current) {
-        isClosingModalFromUiRef.current = false;
-        return;
-      }
-
+    (window as any).TrackBookHandleHardwareBack = function(): string {
       const state = modalStateRef.current;
 
       // 1. If Cash In / Cash Out form is open, close it!
       if (state.showForm) {
         resetForm();
-        return;
+        return "HANDLED";
       }
 
       // 2. If any other modal / drawer is open, close it!
-      if (state.showAiWarning) { setShowAiWarning(false); return; }
-      if (state.aiConstructionModal) { setAiConstructionModal(null); return; }
-      if (state.showGroupSizeModal) { setShowGroupSizeModal(false); return; }
-      if (state.showFullScreenPreview) { setShowFullScreenPreview(false); return; }
-      if (state.showShareModal) { setShowShareModal(false); return; }
-      if (state.showImportModal) { setShowImportModal(false); return; }
-      if (state.showPhoneSecurityModal) { setShowPhoneSecurityModal(false); return; }
-      if (state.showPhoneLinkingComingSoon) { setShowPhoneLinkingComingSoon(false); return; }
-      if (state.showDownloadCenter) { setShowDownloadCenter(false); return; }
-      if (state.showWhatsAppModal) { setShowWhatsAppModal(false); return; }
-      if (state.isCreatingBook) { setIsCreatingBook(false); return; }
-      if (state.isProfileOpen) { setIsProfileOpen(false); return; }
-      if (state.deleteConfirmId) { setDeleteConfirmId(null); return; }
+      if (state.showAiWarning) { setShowAiWarning(false); return "HANDLED"; }
+      if (state.aiConstructionModal) { setAiConstructionModal(null); return "HANDLED"; }
+      if (state.showGroupSizeModal) { setShowGroupSizeModal(false); return "HANDLED"; }
+      if (state.showFullScreenPreview) { setShowFullScreenPreview(false); return "HANDLED"; }
+      if (state.showShareModal) { setShowShareModal(false); return "HANDLED"; }
+      if (state.showImportModal) { setShowImportModal(false); return "HANDLED"; }
+      if (state.showPhoneSecurityModal) { setShowPhoneSecurityModal(false); return "HANDLED"; }
+      if (state.showPhoneLinkingComingSoon) { setShowPhoneLinkingComingSoon(false); return "HANDLED"; }
+      if (state.showDownloadCenter) { setShowDownloadCenter(false); return "HANDLED"; }
+      if (state.showWhatsAppModal) { setShowWhatsAppModal(false); return "HANDLED"; }
+      if (state.isCreatingBook) { setIsCreatingBook(false); return "HANDLED"; }
+      if (state.isProfileOpen) { setIsProfileOpen(false); return "HANDLED"; }
+      if (state.deleteConfirmId) { setDeleteConfirmId(null); return "HANDLED"; }
       if (state.showBulkDeleteConfirm || state.showBulkTransactionDeleteConfirm) { 
         setShowBulkDeleteConfirm(false); 
         setShowBulkTransactionDeleteConfirm(false); 
-        return; 
+        return "HANDLED"; 
       }
-      if (state.showOfflineDialog) { setShowOfflineDialog(false); return; }
+      if (state.showOfflineDialog) { setShowOfflineDialog(false); return "HANDLED"; }
 
       // 3. If quit confirmation dialog was open, dismiss it
       if (state.showQuitDialog) {
         setShowQuitDialog(false);
-        return;
+        return "HANDLED";
       }
 
       // 4. If user is inside a cashbook and on a tab other than 'entries' (e.g. reports), go back to entries page!
       if (state.activeBookId && state.currentTabName && state.currentTabName !== 'entries') {
         const slug = getBookSlug(state.activeBook?.name || '', state.activeBook?.id || state.activeBookId);
         navigate(`/cashbooks/${slug}/entries`);
-        return;
+        return "HANDLED";
       }
 
       // 5. If user is inside a cashbook on 'entries' tab, go back to cashbooks home list
       if (state.activeBookId) {
         handleSelectBook(null);
-        return;
+        return "HANDLED";
       }
 
-      // 6. If user is on the Home screen (books list), show Quit Confirmation Dialog!
-      if (!state.activeBookId) {
-        setShowQuitDialog(true);
-        // Push state back so app doesn't exit immediately on first back press
-        window.history.pushState({ tbPage: 'home' }, '');
-        return;
-      }
+      // 6. Only when on the Home screen (books list) with no open views/modals, return HOME
+      return "HOME";
     };
 
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    return () => {
+      delete (window as any).TrackBookHandleHardwareBack;
+    };
   }, []);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

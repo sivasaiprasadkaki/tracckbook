@@ -24,6 +24,7 @@ import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
@@ -224,13 +225,39 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackNavigation() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (webView.canGoBack()) {
-                    webView.goBack()
-                } else {
-                    finish()
+                val jsCode = """
+                    (function() {
+                        if (typeof window.TrackBookHandleHardwareBack === 'function') {
+                            try {
+                                return window.TrackBookHandleHardwareBack();
+                            } catch (e) {
+                                return 'HANDLED';
+                            }
+                        }
+                        return 'HOME';
+                    })()
+                """.trimIndent()
+
+                webView.evaluateJavascript(jsCode) { result ->
+                    val cleanResult = result?.replace("\"", "")?.trim()
+                    if (cleanResult == "HOME") {
+                        showQuitDialog()
+                    }
+                    // If cleanResult is "HANDLED" (or anything else), React handled the back action internally
                 }
             }
         })
+    }
+
+    private fun showQuitDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Exit App?")
+            .setMessage("Do you want to exit the application?")
+            .setPositiveButton("Exit") { _, _ ->
+                finishAffinity()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun requestAppPermissions() {
