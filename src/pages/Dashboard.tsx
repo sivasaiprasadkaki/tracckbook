@@ -13337,7 +13337,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </span>
               </div>
             </div>
-            <div className={cn("grid gap-2", selectedTransactions.size >= 2 ? "grid-cols-5" : "grid-cols-4")}>
+            <div className="grid grid-cols-4 gap-2">
               <button
                 onClick={toggleSelectAll}
                 className={cn(

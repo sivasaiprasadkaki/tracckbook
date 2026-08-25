@@ -225,29 +225,6 @@ export default function App() {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
-  // Back button handling for mobile
-  useEffect(() => {
-    const handlePopState = (event: PopStateEvent) => {
-      if (activeBookId) {
-        setActiveBookId(null);
-        // Prevent default back behavior
-        window.history.pushState(null, '', window.location.pathname);
-      } else {
-        setShowExitConfirm(true);
-        // Prevent default back behavior
-        window.history.pushState(null, '', window.location.pathname);
-      }
-    };
-
-    // Push initial state
-    window.history.pushState(null, '', window.location.pathname);
-    window.addEventListener('popstate', handlePopState);
-
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-    };
-  }, [activeBookId]);
-
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [previewImages, setPreviewImages] = useState<string[] | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
@@ -301,6 +278,164 @@ export default function App() {
   const CATEGORIES = ['Food', 'Travel', 'Advance', 'Shopping', 'Custom'];
   const MODES = ['Card', 'UPI', 'Cash', 'Custom'];
   const DURATIONS = ['All', 'Today', 'Yesterday', 'Last Week'];
+
+  // Dynamic UI navigation state tracking ref for hardware/mobile back button popstate
+  const uiNavStateRef = useRef({
+    previewImages: null as string[] | null,
+    isHelpOpen: false,
+    showForm: null as 'in' | 'out' | null,
+    showAiWarning: false,
+    isCreatingBook: false,
+    isEditingBook: null as string | null,
+    deleteConfirmId: null as string | null,
+    transactionToDelete: null as string | null,
+    showBulkDeleteConfirm: false,
+    showBulkTransactionDeleteConfirm: false,
+    isProfileOpen: false,
+    isSearchExpanded: false,
+    selectedTransactionsCount: 0,
+    selectedBooksCount: 0,
+    showReportsMenu: false,
+    showExitConfirm: false,
+    activeBookId: null as string | null,
+  });
+
+  useEffect(() => {
+    uiNavStateRef.current = {
+      previewImages,
+      isHelpOpen,
+      showForm,
+      showAiWarning,
+      isCreatingBook,
+      isEditingBook,
+      deleteConfirmId,
+      transactionToDelete,
+      showBulkDeleteConfirm,
+      showBulkTransactionDeleteConfirm,
+      isProfileOpen,
+      isSearchExpanded,
+      selectedTransactionsCount: selectedTransactions.size,
+      selectedBooksCount: selectedBooks.size,
+      showReportsMenu,
+      showExitConfirm,
+      activeBookId,
+    };
+  });
+
+  // Mobile / Hardware Back Button Navigation Handler
+  useEffect(() => {
+    // Push an initial history entry once on mount so popstate events are reliably received
+    if (typeof window !== 'undefined') {
+      window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+    }
+
+    const handlePopState = () => {
+      const state = uiNavStateRef.current;
+
+      // 1. If Exit Confirm dialog is open, pressing back closes the dialog
+      if (state.showExitConfirm) {
+        setShowExitConfirm(false);
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+
+      // 2. If Image Preview modal is open, close it and return to the entries view
+      if (state.previewImages) {
+        setPreviewImages(null);
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+
+      // 3. If AI Help drawer/modal is open, close it
+      if (state.isHelpOpen) {
+        setIsHelpOpen(false);
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+
+      // 4. If Cash In / Cash Out form modal is open, close it and return to entries view
+      if (state.showForm) {
+        setShowForm(null);
+        setEditingTransaction(null);
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+
+      // 5. If AI Warning modal is open, close it
+      if (state.showAiWarning) {
+        setShowAiWarning(false);
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+
+      // 6. If Create Book or Edit Book modal is open, close it
+      if (state.isCreatingBook || state.isEditingBook) {
+        setIsCreatingBook(false);
+        setIsEditingBook(null);
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+
+      // 7. If any delete confirmation modal is open, close it
+      if (
+        state.deleteConfirmId ||
+        state.transactionToDelete ||
+        state.showBulkDeleteConfirm ||
+        state.showBulkTransactionDeleteConfirm
+      ) {
+        setDeleteConfirmId(null);
+        setTransactionToDelete(null);
+        setShowBulkDeleteConfirm(false);
+        setShowBulkTransactionDeleteConfirm(false);
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+
+      // 8. If profile popup or mobile search bar is open, close it
+      if (state.isProfileOpen || state.isSearchExpanded) {
+        setIsProfileOpen(false);
+        setIsSearchExpanded(false);
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+
+      // 9. If multi-select mode is active, cancel selection
+      if (state.selectedTransactionsCount > 0) {
+        setSelectedTransactions(new Set());
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+      if (state.selectedBooksCount > 0) {
+        setSelectedBooks(new Set());
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+
+      // 10. If Reports menu was opened inside Entries page, close Reports and return to Entries
+      if (state.showReportsMenu) {
+        setShowReportsMenu(false);
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+
+      // 11. If user is on Entries page (activeBookId is set), navigate back to Home screen (Books list)
+      if (state.activeBookId) {
+        setActiveBookId(null);
+        window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+        return;
+      }
+
+      // 12. Only when on the Home screen with no open views/modals, show Exit App confirmation dialog!
+      setShowExitConfirm(true);
+      window.history.pushState({ page: 'app_root' }, '', window.location.pathname);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, []);
 
   // Handle Auth Session
   useEffect(() => {
@@ -3449,12 +3584,18 @@ export default function App() {
                 </button>
                 <button 
                   onClick={() => {
-                    // In a real app, this might close the window or navigate away
-                    // Here we'll just sign out or similar, or just close the modal
-                    // The user specifically asked for "Exit" button
-                    window.close(); 
-                    // Fallback if window.close() is blocked
                     setShowExitConfirm(false);
+                    try {
+                      if ((window as any).TrackBookAndroid && typeof (window as any).TrackBookAndroid.exitApp === 'function') {
+                        (window as any).TrackBookAndroid.exitApp();
+                      } else if ((window as any).navigator?.app && typeof (window as any).navigator.app.exitApp === 'function') {
+                        (window as any).navigator.app.exitApp();
+                      } else {
+                        window.close();
+                      }
+                    } catch (e) {
+                      console.warn('Exit app handler:', e);
+                    }
                   }}
                   className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-100 dark:shadow-none transition-all"
                 >
