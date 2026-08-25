@@ -5561,130 +5561,168 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setTransactionCategoryFilter('All');
     setTransactionSearchQuery('');
     setIsSubmitting(false);
-
-    // If history was pushed for modal, pop it cleanly
-    if (typeof window !== 'undefined' && window.history.state?.tbModalOpen) {
-      isClosingModalFromUiRef.current = true;
-      window.history.back();
-    }
   };
 
   // Fresh modal state tracking ref for hardware / browser back button popstate
   const modalStateRef = useRef<any>({});
   useEffect(() => {
     modalStateRef.current = {
-      showForm,
-      isCreatingBook,
-      isEditingName,
+      previewImages,
+      showFullScreenPreview,
       showAvatarPreviewModal,
+      showQuitDialog,
       showAiWarning,
       aiConstructionModal,
       showGroupSizeModal,
-      showFullScreenPreview,
+      showDropZone,
+      showForm,
+      isCreatingBook,
       showShareModal,
       showImportModal,
       showPhoneSecurityModal,
       showPhoneLinkingComingSoon,
       showDownloadCenter,
       showWhatsAppModal,
-      isProfileOpen,
+      showOfflineDialog,
+      deleteConfirmId,
       showBulkDeleteConfirm,
       showBulkTransactionDeleteConfirm,
-      deleteConfirmId,
-      showOfflineDialog,
-      showQuitDialog,
+      isEditingName,
+      isProfileOpen,
+      selectedTransactions,
+      selectedBooks,
       activeBookId,
       currentTabName,
       activeBook,
     };
   });
 
-  const isAnyModalOpen = Boolean(
-    showForm ||
-    isCreatingBook ||
-    isEditingName ||
-    showAvatarPreviewModal ||
-    showAiWarning ||
-    aiConstructionModal ||
-    showGroupSizeModal ||
-    showFullScreenPreview ||
-    showShareModal ||
-    showImportModal ||
-    showPhoneSecurityModal ||
-    showPhoneLinkingComingSoon ||
-    showDownloadCenter ||
-    showWhatsAppModal ||
-    isProfileOpen ||
-    showBulkDeleteConfirm ||
-    showBulkTransactionDeleteConfirm ||
-    deleteConfirmId ||
-    showOfflineDialog ||
-    showQuitDialog
-  );
-
-  // Push history state whenever a modal opens
-  useEffect(() => {
-    if (isAnyModalOpen) {
-      if (typeof window !== 'undefined' && !window.history.state?.tbModalOpen) {
-        window.history.pushState({ ...window.history.state, tbModalOpen: true }, '');
-      }
-    }
-  }, [isAnyModalOpen]);
-
   // Global Hardware Back Navigation Bridge for Android Native App & Web View
   useEffect(() => {
     (window as any).TrackBookHandleHardwareBack = function(): string {
       const state = modalStateRef.current;
 
-      // 1. If Cash In / Cash Out form is open, close it!
-      if (state.showForm) {
-        resetForm();
+      // 1. Image preview / topmost overlays
+      if (state.previewImages) {
+        setPreviewImages(null);
         return "HANDLED";
       }
-
-      // 2. If any other modal / drawer is open, close it!
-      if (state.showAvatarPreviewModal) { setShowAvatarPreviewModal(false); return "HANDLED"; }
-      if (state.isEditingName) { setIsEditingName(false); return "HANDLED"; }
-      if (state.showAiWarning) { setShowAiWarning(false); return "HANDLED"; }
-      if (state.aiConstructionModal) { setAiConstructionModal(null); return "HANDLED"; }
-      if (state.showGroupSizeModal) { setShowGroupSizeModal(false); return "HANDLED"; }
-      if (state.showFullScreenPreview) { setShowFullScreenPreview(false); return "HANDLED"; }
-      if (state.showShareModal) { setShowShareModal(false); return "HANDLED"; }
-      if (state.showImportModal) { setShowImportModal(false); return "HANDLED"; }
-      if (state.showPhoneSecurityModal) { setShowPhoneSecurityModal(false); return "HANDLED"; }
-      if (state.showPhoneLinkingComingSoon) { setShowPhoneLinkingComingSoon(false); return "HANDLED"; }
-      if (state.showDownloadCenter) { setShowDownloadCenter(false); return "HANDLED"; }
-      if (state.showWhatsAppModal) { setShowWhatsAppModal(false); return "HANDLED"; }
-      if (state.isCreatingBook) { setIsCreatingBook(false); return "HANDLED"; }
-      if (state.isProfileOpen) { setIsProfileOpen(false); return "HANDLED"; }
-      if (state.deleteConfirmId) { setDeleteConfirmId(null); return "HANDLED"; }
-      if (state.showBulkDeleteConfirm || state.showBulkTransactionDeleteConfirm) { 
-        setShowBulkDeleteConfirm(false); 
-        setShowBulkTransactionDeleteConfirm(false); 
-        return "HANDLED"; 
+      if (state.showFullScreenPreview) {
+        setShowFullScreenPreview(false);
+        return "HANDLED";
       }
-      if (state.showOfflineDialog) { setShowOfflineDialog(false); return "HANDLED"; }
-
-      // 3. If quit confirmation dialog was open, dismiss it
+      if (state.showAvatarPreviewModal) {
+        setShowAvatarPreviewModal(false);
+        return "HANDLED";
+      }
       if (state.showQuitDialog) {
         setShowQuitDialog(false);
         return "HANDLED";
       }
 
-      // 4. If user is inside a cashbook and on a tab other than 'entries' (e.g. reports), go back to entries page!
+      // 2. AI drawer or warning
+      if (state.showAiWarning) {
+        setShowAiWarning(false);
+        return "HANDLED";
+      }
+      if (state.aiConstructionModal) {
+        setAiConstructionModal(null);
+        return "HANDLED";
+      }
+      if (state.showGroupSizeModal) {
+        setShowGroupSizeModal(false);
+        return "HANDLED";
+      }
+      if (state.showDropZone) {
+        setShowDropZone(false);
+        return "HANDLED";
+      }
+
+      // 3. Cash In / Cash Out transaction form
+      if (state.showForm) {
+        resetForm();
+        return "HANDLED";
+      }
+
+      // 4. Create / edit book modal & secondary modals
+      if (state.isCreatingBook) {
+        setIsCreatingBook(false);
+        return "HANDLED";
+      }
+      if (state.showShareModal) {
+        setShowShareModal(false);
+        return "HANDLED";
+      }
+      if (state.showImportModal) {
+        setShowImportModal(false);
+        return "HANDLED";
+      }
+      if (state.showPhoneSecurityModal) {
+        setShowPhoneSecurityModal(false);
+        return "HANDLED";
+      }
+      if (state.showPhoneLinkingComingSoon) {
+        setShowPhoneLinkingComingSoon(false);
+        return "HANDLED";
+      }
+      if (state.showDownloadCenter) {
+        setShowDownloadCenter(false);
+        return "HANDLED";
+      }
+      if (state.showWhatsAppModal) {
+        setShowWhatsAppModal(false);
+        return "HANDLED";
+      }
+      if (state.showOfflineDialog) {
+        setShowOfflineDialog(false);
+        return "HANDLED";
+      }
+
+      // 5. Delete confirmation modals
+      if (state.deleteConfirmId) {
+        setDeleteConfirmId(null);
+        return "HANDLED";
+      }
+      if (state.showBulkDeleteConfirm || state.showBulkTransactionDeleteConfirm) {
+        setShowBulkDeleteConfirm(false);
+        setShowBulkTransactionDeleteConfirm(false);
+        return "HANDLED";
+      }
+
+      // 6. Profile dropdown & name editing
+      if (state.isEditingName) {
+        setIsEditingName(false);
+        return "HANDLED";
+      }
+      if (state.isProfileOpen) {
+        setIsProfileOpen(false);
+        return "HANDLED";
+      }
+
+      // 7. Multi-select modes
+      if (state.selectedTransactions && state.selectedTransactions.size > 0) {
+        setSelectedTransactions(new Set());
+        return "HANDLED";
+      }
+      if (state.selectedBooks && state.selectedBooks.size > 0) {
+        setSelectedBooks(new Set());
+        return "HANDLED";
+      }
+
+      // 8. Reports / secondary tabs → entries tab inside active cashbook
       if (state.activeBookId && state.currentTabName && state.currentTabName !== 'entries') {
         const slug = getBookSlug(state.activeBook?.name || '', state.activeBook?.id || state.activeBookId);
         navigate(`/cashbooks/${slug}/entries`);
         return "HANDLED";
       }
 
-      // 5. If user is inside a cashbook on 'entries' tab, go back to cashbooks home list
+      // 9. Entries page → Home screen (cashbooks list)
       if (state.activeBookId) {
         handleSelectBook(null);
         return "HANDLED";
       }
 
-      // 6. Only when on the Home screen (books list) with no open views/modals, return HOME
+      // 10. Truly on the Home screen (books list) with no open views/modals/overlays
       return "HOME";
     };
 
