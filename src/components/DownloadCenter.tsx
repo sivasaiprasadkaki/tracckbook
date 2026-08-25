@@ -27,6 +27,7 @@ import {
 import { backgroundExportManager, ExportTask, JobNotification } from '../services/exportManager';
 import { syncManager, SyncQueueItem } from '../services/syncManager';
 import { cn } from '../lib/utils';
+import { InAppDialog, DialogOptions } from './InAppDialog';
 
 // Responsive and reactive named export for Processing Center Trigger
 export function DownloadCenterTrigger({ 
@@ -148,6 +149,7 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
   const [syncQueue, setSyncQueue] = useState<SyncQueueItem[]>([]);
   const [activeCount, setActiveCount] = useState(0);
   const [showToast, setShowToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [inAppDialog, setInAppDialog] = useState<DialogOptions | null>(null);
   
   const [activeTab, setActiveTab] = useState<'active' | 'archive'>('active');
   const [activeFilter, setActiveFilter] = useState<'all' | 'export' | 'ai' | 'sync'>('all');
@@ -424,13 +426,21 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={async (e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
-                      if (confirm("Are you sure you want to completely wipe all local databases? This action is irreversible.")) {
-                        await backgroundExportManager.clearAllData();
-                        await syncManager.db.clearAllData();
-                        window.location.reload();
-                      }
+                      setInAppDialog({
+                        title: "Wipe Local Databases?",
+                        message: "Are you sure you want to completely wipe all local databases? This will clear all cached exports and offline sync queues. This action is irreversible.",
+                        type: "warning",
+                        showCancel: true,
+                        confirmText: "Wipe Database",
+                        cancelText: "Cancel",
+                        onConfirm: async () => {
+                          await backgroundExportManager.clearAllData();
+                          await syncManager.db.clearAllData();
+                          window.location.reload();
+                        }
+                      });
                     }}
                     className="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 font-bold text-[9px] uppercase tracking-wider transition-colors cursor-pointer border border-rose-500/20"
                     title="completely wipe local IndexedDB databases"
@@ -916,6 +926,13 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
           </>
         )}
       </AnimatePresence>
+
+      <InAppDialog
+        isOpen={Boolean(inAppDialog)}
+        options={inAppDialog}
+        onClose={() => setInAppDialog(null)}
+        theme={theme}
+      />
     </>
   );
 }

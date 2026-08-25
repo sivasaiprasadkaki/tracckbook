@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency, vibrate } from '../lib/utils';
+import { InAppSelect } from './InAppSelect';
 
 interface SaaSImportsProps {
   theme: 'light' | 'dark';
@@ -279,19 +280,21 @@ export default function SaaSImports({
               <label className="text-[10px] uppercase font-semibold tracking-wider text-zinc-400 dark:text-zinc-550">
                 Target Cashbook Workspace Destination
               </label>
-              <select
+              <InAppSelect
+                id="target-cashbook-import-select"
                 value={selectedBookId}
-                onChange={(e) => setSelectedBookId(e.target.value)}
-                className={cn(
+                onChange={(val) => setSelectedBookId(val)}
+                options={[
+                  { value: '', label: '-- Create New Cashbook --' },
+                  ...books.map(b => ({ value: b.id, label: b.name }))
+                ]}
+                theme={theme}
+                size="md"
+                triggerClassName={cn(
                   "w-full px-3 py-2 text-xs rounded-sm border outline-none font-semibold focus:border-emerald-550 focus:ring-1 focus:ring-emerald-550",
                   theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-zinc-200 text-zinc-800"
                 )}
-              >
-                <option value="">-- Create New Cashbook --</option>
-                {books.map(b => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
+              />
             </div>
 
             {/* Action Bar */}

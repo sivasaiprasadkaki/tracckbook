@@ -7,11 +7,19 @@
  */
 
 // Native Android Keystore Bridge Interface (if provided by Android WebView)
-interface AndroidBridge {
+export interface AndroidBridge {
   hasSecureMpin?: (userId: string) => boolean;
   saveSecureMpin?: (userId: string, hash: string) => boolean;
   getSecureMpin?: (userId: string) => string | null;
   removeSecureMpin?: (userId: string) => boolean;
+  signInWithGoogle?: (options?: string) => string | boolean | Promise<string | boolean>;
+  isGoogleAuthSupported?: () => boolean | Promise<boolean>;
+  isBiometricSupported?: () => boolean | Promise<boolean>;
+  isBiometricEnabled?: () => boolean | Promise<boolean>;
+  enableBiometric?: () => boolean | Promise<boolean | { success: boolean; error?: string }>;
+  disableBiometric?: () => boolean | Promise<boolean | { success: boolean; error?: string }>;
+  openBiometricSettings?: () => void | Promise<void>;
+  exitApp?: () => void | Promise<void>;
 }
 
 declare global {

@@ -1671,11 +1671,26 @@ export class BackgroundExportManager {
         this.triggerDownload(task.fileName, blob);
         vibrateFeedback(40);
       } else {
-        alert('File not found in local db. Please run a retry.');
+        console.warn('File not found in local db for task:', taskId);
+        this.notifications = [{
+          id: 'notif_err_' + Date.now(),
+          type: 'pdf',
+          message: 'File not found in local database. Please retry the export.',
+          taskId,
+          timestamp: new Date().toISOString()
+        }, ...this.notifications];
+        this.notifyListeners();
       }
     } catch (err) {
-      console.error(err);
-      alert('Error loading file from DB');
+      console.error('Error loading file from DB:', err);
+      this.notifications = [{
+        id: 'notif_err_' + Date.now(),
+        type: 'pdf',
+        message: 'Error loading file from local cache.',
+        taskId,
+        timestamp: new Date().toISOString()
+      }, ...this.notifications];
+      this.notifyListeners();
     }
   }
 

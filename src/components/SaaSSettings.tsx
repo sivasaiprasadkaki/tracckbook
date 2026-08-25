@@ -22,6 +22,7 @@ import { motion } from 'motion/react';
 import { cn, vibrate } from '../lib/utils';
 import { ALL_ROLES, ROLE_DEFINITIONS } from '../lib/rbac';
 import RolesPermissionsModal from './RolesPermissionsModal';
+import { InAppDialog, DialogOptions } from './InAppDialog';
 
 interface SaaSSettingsProps {
   theme: 'light' | 'dark';
@@ -78,7 +79,11 @@ export default function SaaSSettings({
     e.preventDefault();
     vibrate(15);
     onUpdateUserName(nameInput);
-    alert('Profile name updated successfully!');
+    setInAppDialog({
+      title: 'Profile Updated',
+      message: 'Profile name updated successfully!',
+      type: 'success'
+    });
   };
 
   const handleLinkPhoneSubmit = async (e: React.FormEvent) => {
@@ -138,6 +143,7 @@ export default function SaaSSettings({
   };
 
   const [showRolesModal, setShowRolesModal] = useState(false);
+  const [inAppDialog, setInAppDialog] = useState<DialogOptions | null>(null);
 
   const tabs = [
     { id: 'profile', label: 'User Profile', icon: User },
@@ -488,9 +494,17 @@ export default function SaaSSettings({
                   <button
                     onClick={() => {
                       vibrate([100, 50, 100]);
-                      if (confirm("Are you absolutely sure? This will unregister offline databases, clear cache, wipe locally saved credentials, and perform a hard application reload.")) {
-                        clearAllAppData();
-                      }
+                      setInAppDialog({
+                        title: "Clear Cache & Flush Databases?",
+                        message: "Are you absolutely sure? This will unregister offline databases, clear cache, wipe locally saved credentials, and perform a hard application reload.",
+                        type: "warning",
+                        showCancel: true,
+                        confirmText: "Flush & Reload",
+                        cancelText: "Cancel",
+                        onConfirm: () => {
+                          clearAllAppData();
+                        }
+                      });
                     }}
                     className="py-2 px-4.5 border border-rose-500 hover:bg-rose-500 hover:text-white text-rose-500 rounded-sm text-xs font-semibold transition-all cursor-pointer active:scale-95 duration-150"
                   >
@@ -639,6 +653,12 @@ export default function SaaSSettings({
 
       </div>
 
+      <InAppDialog
+        isOpen={Boolean(inAppDialog)}
+        options={inAppDialog}
+        onClose={() => setInAppDialog(null)}
+        theme={theme}
+      />
     </div>
   );
 }

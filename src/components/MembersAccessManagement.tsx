@@ -34,6 +34,8 @@ import {
 } from '../lib/rbac';
 import { supabase } from '../lib/supabase';
 import RolesPermissionsModal from './RolesPermissionsModal';
+import { InAppSelect } from './InAppSelect';
+import { InAppDialog, DialogOptions } from './InAppDialog';
 
 interface MembersAccessManagementProps {
   cashbookId: string;
@@ -97,6 +99,7 @@ export default function MembersAccessManagement({
 
   const [activeTab, setActiveTab] = useState<'members' | 'audit'>('members');
   const [searchQuery, setSearchQuery] = useState('');
+  const [inAppDialog, setInAppDialog] = useState<DialogOptions | null>(null);
   
   // Real-time server sync function
   const loadMembersData = async () => {
@@ -296,7 +299,11 @@ export default function MembersAccessManagement({
     vibrate(15);
 
     if (memberToRemove.role === 'Primary Admin') {
-      alert("Primary Admin cannot be removed.");
+      setInAppDialog({
+        title: "Access Restricted",
+        message: "Primary Admin cannot be removed.",
+        type: "warning"
+      });
       setMemberToRemove(null);
       return;
     }
@@ -1019,17 +1026,15 @@ export default function MembersAccessManagement({
 
                 <div className={cn("p-3 rounded-xl border space-y-1", theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-zinc-50 border-zinc-200")}>
                   <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">New Role</p>
-                  <select
+                  <InAppSelect
+                    id="member-new-role-select"
                     value={pendingRoleChange.newRole}
-                    onChange={(e) => setPendingRoleChange({ ...pendingRoleChange, newRole: e.target.value as Role })}
-                    className="w-full text-xs font-extrabold text-emerald-500 bg-transparent outline-none cursor-pointer"
-                  >
-                    {ALL_ROLES.filter(r => r !== 'Primary Admin').map(r => (
-                      <option key={r} value={r} className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
-                        {r}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setPendingRoleChange({ ...pendingRoleChange, newRole: val as Role })}
+                    options={ALL_ROLES.filter(r => r !== 'Primary Admin')}
+                    theme={theme}
+                    size="sm"
+                    triggerClassName="w-full text-xs font-extrabold text-emerald-500 bg-transparent border-0 p-0 shadow-none hover:bg-transparent"
+                  />
                 </div>
               </div>
 
@@ -1503,6 +1508,13 @@ export default function MembersAccessManagement({
         onClose={() => setShowRolesModal(false)}
         theme={theme}
         initialRole={rolesModalRole}
+      />
+
+      <InAppDialog
+        isOpen={Boolean(inAppDialog)}
+        options={inAppDialog}
+        onClose={() => setInAppDialog(null)}
+        theme={theme}
       />
     </div>
   );

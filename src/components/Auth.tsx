@@ -24,6 +24,7 @@ import { markSessionUnlocked } from '../services/mpinSecurityService';
 import DesktopSignIn from './DesktopSignIn';
 import DesktopSignUp from './DesktopSignUp';
 import DesktopForgot from './DesktopForgot';
+import { handleUniversalGoogleLogin } from '../services/nativeGoogleAuthService';
 
 type AuthMode = 'signin' | 'signup' | 'forgot';
 
@@ -295,31 +296,30 @@ export default function Auth({
       setError('Supabase is not configured.');
       return;
     }
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const redirectTo = 'https://trackbook.xyz';
-      console.log("OAuth redirect:", redirectTo);
-      
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectTo
+
+    await handleUniversalGoogleLogin({
+      redirectTo: typeof window !== 'undefined' ? window.location.origin : 'https://trackbook.xyz',
+      onStart: () => {
+        setLoading(true);
+        setError(null);
+        setSuccess(null);
+      },
+      onSuccess: (session) => {
+        setLoading(false);
+        setSuccess('Logged in successfully with Google!');
+        if (session?.user?.id) {
+          markSessionUnlocked(session.user.id);
         }
-      });
-      
-      if (data?.url) {
-        console.log("Exact URL being sent to Google OAuth:", data.url);
+        navigate('/cashbooks', { replace: true });
+      },
+      onError: (errorMessage) => {
+        setLoading(false);
+        setError(errorMessage || 'Google Sign-In failed.');
+      },
+      onCancelled: () => {
+        setLoading(false);
       }
-      
-      if (error) throw error;
-    } catch (err: any) {
-      console.error('Google Sign-In failed:', err);
-      setError(err.message || 'Google Sign-In failed.');
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   const handleDemoLogin = async () => {

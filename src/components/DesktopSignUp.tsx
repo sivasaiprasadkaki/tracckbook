@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { InAppDialog, DialogOptions } from './InAppDialog';
 
 interface DesktopSignUpProps {
   fullName: string;
@@ -45,6 +46,7 @@ export default function DesktopSignUp({
   navigate
 }: DesktopSignUpProps) {
   const [agreedToTerms, setAgreedToTerms] = useState(true);
+  const [inAppDialog, setInAppDialog] = useState<DialogOptions | null>(null);
 
   const reqs = [
     { label: '6+ characters', met: password.length >= 6 },
@@ -56,7 +58,11 @@ export default function DesktopSignUp({
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!agreedToTerms) {
-      alert('Please agree to the Terms of Service and Privacy Policy to continue.');
+      setInAppDialog({
+        title: 'Terms of Service',
+        message: 'Please agree to the Terms of Service and Privacy Policy to continue.',
+        type: 'warning'
+      });
       return;
     }
     handleAuth(e);
@@ -354,6 +360,13 @@ export default function DesktopSignUp({
           </p>
         </div>
       </div>
+
+      <InAppDialog
+        isOpen={Boolean(inAppDialog)}
+        options={inAppDialog}
+        onClose={() => setInAppDialog(null)}
+        theme="light"
+      />
     </div>
   );
 }

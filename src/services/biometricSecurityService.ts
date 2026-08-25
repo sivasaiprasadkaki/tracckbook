@@ -17,6 +17,8 @@ export interface TrackBookAndroidBridge {
   enableBiometric?: () => boolean | Promise<boolean | { success: boolean; error?: string }>;
   disableBiometric?: () => boolean | Promise<boolean | { success: boolean; error?: string }>;
   openBiometricSettings?: () => void | Promise<void>;
+  signInWithGoogle?: (options?: string) => string | boolean | Promise<string | boolean>;
+  isGoogleAuthSupported?: () => boolean | Promise<boolean>;
   exitApp?: () => void | Promise<void>;
 }
 

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, vibrate } from '../lib/utils';
+import { InAppSelect } from './InAppSelect';
 
 interface SaaSSharedEntriesProps {
   theme: 'light' | 'dark';
@@ -103,20 +104,21 @@ export default function SaaSSharedEntries({
               <label className="text-[10px] uppercase font-semibold tracking-wider text-zinc-400 dark:text-zinc-500">
                 Select Cashbook
               </label>
-              <select
-                required
+              <InAppSelect
+                id="shared-entries-cashbook-select"
                 value={selectedBookId}
-                onChange={(e) => setSelectedBookId(e.target.value)}
-                className={cn(
+                onChange={(val) => setSelectedBookId(val)}
+                options={[
+                  { value: '', label: '-- Select Cashbook --' },
+                  ...books.map(b => ({ value: b.id, label: b.name }))
+                ]}
+                theme={theme}
+                size="md"
+                triggerClassName={cn(
                   "w-full px-3 py-2 text-xs rounded-sm border outline-none font-semibold",
                   theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-zinc-200 text-zinc-850"
                 )}
-              >
-                <option value="">-- Select Cashbook --</option>
-                {books.map(b => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
+              />
             </div>
 
             {/* Select Expiry */}
@@ -124,19 +126,23 @@ export default function SaaSSharedEntries({
               <label className="text-[10px] uppercase font-semibold tracking-wider text-zinc-400 dark:text-zinc-500">
                 Code Expiry Duration
               </label>
-              <select
+              <InAppSelect
+                id="shared-entries-expiry-select"
                 value={expiryHours}
-                onChange={(e) => setExpiryHours(e.target.value)}
-                className={cn(
+                onChange={(val) => setExpiryHours(val)}
+                options={[
+                  { value: '2', label: '2 Hours (Highly Secure)' },
+                  { value: '24', label: '24 Hours' },
+                  { value: '48', label: '48 Hours' },
+                  { value: '168', label: '7 Days' },
+                ]}
+                theme={theme}
+                size="md"
+                triggerClassName={cn(
                   "w-full px-3 py-2 text-xs rounded-sm border outline-none font-semibold",
                   theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-zinc-200 text-zinc-850"
                 )}
-              >
-                <option value="2">2 Hours (Highly Secure)</option>
-                <option value="24">24 Hours</option>
-                <option value="48">48 Hours</option>
-                <option value="168">7 Days</option>
-              </select>
+              />
             </div>
 
             <button

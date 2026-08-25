@@ -26,6 +26,7 @@ import {
   Users
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { InAppDialog, DialogOptions } from '../components/InAppDialog';
 
 interface AdminStatCardProps {
   title: string;
@@ -92,6 +93,7 @@ export default function AdminPortal() {
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [inAppDialog, setInAppDialog] = useState<DialogOptions | null>(null);
 
   // Stats Counters
   const [totalCashbooks, setTotalCashbooks] = useState<number | string>('Fetching...');
@@ -273,16 +275,28 @@ export default function AdminPortal() {
 
   // Clear App local storages
   const wipeSandboxedStorage = () => {
-    if (confirm("Wipe client cache but retain sessions?")) {
-      const savedTheme = localStorage.getItem('theme');
-      const savedAdmin = sessionStorage.getItem('admin_session');
-      localStorage.clear();
-      sessionStorage.clear();
-      if (savedTheme) localStorage.setItem('theme', savedTheme);
-      if (savedAdmin) sessionStorage.setItem('admin_session', savedAdmin);
-      addLog("Purged index lists and local cached preferences cleanly.");
-      alert("Cached storage arrays clean! Credentials maintained.");
-    }
+    setInAppDialog({
+      title: "Wipe Local Storage?",
+      message: "Wipe client cache but retain sessions?",
+      type: "warning",
+      showCancel: true,
+      confirmText: "Wipe Cache",
+      cancelText: "Cancel",
+      onConfirm: () => {
+        const savedTheme = localStorage.getItem('theme');
+        const savedAdmin = sessionStorage.getItem('admin_session');
+        localStorage.clear();
+        sessionStorage.clear();
+        if (savedTheme) localStorage.setItem('theme', savedTheme);
+        if (savedAdmin) sessionStorage.setItem('admin_session', savedAdmin);
+        addLog("Purged index lists and local cached preferences cleanly.");
+        setInAppDialog({
+          title: "Storage Cleaned",
+          message: "Cached storage arrays clean! Credentials maintained.",
+          type: "success"
+        });
+      }
+    });
   };
 
   // Filter lists based on search
@@ -763,6 +777,13 @@ export default function AdminPortal() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <InAppDialog
+        isOpen={Boolean(inAppDialog)}
+        options={inAppDialog}
+        onClose={() => setInAppDialog(null)}
+        theme={theme}
+      />
     </div>
   );
 }

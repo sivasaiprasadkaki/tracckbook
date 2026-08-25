@@ -20,6 +20,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, vibrate } from '../lib/utils';
 import { ExportTask } from '../services/exportManager';
+import { InAppDialog, DialogOptions } from './InAppDialog';
 
 interface SaaSProcessingCenterProps {
   exportTasks: ExportTask[];
@@ -41,6 +42,7 @@ export default function SaaSProcessingCenter({
 
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [inAppDialog, setInAppDialog] = useState<DialogOptions | null>(null);
 
   const activeTasks = exportTasks.filter(t => !t.isArchived);
   const archivedTasks = exportTasks.filter(t => t.isArchived);
@@ -62,10 +64,14 @@ export default function SaaSProcessingCenter({
     return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true });
   };
 
-  // Mock retry action to simulate starting job again (safe as we don't break existing Supabase state)
+  // Retry action to simulate starting job again
   const handleRetryTask = (task: ExportTask) => {
     vibrate(15);
-    alert(`Job "${task.fileName}" has been re-queued for processing in the background.`);
+    setInAppDialog({
+      title: "Job Re-queued",
+      message: `Job "${task.fileName}" has been re-queued for processing in the background.`,
+      type: "info"
+    });
   };
 
   return (
@@ -299,6 +305,12 @@ export default function SaaSProcessingCenter({
         </div>
       )}
 
+      <InAppDialog
+        isOpen={Boolean(inAppDialog)}
+        options={inAppDialog}
+        onClose={() => setInAppDialog(null)}
+        theme={theme}
+      />
     </div>
   );
 }

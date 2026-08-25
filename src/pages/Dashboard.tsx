@@ -108,6 +108,8 @@ import { clearSessionUnlocked } from '../services/mpinSecurityService';
 import { ShareWhatsAppModal } from '../components/ShareWhatsAppModal';
 import { addPdfBrandingFooter } from '../utils/pdfBranding';
 import { exitNativeApp } from '../services/biometricSecurityService';
+import { InAppSelect } from '../components/InAppSelect';
+import { InAppDialog, DialogOptions } from '../components/InAppDialog';
 
 interface TimelineStep {
   id: string;
@@ -3001,6 +3003,27 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [customCategory, setCustomCategory] = useState('');
   const [mode, setMode] = useState('Cash');
   const [customMode, setCustomMode] = useState('');
+  const [inAppDialog, setInAppDialog] = useState<DialogOptions | null>(null);
+
+  const showInAppAlert = useCallback((title: string, message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
+    setInAppDialog({ title, message, type });
+  }, []);
+
+  const activeCategoryOptions = useMemo(() => {
+    const list = [...CATEGORIES];
+    if (category && !list.includes(category) && category !== 'Custom') {
+      list.splice(list.length - 1, 0, category);
+    }
+    return list;
+  }, [category]);
+
+  const activeModeOptions = useMemo(() => {
+    const list = [...MODES];
+    if (mode && !list.includes(mode) && mode !== 'Custom') {
+      list.splice(list.length - 1, 0, mode);
+    }
+    return list;
+  }, [mode]);
   const safeToISOString = (date: Date | string | number) => {
     try {
       const d = new Date(date);
@@ -6205,7 +6228,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       await new Promise(r => setTimeout(r, 200));
     } catch (error) {
       console.error("PDF Export failed:", error);
-      alert("Failed to download PDF. Please try again.");
+      showInAppAlert("PDF Export Failed", "Failed to generate or download PDF. Please try again.", "error");
     } finally {
       setReportLoading(null);
       setShowReportsMenu(false);
@@ -7868,33 +7891,37 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       )}
                     </>
                   )}
-                  <div className="relative min-w-[120px]">
-                    <select 
+                  <div className="relative min-w-[130px]">
+                    <InAppSelect
+                      id="filter-transaction-type-desktop"
                       value={transactionTypeFilter}
-                      onChange={(e) => setTransactionTypeFilter(e.target.value as any)}
-                      className={cn(
-                        "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold appearance-none",
+                      onChange={(val) => setTransactionTypeFilter(val as any)}
+                      options={[
+                        { value: 'all', label: 'All Types' },
+                        { value: 'in', label: 'Cash In' },
+                        { value: 'out', label: 'Cash Out' },
+                      ]}
+                      theme={theme}
+                      size="md"
+                      triggerClassName={cn(
+                        "w-full px-3.5 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold",
                         theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
                       )}
-                    >
-                      <option value="all">All Types</option>
-                      <option value="in">Cash In</option>
-                      <option value="out">Cash Out</option>
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                    />
                   </div>
                   <div className="relative min-w-[140px]">
-                    <select 
+                    <InAppSelect
+                      id="filter-transaction-duration-desktop"
                       value={transactionDurationFilter}
-                      onChange={(e) => setTransactionDurationFilter(e.target.value)}
-                      className={cn(
-                        "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold appearance-none",
+                      onChange={(val) => setTransactionDurationFilter(val)}
+                      options={DURATIONS.map(d => ({ value: d, label: d }))}
+                      theme={theme}
+                      size="md"
+                      triggerClassName={cn(
+                        "w-full px-3.5 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold",
                         theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
                       )}
-                    >
-                      {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                    />
                   </div>
                   {transactionDurationFilter === 'Custom' && (
                     <div className="relative min-w-[150px]">
@@ -7918,32 +7945,36 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   {/* ROW 3: [All Types] [All] */}
                   <div className="grid grid-cols-2 gap-2.5 w-full">
                     <div className="relative w-full">
-                      <select 
+                      <InAppSelect
+                        id="filter-transaction-type-mobile"
                         value={transactionTypeFilter}
-                        onChange={(e) => setTransactionTypeFilter(e.target.value as any)}
-                        className={cn(
-                          "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-xs font-bold appearance-none",
+                        onChange={(val) => setTransactionTypeFilter(val as any)}
+                        options={[
+                          { value: 'all', label: 'All Types' },
+                          { value: 'in', label: 'Cash In' },
+                          { value: 'out', label: 'Cash Out' },
+                        ]}
+                        theme={theme}
+                        size="md"
+                        triggerClassName={cn(
+                          "w-full px-3 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-xs font-bold",
                           theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
                         )}
-                      >
-                        <option value="all">All Types</option>
-                        <option value="in">Cash In</option>
-                        <option value="out">Cash Out</option>
-                      </select>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                      />
                     </div>
                     <div className="relative w-full">
-                      <select 
+                      <InAppSelect
+                        id="filter-transaction-duration-mobile"
                         value={transactionDurationFilter}
-                        onChange={(e) => setTransactionDurationFilter(e.target.value)}
-                        className={cn(
-                          "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-xs font-bold appearance-none",
+                        onChange={(val) => setTransactionDurationFilter(val)}
+                        options={DURATIONS.map(d => ({ value: d, label: d }))}
+                        theme={theme}
+                        size="md"
+                        triggerClassName={cn(
+                          "w-full px-3 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-xs font-bold",
                           theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
                         )}
-                      >
-                        {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
-                      </select>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                      />
                     </div>
                   </div>
                   {transactionDurationFilter === 'Custom' && (
@@ -8935,35 +8966,37 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           {/* Bill Type Category selection */}
                           <div className="space-y-1.5 col-span-1">
                             <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Bill Type</label>
-                            <select 
+                            <InAppSelect
+                              id="ai-quick-bill-type-select"
                               value={aiBillType}
-                              onChange={(e) => setAiBillType(e.target.value)}
-                              className={cn(
-                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors appearance-none cursor-pointer",
+                              onChange={(val) => setAiBillType(val)}
+                              options={["Restaurant", "Food", "Taxi", "Cab", "Bus", "Train", "Flight", "Fuel", "Groceries", "Medical", "Shopping", "Utilities", "Internet", "Recharge", "Hotel", "Entertainment"]}
+                              theme={theme}
+                              size="md"
+                              searchable={true}
+                              triggerClassName={cn(
+                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors",
                                 theme === 'dark' ? "border-zinc-800 bg-zinc-900 text-white" : "border-slate-200 bg-slate-50 text-slate-900"
                               )}
-                            >
-                              {["Restaurant", "Food", "Taxi", "Cab", "Bus", "Train", "Flight", "Fuel", "Groceries", "Medical", "Shopping", "Utilities", "Internet", "Recharge", "Hotel", "Entertainment"].map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                            />
                           </div>
 
                           {/* Ledger Category selection */}
                           <div className="space-y-1.5 col-span-1">
                             <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Category</label>
-                            <select 
+                            <InAppSelect
+                              id="ai-quick-category-select"
                               value={aiCategory}
-                              onChange={(e) => setAiCategory(e.target.value)}
-                              className={cn(
-                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors appearance-none cursor-pointer",
+                              onChange={(val) => setAiCategory(val)}
+                              options={["Food", "Transport", "Utilities", "Shopping", "Entertainment", "Health", "Education", "Salary", "Other"]}
+                              theme={theme}
+                              size="md"
+                              searchable={true}
+                              triggerClassName={cn(
+                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors",
                                 theme === 'dark' ? "border-zinc-800 bg-zinc-900 text-white" : "border-slate-200 bg-slate-50 text-slate-900"
                               )}
-                            >
-                              {["Food", "Transport", "Utilities", "Shopping", "Entertainment", "Health", "Education", "Salary", "Other"].map(c => (
-                                <option key={c} value={c}>{c}</option>
-                              ))}
-                            </select>
+                            />
                           </div>
 
                           {/* Description field */}
@@ -9217,7 +9250,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     onClick={() => {
                       if (activeBook) {
                         if (!filteredTransactions || filteredTransactions.length === 0) {
-                          alert('No transactions found to export in this cashbook.');
+                          showInAppAlert('No Transactions', 'No transactions found to export in this cashbook.', 'info');
                           return;
                         }
                         backgroundExportManager.enqueueExcelTask(activeBook.id, activeBook.name, filteredTransactions);
@@ -9242,7 +9275,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     onClick={() => {
                       if (activeBook) {
                         if (!filteredTransactions || filteredTransactions.length === 0) {
-                          alert('No transactions found to export in this cashbook.');
+                          showInAppAlert('No Transactions', 'No transactions found to export in this cashbook.', 'info');
                           return;
                         }
                         backgroundExportManager.enqueueTask(activeBook.id, activeBook.name, filteredTransactions, true);
@@ -10404,35 +10437,37 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           {/* Bill Type Category selection */}
                           <div className="space-y-1.5 col-span-1">
                             <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Bill Type</label>
-                            <select 
+                            <InAppSelect
+                              id="ai-modal-bill-type-select"
                               value={aiBillType}
-                              onChange={(e) => setAiBillType(e.target.value)}
-                              className={cn(
-                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors appearance-none cursor-pointer",
+                              onChange={(val) => setAiBillType(val)}
+                              options={["Restaurant", "Food", "Taxi", "Cab", "Bus", "Train", "Flight", "Fuel", "Groceries", "Medical", "Shopping", "Utilities", "Internet", "Recharge", "Hotel", "Entertainment"]}
+                              theme={theme}
+                              size="md"
+                              searchable={true}
+                              triggerClassName={cn(
+                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors",
                                 theme === 'dark' ? "border-zinc-800 bg-zinc-900 text-white" : "border-slate-200 bg-slate-50 text-slate-900"
                               )}
-                            >
-                              {["Restaurant", "Food", "Taxi", "Cab", "Bus", "Train", "Flight", "Fuel", "Groceries", "Medical", "Shopping", "Utilities", "Internet", "Recharge", "Hotel", "Entertainment"].map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                            />
                           </div>
 
                           {/* Ledger Category selection */}
                           <div className="space-y-1.5 col-span-1">
                             <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Category</label>
-                            <select 
+                            <InAppSelect
+                              id="ai-modal-category-select"
                               value={aiCategory}
-                              onChange={(e) => setAiCategory(e.target.value)}
-                              className={cn(
-                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors appearance-none cursor-pointer",
+                              onChange={(val) => setAiCategory(val)}
+                              options={["Food", "Transport", "Utilities", "Shopping", "Entertainment", "Health", "Education", "Salary", "Other"]}
+                              theme={theme}
+                              size="md"
+                              searchable={true}
+                              triggerClassName={cn(
+                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors",
                                 theme === 'dark' ? "border-zinc-800 bg-zinc-900 text-white" : "border-slate-200 bg-slate-50 text-slate-900"
                               )}
-                            >
-                              {["Food", "Transport", "Utilities", "Shopping", "Entertainment", "Health", "Education", "Salary", "Other"].map(c => (
-                                <option key={c} value={c}>{c}</option>
-                              ))}
-                            </select>
+                            />
                           </div>
 
                           {/* Description field */}
@@ -11566,20 +11601,19 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</label>
                       <div className="space-y-2">
-                        <div className="relative">
-                          <select
-                            value={category}
-                            onChange={(e) => setCategory(e.target.value)}
-                            tabIndex={2}
-                            className={cn(
-                              "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium appearance-none transition-colors duration-300",
-                              theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
-                            )}
-                          >
-                            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                          </select>
-                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
-                        </div>
+                        <InAppSelect
+                          id="cash-entry-category-select"
+                          value={category}
+                          onChange={(val) => setCategory(val)}
+                          options={activeCategoryOptions}
+                          theme={theme}
+                          size="lg"
+                          tabIndex={2}
+                          triggerClassName={cn(
+                            "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
+                            theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                          )}
+                        />
                         {category === 'Custom' && (
                           <input
                             type="text"
@@ -11599,20 +11633,19 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Mode</label>
                       <div className="space-y-2">
-                        <div className="relative">
-                          <select
-                            value={mode}
-                            onChange={(e) => setMode(e.target.value)}
-                            tabIndex={3}
-                            className={cn(
-                              "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium appearance-none transition-colors duration-300",
-                              theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
-                            )}
-                          >
-                            {MODES.map(m => <option key={m} value={m}>{m}</option>)}
-                          </select>
-                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
-                        </div>
+                        <InAppSelect
+                          id="cash-entry-mode-select"
+                          value={mode}
+                          onChange={(val) => setMode(val)}
+                          options={activeModeOptions}
+                          theme={theme}
+                          size="lg"
+                          tabIndex={3}
+                          triggerClassName={cn(
+                            "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
+                            theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                          )}
+                        />
                         {mode === 'Custom' && (
                           <input
                             type="text"
@@ -12848,34 +12881,38 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   {/* Category Select */}
                   <div className="space-y-1 text-left">
                     <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Category</label>
-                    <select
+                    <InAppSelect
+                      id="merge-category-select"
                       value={mergeCategory}
-                      onChange={(e) => setMergeCategory(e.target.value)}
-                      className={cn(
-                        "w-full px-4 h-11 border-2 rounded-xl outline-none focus:border-indigo-500 transition-all text-sm font-semibold appearance-none bg-no-repeat bg-[right_12px_center]",
+                      onChange={(val) => setMergeCategory(val)}
+                      options={CATEGORIES}
+                      theme={theme}
+                      size="md"
+                      triggerClassName={cn(
+                        "w-full px-4 h-11 border-2 rounded-xl outline-none focus:border-indigo-500 transition-all text-sm font-semibold",
                         theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-slate-50 border-slate-100 text-black"
                       )}
-                    >
-                      {CATEGORIES.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   {/* Transaction Type Select */}
                   <div className="space-y-1 text-left">
                     <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Type</label>
-                    <select
+                    <InAppSelect
+                      id="merge-type-select"
                       value={mergeType}
-                      onChange={(e) => setMergeType(e.target.value as any)}
-                      className={cn(
-                        "w-full px-4 h-11 border-2 rounded-xl outline-none focus:border-indigo-500 transition-all text-sm font-semibold appearance-none bg-no-repeat bg-[right_12px_center]",
+                      onChange={(val) => setMergeType(val as any)}
+                      options={[
+                        { value: 'out', label: 'Cash Out (-)' },
+                        { value: 'in', label: 'Cash In (+)' },
+                      ]}
+                      theme={theme}
+                      size="md"
+                      triggerClassName={cn(
+                        "w-full px-4 h-11 border-2 rounded-xl outline-none focus:border-indigo-500 transition-all text-sm font-semibold",
                         theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-slate-50 border-slate-100 text-black"
                       )}
-                    >
-                      <option value="out">Cash Out (-)</option>
-                      <option value="in">Cash In (+)</option>
-                    </select>
+                    />
                   </div>
                 </div>
 
@@ -13884,6 +13921,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           </div>
         )}
       </AnimatePresence>
+
+      {/* Global In-App Dialog / Alert */}
+      <InAppDialog
+        isOpen={Boolean(inAppDialog)}
+        options={inAppDialog}
+        onClose={() => setInAppDialog(null)}
+        theme={theme}
+      />
     </div>
   );
 }
