@@ -1,8 +1,8 @@
 {
-  "version": "1.2.5",
+  "version": "1.2.6",
   "releaseNotes": [
-    "Ultra-fast background PDF compilation & optimization workers",
-    "Staggered wave load transitions for cashbook transactions",
+    "Resolved character encoding corruption in phone linking state",
+    "Enhanced AI multiple receipt review workflow with discard & next",
     "Real-time backup caching to eliminate layout jumps & empty flashes"
   ]
 }
