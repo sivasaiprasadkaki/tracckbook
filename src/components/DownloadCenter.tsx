@@ -358,7 +358,12 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                         if (notif.type === 'ai') {
                           if (backgroundExportManager.onReviewAiScan) {
                             backgroundExportManager.getAiScanResults(notif.taskId).then(results => {
-                              backgroundExportManager.onReviewAiScan?.(results);
+                              if (!results || results.length === 0) {
+                                triggerToast("All receipts from this scan have already been saved.", "info");
+                                return;
+                              }
+                              backgroundExportManager.onReviewAiScan?.(results, notif.taskId);
+                              setIsOpen(false);
                             });
                           }
                         } else {
@@ -724,7 +729,12 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                                 if (taskType === 'ai') {
                                   if (backgroundExportManager.onReviewAiScan) {
                                     backgroundExportManager.getAiScanResults(task.id).then(results => {
-                                      backgroundExportManager.onReviewAiScan?.(results);
+                                      if (!results || results.length === 0) {
+                                        triggerToast("All receipts from this scan have already been saved.", "info");
+                                        return;
+                                      }
+                                      backgroundExportManager.onReviewAiScan?.(results, task.id);
+                                      setIsOpen(false);
                                     });
                                   }
                                 } else {

@@ -339,7 +339,7 @@ export class BackgroundExportManager {
   private isProcessing = false;
   private cloudName = 'dd2kcpetc';
   
-  public onReviewAiScan?: (results: any[]) => void;
+  public onReviewAiScan?: (results: any[], taskId?: string) => void;
   private notifications: JobNotification[] = [];
   public networkState: 'good' | 'slow' | 'offline' = 'good';
 
@@ -1648,6 +1648,22 @@ export class BackgroundExportManager {
   async getAiScanResults(taskId: string): Promise<any[]> {
     const results = await this.db.getPayload(taskId + '_results');
     return results || [];
+  }
+
+  // Update remaining AI scan results (e.g. after partial saves or discards)
+  async updateAiScanResults(taskId: string, results: any[]): Promise<void> {
+    await this.db.savePayload(taskId + '_results', results);
+    const task = this.tasks.find(t => t.id === taskId);
+    if (task) {
+      task.attachmentsCount = results.length;
+      if (results.length === 0) {
+        task.message = 'All receipts added to cashbook.';
+      } else {
+        task.message = `${results.length} receipt${results.length > 1 ? 's' : ''} awaiting review`;
+      }
+      await this.db.saveTask(task);
+      this.notifyListeners();
+    }
   }
 
   // Trigger web storage download on click
