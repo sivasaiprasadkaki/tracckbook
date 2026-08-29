@@ -1,16 +1,17 @@
-const CACHE_NAME = 'trackbook-v4';
+const CACHE_NAME = 'trackbook-v5';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icon.svg?v=5'
+  '/icon.svg?v=6'
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(ASSETS_TO_CACHE);
-    }).then(() => self.skipWaiting())
+    })
   );
 });
 
@@ -29,16 +30,35 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Use Network First strategy for everything
-  // This ensures the latest version is always requested first
+  // Only intercept GET requests - Cache API throws error on POST/PUT/DELETE
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  const url = new URL(event.request.url);
+  // Never cache API routes or dynamic external services
+  if (
+    url.pathname.startsWith('/api/') || 
+    url.hostname.includes('supabase.co') || 
+    url.hostname.includes('cloudinary.com') ||
+    url.hostname.includes('googleapis.com')
+  ) {
+    return;
+  }
+
+  // Network First strategy
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // Cache successful responses for next offline visit
-        if (response.status === 200) {
+        // Cache successful GET responses for offline fallback
+        if (response.status === 200 && event.request.method === 'GET') {
           const responseClone = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
+            try {
+              cache.put(event.request, responseClone);
+            } catch (_) {
+              // Ignore cache write errors
+            }
           });
         }
         return response;
