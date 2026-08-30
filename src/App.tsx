@@ -26,7 +26,7 @@ function lazyWithRetry(componentImport: () => Promise<any>) {
 }
 
 import Dashboard from './pages/Dashboard';
-const Login = lazyWithRetry(() => import('./pages/Login'));
+import Login from './pages/Login';
 const ResetPassword = lazyWithRetry(() => import('./pages/ResetPassword'));
 const AdminPortal = lazyWithRetry(() => import('./pages/AdminPortal'));
 const AutomationMail = lazyWithRetry(() => import('./pages/AutomationMail'));

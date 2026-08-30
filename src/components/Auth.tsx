@@ -73,6 +73,14 @@ export default function Auth({
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [isDesktop, setIsDesktop] = useState(isDesktopProp);
+  const [rememberMe, setRememberMe] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('supabase_remember_me');
+      return saved === null ? true : saved === 'true';
+    }
+    return true;
+  });
+  const [testingConnection, setTestingConnection] = useState(false);
 
   useEffect(() => {
     if (isDesktopProp) return;
@@ -97,14 +105,6 @@ export default function Auth({
     setError(null);
     setSuccess(null);
   }, [mode]);
-
-  const [rememberMe, setRememberMe] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('supabase_remember_me');
-      return saved === null ? true : saved === 'true';
-    }
-    return true;
-  });
 
   useEffect(() => {
     localStorage.setItem('supabase_remember_me', rememberMe ? 'true' : 'false');
@@ -136,8 +136,6 @@ export default function Auth({
       }
     }
   }, []);
-
-  const [testingConnection, setTestingConnection] = useState(false);
 
   const testConnection = async () => {
     if (!supabase) return;
