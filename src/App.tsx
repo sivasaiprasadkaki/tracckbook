@@ -32,6 +32,7 @@ const AdminPortal = lazyWithRetry(() => import('./pages/AdminPortal'));
 const AutomationMail = lazyWithRetry(() => import('./pages/AutomationMail'));
 const AcceptInvitePage = lazyWithRetry(() => import('./pages/AcceptInvitePage'));
 const BiometricSecurity = lazyWithRetry(() => import('./pages/BiometricSecurity'));
+const WhatsAppReports = lazyWithRetry(() => import('./pages/WhatsAppReports'));
 
 function NavigationHandler({ 
   session, 
@@ -291,6 +292,28 @@ export default function App() {
               element={
                 session ? (
                   <BiometricSecurity session={session} theme={theme} setTheme={setTheme} />
+                ) : (
+                  loading ? suspenseFallback : <Navigate to="/login" replace />
+                )
+              } 
+            />
+
+            {/* WhatsApp Reports Separate Route */}
+            <Route 
+              path="/whatsapp-reports" 
+              element={
+                session ? (
+                  <WhatsAppReports session={session} theme={theme} setTheme={setTheme} />
+                ) : (
+                  loading ? suspenseFallback : <Navigate to="/login" replace />
+                )
+              } 
+            />
+            <Route 
+              path="/cashbooks/:bookSlug/whatsapp-reports" 
+              element={
+                session ? (
+                  <WhatsAppReports session={session} theme={theme} setTheme={setTheme} />
                 ) : (
                   loading ? suspenseFallback : <Navigate to="/login" replace />
                 )

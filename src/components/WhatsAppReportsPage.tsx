@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
   Construction,
@@ -22,6 +22,31 @@ export function WhatsAppReportsPage({
   theme,
   onBack
 }: WhatsAppReportsPageProps) {
+  // Smoothly animated progress slider from 0% to 89% on load
+  const [animatedProgress, setAnimatedProgress] = useState(0);
+
+  useEffect(() => {
+    setAnimatedProgress(0);
+    const targetProgress = 89;
+    const duration = 1200; // 1.2s smooth ease-out
+    const startTime = performance.now();
+
+    const animate = (currentTime: number) => {
+      const elapsed = currentTime - startTime;
+      const progressRatio = Math.min(elapsed / duration, 1);
+      const easeProgress = 1 - Math.pow(1 - progressRatio, 3);
+      const currentVal = Math.round(easeProgress * targetProgress);
+      setAnimatedProgress(currentVal);
+
+      if (progressRatio < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+
+    const rafId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
+
   return (
     <div className="space-y-6 max-w-4xl mx-auto py-4 sm:py-6 px-4 pb-20 animate-in fade-in duration-200">
       {/* Top Navigation Header */}
@@ -42,7 +67,7 @@ export function WhatsAppReportsPage({
 
         <div className="flex items-center gap-2">
           <span className="px-2 py-0.5 text-[10px] font-black uppercase bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 rounded tracking-wider">
-            UNDER CONSTRUCTION
+            {animatedProgress}% BUILT
           </span>
           <span className="text-xs font-black uppercase tracking-wider text-slate-400 dark:text-zinc-500 hidden sm:inline">
             WhatsApp Reports
@@ -80,7 +105,7 @@ export function WhatsAppReportsPage({
           </div>
         </div>
 
-        {/* Build Progress Card - 89% Complete */}
+        {/* Build Progress Card with Animated Slider */}
         <div className={cn(
           "p-5 sm:p-6 rounded-3xl border transition-all shadow-sm space-y-4",
           theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
@@ -94,8 +119,8 @@ export function WhatsAppReportsPage({
                 Near Completion
               </span>
             </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400">89%</span>
+            <div className="flex items-baseline gap-1 font-mono">
+              <span className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400">{animatedProgress}%</span>
               <span className="text-xs font-bold text-slate-400">/ 100%</span>
             </div>
           </div>
@@ -103,14 +128,14 @@ export function WhatsAppReportsPage({
           {/* Progress Bar */}
           <div className="w-full h-3.5 bg-slate-100 dark:bg-zinc-900 rounded-full overflow-hidden p-0.5 border border-slate-200 dark:border-zinc-800">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-amber-500 via-emerald-500 to-emerald-600 transition-all duration-700 shadow-xs"
-              style={{ width: '89%' }}
+              className="h-full rounded-full bg-gradient-to-r from-amber-500 via-emerald-500 to-emerald-600 transition-all duration-75 shadow-xs"
+              style={{ width: `${animatedProgress}%` }}
             />
           </div>
 
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
-            <span>89% built & verified</span>
-            <span>11% remaining (API finalization)</span>
+            <span>{animatedProgress}% built & verified</span>
+            <span>{Math.max(0, 100 - animatedProgress)}% remaining (API finalization)</span>
           </div>
         </div>
 
@@ -219,13 +244,13 @@ export function WhatsAppReportsPage({
                 <span>Meta WhatsApp API</span>
               </div>
               <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 shrink-0">
-                89% Built
+                {animatedProgress}% Built
               </span>
             </div>
           </div>
         </div>
 
-        {/* Bottom Actions - ONLY Back to Reports (preview flow and share via whatsapp removed) */}
+        {/* Bottom Actions */}
         <div className="pt-2 flex items-center justify-start">
           <button
             type="button"
