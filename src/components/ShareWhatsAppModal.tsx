@@ -14,7 +14,10 @@ import {
   ShieldCheck,
   Smartphone,
   ChevronRight,
-  Clock
+  Clock,
+  Construction,
+  ExternalLink,
+  Sparkles
 } from 'lucide-react';
 import { backgroundExportManager } from '../services/exportManager';
 import { supabase } from '../lib/supabase';
@@ -29,7 +32,7 @@ interface ShareWhatsAppModalProps {
   theme: 'light' | 'dark';
 }
 
-type ModalStep = 'phone' | 'select_docs' | 'confirm' | 'sending' | 'success' | 'error';
+type ModalStep = 'construction' | 'phone' | 'select_docs' | 'confirm' | 'sending' | 'success' | 'error';
 type DeliveryStatus = 'Sent' | 'Delivered' | 'Read' | 'Failed';
 
 export function ShareWhatsAppModal({
@@ -40,7 +43,7 @@ export function ShareWhatsAppModal({
   filteredTransactions,
   theme
 }: ShareWhatsAppModalProps) {
-  const [step, setStep] = useState<ModalStep>('phone');
+  const [step, setStep] = useState<ModalStep>('construction');
   const [mobileNumber, setMobileNumber] = useState('');
   const [countryCode] = useState('+91');
   
@@ -291,7 +294,7 @@ export function ShareWhatsAppModal({
   }, [isOpen, step, sentMessageIds]);
 
   const handleResetAndClose = () => {
-    setStep('phone');
+    setStep('construction');
     setMobileNumber('');
     setSelectedDocs({ excel: true, pdf: true });
     setErrorMessage(null);
@@ -320,13 +323,23 @@ export function ShareWhatsAppModal({
             theme === 'dark' ? "border-zinc-800 bg-zinc-900/50" : "border-slate-100 bg-slate-50/50"
           )}>
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
-                <MessageSquare size={18} />
+              <div className={cn(
+                "w-9 h-9 rounded-xl flex items-center justify-center shadow-xs text-white",
+                step === 'construction' ? "bg-amber-500" : "bg-emerald-600"
+              )}>
+                {step === 'construction' ? <Construction size={18} /> : <MessageSquare size={18} />}
               </div>
               <div>
-                <h3 className="font-bold text-base leading-tight">Share Reports via WhatsApp</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-base leading-tight">Share Reports to WhatsApp</h3>
+                  {step === 'construction' && (
+                    <span className="px-1.5 py-0.2 text-[9px] font-black uppercase bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 rounded tracking-wider">
+                      89% BUILT
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                  {cashbookName || 'Current Cashbook'}
+                  {cashbookName || 'Current Cashbook'} {step === 'construction' ? '• Under Construction' : ''}
                 </p>
               </div>
             </div>
@@ -341,6 +354,145 @@ export function ShareWhatsAppModal({
 
           {/* Modal Body */}
           <div className="p-6">
+            {/* STEP 0: Under Construction Board */}
+            {step === 'construction' && (
+              <div className="space-y-4">
+                {/* Construction Warning / In Progress Banner */}
+                <div className={cn(
+                  "p-4 rounded-2xl border flex items-start gap-3.5 relative overflow-hidden",
+                  theme === 'dark' 
+                    ? "bg-amber-950/25 border-amber-800/50 text-amber-200" 
+                    : "bg-amber-50/90 border-amber-200 text-amber-900"
+                )}>
+                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+                    <Construction size={20} className="stroke-[2.2]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-amber-500 text-white shadow-xs">
+                        Under Construction
+                      </span>
+                      <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                        Feature in active development
+                      </span>
+                    </div>
+                    <p className="text-xs font-semibold leading-snug">
+                      Automatic WhatsApp direct report sharing is currently being built.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Build Progress Card - 89% Complete */}
+                <div className={cn(
+                  "p-4 rounded-2xl border transition-all",
+                  theme === 'dark' ? "bg-zinc-900/60 border-zinc-800" : "bg-slate-50 border-slate-200/80"
+                )}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Build Progress
+                      </span>
+                      <span className="px-1.5 py-0.2 text-[9px] font-bold rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                        Near Completion
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-xl font-black text-emerald-600 dark:text-emerald-400">89%</span>
+                      <span className="text-xs font-bold text-slate-400">/ 100%</span>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="w-full h-3 bg-slate-200 dark:bg-zinc-800 rounded-full overflow-hidden p-0.5 border border-slate-300/60 dark:border-zinc-700">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-amber-500 via-emerald-500 to-emerald-600 transition-all duration-700"
+                      style={{ width: '89%' }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10.5px] font-medium text-slate-500 dark:text-slate-400 mt-2">
+                    <span>89% built & verified</span>
+                    <span>11% remaining (API finalization)</span>
+                  </div>
+                </div>
+
+                {/* Feature Purpose / Explanation */}
+                <div className={cn(
+                  "p-4 rounded-2xl border space-y-2.5",
+                  theme === 'dark' ? "bg-zinc-900/30 border-zinc-800/80" : "bg-white border-slate-200/80"
+                )}>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Sparkles size={14} className="text-emerald-500" />
+                    What does this feature do?
+                  </h4>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
+                    This feature allows you to send <strong>Excel spreadsheets (.xlsx)</strong> and <strong>official PDF statements</strong> for <strong>{cashbookName || 'your Cashbook'}</strong> directly to any client, partner, or accountant's WhatsApp number with one tap — completely bypassing manual downloads and phone saving.
+                  </p>
+
+                  <div className="grid grid-cols-1 gap-2 pt-1">
+                    <div className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
+                      <div className="w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5 font-black text-[10px]">
+                        ✓
+                      </div>
+                      <span><strong>Instant Delivery:</strong> Directly delivers files to any 10-digit WhatsApp mobile number.</span>
+                    </div>
+
+                    <div className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
+                      <div className="w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5 font-black text-[10px]">
+                        ✓
+                      </div>
+                      <span><strong>No Manual Re-upload:</strong> No need to download files into device storage and attach them manually.</span>
+                    </div>
+
+                    <div className="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300">
+                      <div className="w-4 h-4 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 mt-0.5 font-black text-[10px]">
+                        ✓
+                      </div>
+                      <span><strong>Live Status Tracking:</strong> Real-time delivery ticks (Sent, Delivered, and Read receipts).</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sub-components readiness checklist */}
+                <div className={cn(
+                  "p-3 rounded-xl border text-[11px] font-medium space-y-1.5",
+                  theme === 'dark' ? "bg-zinc-900/40 border-zinc-800 text-slate-400" : "bg-slate-50/70 border-slate-200 text-slate-600"
+                )}>
+                  <div className="flex items-center justify-between">
+                    <span>📊 Excel (.xlsx) Report Generator</span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">100% Ready</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>📑 PDF Statements & Receipts</span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">100% Ready</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>💬 WhatsApp Web Direct Share</span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">100% Ready (Active)</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>⚙️ Meta Cloud Direct Dispatch API</span>
+                    <span className="font-bold text-amber-500">89% Built (In Progress)</span>
+                  </div>
+                </div>
+
+                {/* Footer Actions */}
+                <div className="pt-2 flex items-center justify-end gap-2">
+                  <button
+                    onClick={handleResetAndClose}
+                    className={cn(
+                      "px-5 py-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors text-center border",
+                      theme === 'dark'
+                        ? "bg-zinc-900 border-zinc-800 hover:bg-zinc-800 text-slate-300"
+                        : "bg-white border-slate-200 hover:bg-slate-100 text-slate-700"
+                    )}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* STEP 1: Phone Number */}
             {step === 'phone' && (
               <div className="space-y-5">
@@ -398,29 +550,42 @@ export function ShareWhatsAppModal({
                   </p>
                 </div>
 
-                <div className="pt-2 flex items-center justify-end gap-2">
+                <div className="pt-2 flex items-center justify-between gap-2">
                   <button
-                    onClick={handleResetAndClose}
+                    onClick={() => setStep('construction')}
                     className={cn(
-                      "px-4 py-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors",
+                      "px-3 py-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5",
                       theme === 'dark' ? "hover:bg-zinc-900 text-slate-400" : "hover:bg-slate-100 text-slate-600"
                     )}
                   >
-                    Cancel
+                    <ArrowLeft size={13} />
+                    <span>Status Board</span>
                   </button>
-                  <button
-                    onClick={handlePhoneNext}
-                    disabled={!isValidPhone}
-                    className={cn(
-                      "px-5 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 transition-all shadow-xs cursor-pointer",
-                      isValidPhone 
-                        ? "bg-emerald-600 hover:bg-emerald-700 active:scale-95" 
-                        : "bg-slate-300 dark:bg-zinc-800 text-slate-500 dark:text-zinc-600 cursor-not-allowed opacity-60"
-                    )}
-                  >
-                    <span>Next</span>
-                    <ChevronRight size={14} />
-                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleResetAndClose}
+                      className={cn(
+                        "px-4 py-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors",
+                        theme === 'dark' ? "hover:bg-zinc-900 text-slate-400" : "hover:bg-slate-100 text-slate-600"
+                      )}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handlePhoneNext}
+                      disabled={!isValidPhone}
+                      className={cn(
+                        "px-5 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 transition-all shadow-xs cursor-pointer",
+                        isValidPhone 
+                          ? "bg-emerald-600 hover:bg-emerald-700 active:scale-95" 
+                          : "bg-slate-300 dark:bg-zinc-800 text-slate-500 dark:text-zinc-600 cursor-not-allowed opacity-60"
+                      )}
+                    >
+                      <span>Next</span>
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
