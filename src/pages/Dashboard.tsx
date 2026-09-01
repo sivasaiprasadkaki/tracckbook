@@ -1997,9 +1997,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       }
 
       if (results && results.length > 0) {
-        // Map the results to handwrittenQueue structure with stable IDs
-        const mappedQueue = results.map((item, idx) => ({
-          id: (item as any).id || (item.result as any)?.id || `ai_receipt_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+        // Map the results to handwrittenQueue structure
+        const mappedQueue = results.map(item => ({
           file: item.file,
           result: item.result,
           previewUrl: item.result.cloudinaryUrl || (item.file && item.file.type.startsWith('image/') ? URL.createObjectURL(item.file) : '')
@@ -2134,8 +2133,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [handwrittenTime, setHandwrittenTime] = useState<string>('12:00 PM');
   const [handwrittenIsFood, setHandwrittenIsFood] = useState<boolean>(true);
 
-  // Handwritten verification queue with stable unique IDs
-  const [handwrittenQueue, setHandwrittenQueue] = useState<Array<{ id?: string; file: File; result: any; previewUrl: string }>>([]);
+  // Handwritten verification queue
+  const [handwrittenQueue, setHandwrittenQueue] = useState<Array<{ file: File; result: any; previewUrl: string }>>([]);
   const [currentQueueIndex, setCurrentQueueIndex] = useState<number>(0);
   const [showFullScreenPreview, setShowFullScreenPreview] = useState<boolean>(false);
 
@@ -6629,62 +6628,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setActiveAiTaskId(taskId);
   };
 
-  const handleDiscardAiItem = (targetIndex = currentQueueIndex) => {
-    vibrate();
-    if (handwrittenQueue.length <= 1) {
-      // Discarding the only/last receipt in the queue
-      setHandwrittenQueue([]);
-      setCurrentQueueIndex(0);
-      setAiFile(null);
-      setAiFilePreviewUrl('');
-      setAiAmount('');
-      setAiMerchant('');
-      setAiDescription('');
-      if (activeAiTaskId) {
-        backgroundExportManager.updateAiScanResults(activeAiTaskId, []).catch(console.error);
-      }
-      setAiWorkflowStep('group');
-      setAiConstructionModal(null);
-      return;
-    }
-
-    // Multiple receipts: Discard ONLY the specific item identified by targetIndex
-    const remainingQueue = handwrittenQueue.filter((_, idx) => idx !== targetIndex);
-    setHandwrittenQueue(remainingQueue);
-
-    // Sync remaining items to background manager
-    if (activeAiTaskId) {
-      const remainingResults = remainingQueue.map(item => ({ file: item.file, result: item.result }));
-      backgroundExportManager.updateAiScanResults(activeAiTaskId, remainingResults).catch(console.error);
-    }
-
-    // Determine next index to show
-    let nextIndex = targetIndex;
-    if (nextIndex >= remainingQueue.length) {
-      nextIndex = remainingQueue.length - 1;
-    }
-    setCurrentQueueIndex(nextIndex);
-
-    // Load the next item independent state into form
-    const nextItem = remainingQueue[nextIndex];
-    if (nextItem) {
-      setAiAmount(String(nextItem.result.amount ?? ''));
-      setAiMerchant(nextItem.result.merchant || 'Unknown Vendor');
-      setAiBillType(nextItem.result.billType || 'Food');
-      setAiCategory(nextItem.result.category || 'Food');
-      setAiDate(nextItem.result.date || '27-05-2026');
-      setAiTime(nextItem.result.time || '12:00 PM');
-      setAiMealType(nextItem.result.mealType || '');
-      setAiDescription(nextItem.result.description || 'Food Expense');
-      setAiOcrConfidence(nextItem.result.ocr_confidence ?? 100);
-      setAiOcrDuration(nextItem.result.ocr_duration_ms ?? 0);
-      setAiAnalytics(nextItem.result.analytics || null);
-      setAiCloudinaryUrl(nextItem.result.cloudinaryUrl || '');
-      setAiFile(nextItem.file);
-      setAiFilePreviewUrl(nextItem.previewUrl);
-    }
-  };
-
   const handleSaveAiEntry = async (forceSave = false) => {
     if (!activeBookId) return;
 
@@ -6874,23 +6817,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       })();
     }
 
-    // Remove saved item from handwrittenQueue and advance
-    const remainingQueue = handwrittenQueue.filter((_, idx) => idx !== currentQueueIndex);
-    setHandwrittenQueue(remainingQueue);
-
-    if (activeAiTaskId) {
-      const remainingResults = remainingQueue.map(item => ({ file: item.file, result: item.result }));
-      backgroundExportManager.updateAiScanResults(activeAiTaskId, remainingResults).catch(console.error);
-    }
-
-    if (remainingQueue.length > 0) {
-      let nextIndex = currentQueueIndex;
-      if (nextIndex >= remainingQueue.length) {
-        nextIndex = remainingQueue.length - 1;
-      }
+    // Shift queue for next handwritten bill if available
+    const nextIndex = currentQueueIndex + 1;
+    if (nextIndex < handwrittenQueue.length) {
       setCurrentQueueIndex(nextIndex);
-      const nextItem = remainingQueue[nextIndex];
-      setAiAmount(String(nextItem.result.amount ?? ''));
+      const nextItem = handwrittenQueue[nextIndex];
+      setAiAmount(String(nextItem.result.amount));
       setAiMerchant(nextItem.result.merchant || 'Unknown Vendor');
       setAiBillType(nextItem.result.billType || 'Food');
       setAiCategory(nextItem.result.category || 'Food');
@@ -8897,50 +8829,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       )}>
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest text-left">Captured Receipt</h4>
                         
-                        {handwrittenQueue.length > 1 && (
-                          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-indigo-50/70 dark:bg-indigo-950/40 rounded-2xl border border-indigo-100 dark:border-indigo-900/50 text-xs font-sans">
-                            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 max-w-[calc(100%-80px)]">
-                              {handwrittenQueue.map((item, idx) => (
-                                <button
-                                  key={item.id || idx}
-                                  type="button"
-                                  onClick={() => {
-                                    vibrate();
-                                    setCurrentQueueIndex(idx);
-                                    setAiAmount(String(item.result.amount ?? ''));
-                                    setAiMerchant(item.result.merchant || 'Unknown Vendor');
-                                    setAiBillType(item.result.billType || 'Food');
-                                    setAiCategory(item.result.category || 'Food');
-                                    setAiDate(item.result.date || '27-05-2026');
-                                    setAiTime(item.result.time || '12:00 PM');
-                                    setAiMealType(item.result.mealType || '');
-                                    setAiDescription(item.result.description || 'Food Expense');
-                                    setAiOcrConfidence(item.result.ocr_confidence ?? 100);
-                                    setAiOcrDuration(item.result.ocr_duration_ms ?? 0);
-                                    setAiAnalytics(item.result.analytics || null);
-                                    setAiCloudinaryUrl(item.result.cloudinaryUrl || '');
-                                    setAiFile(item.file);
-                                    setAiFilePreviewUrl(item.previewUrl);
-                                  }}
-                                  className={cn(
-                                    "px-2.5 py-1 rounded-xl text-[10px] font-bold transition-all shrink-0 cursor-pointer border",
-                                    currentQueueIndex === idx
-                                      ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
-                                      : theme === 'dark'
-                                        ? "bg-zinc-900 text-slate-400 border-zinc-800 hover:bg-zinc-800 hover:text-white"
-                                        : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                                  )}
-                                >
-                                  Receipt {idx + 1}
-                                </button>
-                              ))}
-                            </div>
-                            <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 shrink-0">
-                              {currentQueueIndex + 1} of {handwrittenQueue.length}
-                            </span>
-                          </div>
-                        )}
-                        
                         {aiFilePreviewUrl ? (
                           <div className="relative rounded-2xl overflow-hidden aspect-[3/4] bg-slate-100 dark:bg-zinc-900 flex items-center justify-center group border border-slate-200 dark:border-zinc-800 shadow-inner">
                             <img 
@@ -9162,7 +9050,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-zinc-900/60 font-sans">
                           <button
                             type="button"
-                            onClick={() => handleDiscardAiItem()}
+                            onClick={() => {
+                              vibrate();
+                              setAiWorkflowStep('upload');
+                              setAiFile(null);
+                              setAiFilePreviewUrl('');
+                            }}
                             className={cn(
                               "flex-1 py-3.5 rounded-2xl font-bold text-xs tracking-wide border cursor-pointer active:scale-95 transition-all text-center flex items-center justify-center gap-1.5",
                               theme === 'dark' 
@@ -9172,7 +9065,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             id="btn-cancel-ai"
                           >
                             <Trash2 size={14} />
-                            {handwrittenQueue.length > 1 ? `Discard (${currentQueueIndex + 1}/${handwrittenQueue.length})` : 'Discard Bill'}
+                            Change Bill
                           </button>
                           
                           <button
@@ -9364,11 +9257,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   {/* WhatsApp Share Card */}
                   <div 
                     onClick={() => {
-                      vibrate();
                       if (activeBook) {
-                        navigate(`/whatsapp-reports?book=${encodeURIComponent(activeBook.name || '')}&id=${encodeURIComponent(activeBook.id || '')}`);
-                      } else {
-                        navigate('/whatsapp-reports');
+                        setShowWhatsAppModal(true);
                       }
                     }}
                     className={cn(
@@ -10467,50 +10357,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </div>
                     </div>
 
-                    {handwrittenQueue.length > 1 && (
-                      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-indigo-50/70 dark:bg-indigo-950/40 rounded-2xl border border-indigo-100 dark:border-indigo-900/50 text-xs font-sans shrink-0">
-                        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 max-w-[calc(100%-80px)]">
-                          {handwrittenQueue.map((item, idx) => (
-                            <button
-                              key={item.id || idx}
-                              type="button"
-                              onClick={() => {
-                                vibrate();
-                                setCurrentQueueIndex(idx);
-                                setAiAmount(String(item.result.amount ?? ''));
-                                setAiMerchant(item.result.merchant || 'Unknown Vendor');
-                                setAiBillType(item.result.billType || 'Food');
-                                setAiCategory(item.result.category || 'Food');
-                                setAiDate(item.result.date || '27-05-2026');
-                                setAiTime(item.result.time || '12:00 PM');
-                                setAiMealType(item.result.mealType || '');
-                                setAiDescription(item.result.description || 'Food Expense');
-                                setAiOcrConfidence(item.result.ocr_confidence ?? 100);
-                                setAiOcrDuration(item.result.ocr_duration_ms ?? 0);
-                                setAiAnalytics(item.result.analytics || null);
-                                setAiCloudinaryUrl(item.result.cloudinaryUrl || '');
-                                setAiFile(item.file);
-                                setAiFilePreviewUrl(item.previewUrl);
-                              }}
-                              className={cn(
-                                "px-2.5 py-1 rounded-xl text-[10px] font-bold transition-all shrink-0 cursor-pointer border",
-                                currentQueueIndex === idx
-                                  ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
-                                  : theme === 'dark'
-                                    ? "bg-zinc-900 text-slate-400 border-zinc-800 hover:bg-zinc-800 hover:text-white"
-                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                              )}
-                            >
-                              Receipt {idx + 1}
-                            </button>
-                          ))}
-                        </div>
-                        <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 shrink-0">
-                          {currentQueueIndex + 1} of {handwrittenQueue.length}
-                        </span>
-                      </div>
-                    )}
-
                     <div className="flex flex-col md:grid md:grid-cols-5 gap-4 overflow-hidden flex-1 min-h-0 w-full">
                       {/* Left Side: Thumbnail Preview */}
                       <div className="md:col-span-2 space-y-3 shrink-0">
@@ -10675,7 +10521,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-zinc-900/60 font-sans">
                           <button
                             type="button"
-                            onClick={() => handleDiscardAiItem()}
+                            onClick={() => {
+                              vibrate();
+                              setAiWorkflowStep('group');
+                              setAiFile(null);
+                              setAiFilePreviewUrl('');
+                              setAiConstructionModal(null);
+                            }}
                             className={cn(
                               "flex-1 py-3 rounded-xl font-bold text-xs tracking-wide border cursor-pointer active:scale-95 transition-all text-center flex items-center justify-center gap-1.5",
                               theme === 'dark' 
@@ -10684,7 +10536,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             )}
                           >
                             <Trash2 size={13} />
-                            {handwrittenQueue.length > 1 ? `Discard Receipt ${currentQueueIndex + 1}` : 'Discard'}
+                            Discard
                           </button>
                           
                           <button
@@ -11551,92 +11403,2686 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                 : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600"
                             )}
                           >
-           xœì}osÛ8ÒçûûíîXŞ±dı·ì“ó8ÉŒëI&¹Ø3³{yR3”DKÜP$—¤lkü¸êê^ÜÛ«ºçÅU]]Õ}û:û	î#\7À? 	€ ,'™™pw‰@h4ºİ¿&¤pZŞÔvÿCñv~=ÚŸ¬âØ÷ëÊ°"š„ÄëÀ>n°‚mIß;uéûãÛæ.9~Lnµ…	‰ìø|á_¿^ø}nOW¡¯_ú3Ëm^Zndïş¥ºşÇ{ïxs¨e7w\ø²cR‹>ñ»Õrb‡>6ÑÜ1ª—<íUÔ®pn{±ùk½ıKÇµŸ…¡6½•ëÖ¨t¾šNí(2©vw§ıyêZQôµ„Ù¿tí›V—ëVŸLæ-Ç›9s¿5êtÈÂ¿²Ã£üŞÜ‹í›¸u½pb›„şÊ›Ù³VïÆ%—¾·&¾;cn"sùa+ğ/¶C‡–9±ã{-ËuI´°fşuk9K?%v:ûİ¡u$+úáx+û^kçÑşÌ¹Rıühéãk´•e”ÕwËsòhÿÄs–Vl¿íÈ†U_¬'iLhFÓ@F!w»M¨“|¹İÿ3IÈ‰Àb‰}ò¨)š†¶íÁö•c_ºTÉŸ÷Ó'=R>ä6‚e~reÅV˜Tfu¿ü’4-ş6ù·#«ÈYÙïCw—–á_Ş”oÊS©scÏˆãÁbhuÈ/­·½açÒkäB¿Z‡ÃÎşa‡L¬éûYè­‰»
-‘º¸éŸÖÔw	Pí2jMmJ‘_E±s¹N¿­¬4×Æ-XˆH‚î—p·òk'l€Ÿ qîåÄS˜hÇƒÕa¹Ç··Ä¬)ğË#ÒÙ#ÑÔrmøÔËkÚb³"Ôéfuºå
-ö×zB¾l±nGd'
-Bà|;{df-øtDzChFóÒötDúÀ(JMåchÓA´ÛQì@Š5·ğ	ÍÒúàæ?´a+›,­›Öu+Z’hyÄ>Ã4_·.ˆ9r 6r8$?œÁÔ²’ŸÆĞ·”sõs­aÊƒ(#SLÎúDâ(.Y\aßÚ>ùÚ‰äÂ‰a­YŞŒœLñ=#naet´Ï½nòB´7RªØñ5®Øåè6˜ ïfo9)½n£Ì‹Š+?gn­^{H–C,kCÖé1YÀéğ¦sÂm)ê*r²§¸°¤³M%Z å½€Øê±¸­£/ï(Ì	²ì%2ôsÛµ½9LĞcÒ!O²»o;ïÚ±ÿ}Øá©Ù°âä¿ß‘í§JN_İ(Bé€/Kßè»°¥²1‰Ã•7…ym<yxÂ„íÆxÛí7ïXãŒV¸¿gÈ‡8÷Î÷ğ%İ7vîÏQŒ‡ê¶vÛC9ñiÄÛj±ÖPœÂjÉ*tÉ1Ñïf*iÌ¹$Ínvj‰™=%\xÊÌŸ®–ğömØa¹6~kîX:¡ë¶¡}	¬Ô}I
-«ó\ßšAáŸÿ˜Ïr¾€ü_ø×)ù·C;€Eh7÷ÿ5új¾Gv~Ú¡k"H©á§YĞş{0ÿ¹â¹0Ps;†§îü«äyuùl&şlİ¶`-z³Ó…ãÎšØRÕHLqj›šRbó¡½A× y¹H­´9ÂNÊ/³~&Zs;“µË»ìJœôÛ’Åk9‘Ç¸ñ7¦óMY…¬¨‚gd#ç2ºã;²/_öj‰ú‘kMªì"^ºÏıÆ‡R‹­0àçÁ*6Z¶uä°ü’ÍL²‡Ä©Iîö%º
-œƒíÍÑéÂòæví:[Zsûµ»Šª§ˆÎÃƒ3ÒíÍH¾%}Èµrêú‘]cşºùÚîŠÉM‰Dù¹§¸ÛÉ‘ÃÈdğÄåëÖAÿ]à¿‚†zé‚¼pf3*r~àD, zN\†I ÚşĞ@¶[¢‰Šlã’äÖíäÂ¨†EÿXY¡-“^å\2ÔQ8=¾ÕïÒT”‘Šr–Š/ñ42‹µÕÕ*Kì‹d@'ÇW˜âÀÊÈ	öj;íğµ«g}ÜğüVz«\¼DXj*yîû8ÒLÑ _SÒ«¡o,cÔ&â\›ˆKÚÄşX7Ó©Z‚’[_6uªí öf°Æ#5‚¡ÒÜ éWÚÂ¬)j¤GTne¶1äG‰îRç“Ó›É*—UÓÒéÎÖ4èø~ObM“2ªSˆĞJùÙPÅÏ¢ÀòóÛÕ£}zKÂß[zÃ©Ún¶;çùd‰°™ö—Ìì©ßôó-NjÕv$vº/I†X¾¹H¶•Ù²P43‰]‘3 ¾ô'È89õ—øÏ¹<§¦éÚë“vX3´•¢iË§ŞÏ‰^’p¬iS¤$%Ò)ÉkJÉ‰Ñ*êâÆĞØoé?äø´™¾ßõ*ù š“ëÌ±°í×‚“Uì/©İŒ¼´—|mÇš¿/0½m>N”7‡­%íàJ­´ù*ºzMáıË–Ún·ó®š“¡ıU4ßFK‰,7[…´—¸{å‘‡¼‘É'£NF¾Á	ğTèàçn÷n[¶ÚÃáAS¬Ä
-Za²¥õ$Õ´†[ÍãDûm:xX©·GlĞïaLğŸW°É–kk¦™Nu*5¤fXŞ®šØ^ƒˆĞi»µÆO¹ä˜t²gaR5ûöİ^·ßµŞ¥2Ê/7¥œÙ·ş0NGÓƒwéÄ3N-È3=‘µ£±´ğôÂª—Ùz¿úšÓW'óĞš9@Ï	Ø@ì²&‘ï® W­¨&°"kÀO0J&{¼ ’Ê¢}—
-Ú±ÙvÒ²¯àù;Ã(oáı‘›à¤‚\¡&³+»ÚK7Æüç‚u^®ÈM”á1A¥×“
-*“£‰½VaWÙoıª¥Â®FÑ¤Û
-ÍSX‚¸V§¸ñ´®™-Yì’-„»Æè¸[‡eªfW‘áå×ÿû?ÿë¿wù«ï/úŠAA©P TAæê °zˆög:$ğ5´¨¬T¢ "ÕàKm6ÂŠPŒhë(®ñøëg'*Y¶i[®i,åŠ«KARÙQAÖqm`@ğÂÈ]a–RQõË4’Qœz/H¿¶¯Bä2”wCXDîMè(x‹‰,?Øa„»¬êH!xü£½MÙÉ¾¿Š !g	jâÊœNLOÖ¬¾6YúP’.Ø t€ ¬œ„“Eš]€Vó¬ıeH¶‹‡›dñÀ°Á6¤å ğ$oæä lÜX£f.ãAj…ªxÌA®œ	ˆ vs¸û”yÏÔr_êÑ"·o°»Õ¢%K«©¬^s’³Èy+x"¨ÌpXÚDQ¢¨ø¥õÆCAÌdŠ†ê™LÉ85×XQñìÉ·D¯•ªŒr'2AÒ˜Œ¤o—’V·£8@1£7iUÏºræØøÎ~¾¤[KhA~,VA³ªó'¤©·óKvaùŒš÷{R³ÜF]¦k¥sÔHá%ıÄŠÄ>å³ŸíàßİbÊç~¸¬k1 uî¯”vD¥™l´<úk¨TK4×JÍuQUÃUd¦
-ª$ˆÅéb‰©2	3Ãë–œY<¹¨5š9aûÂ°#((‡ÿiŒ“œÌf$qŞ$¯ Ç®µ–i‡¾€Ğâ?°9h-m¬°²–rÂoEjú€]G0-¨Î·5$£ó@c—‚„LŸ-Ó Q€ü{	Úó~j$ºŞĞ0‡6¸İåó¼Oó†é 6„&Ê'LW+pr~ûT„0.iIOÄ˜½^”5Òn%L’7VhX§{úşœ’¥fûş08l`ƒZ9IÌICTéyöİÅ›¿‘ó“=%_ZËà/äôÕË×/]<{ú9yúôì»oÈwÏşzÑn·uj’Î;¶$¹¨wŠôbÖfÜ —ºJ£ŠœÑTYQĞå¬2Wºíp“¢?e)üÍ®Ìîdè0•ù*Rg)¹½ÄÌ>Á4>ÆméÇ‚cwİ±PçGYĞ3%ö7ÕXàukÏ ?Şœ—(”Â~3“hošäŸA )GræQÓ|~ãÕ*ŞÙUòòöÑóÍeßikrB¹EörÀíçvÌİ9÷WáÔn–‹î²^-?ŒíÙj£Øi8ÛLJ	s,˜jØÄ½_S~š›eğÚd–Àˆ5Ò°ÂÛÄAÃ¤Éä+ºÛô;Èxé‘İ
-¦Œ„…‚Ÿ/”ï¦]âîRş
-’‚«·Ê
-öÏÿıï$AòÌ‹ÃµÂ¦â†Ò	ßÊÄœ=Ü”Z<S˜Tvï~ÓÊÚà&–İ¨3µ¬Fqr“vêNï£ó qíÌyª‹¦drrF¾±=uÙ­ÍºÊzÈT°\¿Æ]0F¦rg`ıCIB>JÚØüWö¨¢¬¹p[²M)Í€©cTopW¢ÄÌµK*‘T(¦f4nO­¢ôF~…*Æ¢õvÜ¹Z¼ËÕ‡uÄó[Ñ4ô]wb…Â¡úë:°ÉÈQÄd˜øÒk¬jÜúHãØÛÚ]¢=¨7h}¢Iğ¡ÜãWH·\…?¡‘}/Şï‡’õPË¹Ò‡#HHØi´TØR–”E©¤¢“Ì%U)'zôB8ëÊ„r»š.É» uËäûµ?,¥VM,¨ê€bJULüôäü[rö‚Eë"ı–8}•¼‡×'LØï­gèGv%mÒB¿aÂ|õıEmÊÔŸ4–ï_âÜÄ¸š,Ñ¨²°¼™kƒŞÁ	w²sGq[4
-ğš‡ú883Ü`" Lh!ÿÚÓloêãOU|­C=%‘K¹ìÊ¦ç OŸBò%¹p–¶Æ'>œº*©‘1ˆ4C[-×ŸZ®:nùÊrWè–Ï	vD£¬…ºXfÑ’‘ `å¦DÔ´iãJf]µ&gÀ3no[]u)C¦”»ı€5ìáD¤}}^0Ids”Àa¦¦«è(‰Ùã¾pg,Àw\Ç³Yy!n	JĞª¦¡½ğş2)X$²ß†ÉO”ÈÔ“«z•½M±”éoŸÆ29YÂLÆ¤ùÏÿúwï·NBûòøÖ¢ÍaÁ7ö¥†Ré¢ò(|ƒz¼£ØĞ¸¹VY:ŞqCáöÂzõ•Ú³ªË:^o²±3_4ºnÛ¸BŸÛ*o¼ò•üy!:YùÃïcK=…2s?\Wñ	EoU^u´Î™wçÔ˜£¡gvÜ€¾-Z6škZÓ¤C-fÒ¡‰$Ë<­¡Má–:ÔJ{úòô¶z@cÿ¥Po‚´Ş+v[W“÷(×•£—†;×½oÎ@zÚG†Î|n‡§¦œäWÈK›hø‰’£à•Q#ëÛé*Šı¥ÆÜË®Šm˜¾0İ]±ëz¬'aCz–„)a'HÚ3}ıtQÑ:§KK¾
-õÍ÷Súªft^c³Ä«‘oLß¢._AÃT,z»&Vri‹å3/µJb×’»–à•õ4@L¿‘Ë>™=q	1ß±tı½BµÕÜ±ÎGÛûŸ÷ÀOuD
-üôö?ìU½ïeÅ2Òí{t1m¸çiéúó÷+ßó”?¨›Õ[áCØ\íØrÜH»>Âæ¬Ğ.;*³‹š‘ ¹ièĞİ¢Ê–”¬C®†ª¤l	>Í«™®A	Óà¬½dÆÆ@EL¡idÕ|iî{¦”,ç²5…6îÇÉï›nS»E)æSå¢Zfè@±xÈkÃB˜x†/s¨/ø=ÀªúëxäõÓçújè¡°}…-y)è«À’Í€’gN„Ñm³ã[&iÛ3:ÈQ
-4øˆh´Ñòi2­Ì&¨¹³´	©”ë˜}ùceããä”ÔŒI´;¸rl´-Ìxâ-„FÌx~Œ=ô¯íY‘ò9‡ÄìÀ—§”2ÃÜ¦§1¾ãuDœ|RA²‰Ñ™³î›sQ­º“s.dÉììœõş#Ÿke%¿¥^6ØÍï
-FgÅåÅp“ÎE„!N¶GÃJ_>{óÍ3âÒÙ¡=–¢6á¥Ñ¯Ùä~ƒ†ùÄ1p  Ãa{hóø*™¬	ş«ƒ*ìéí°¡
-N®£qNùq’ÒZd¯¦_‹ŸÀJüT×¡nQ8°âŒ–Ãùëg¤ù¥XøïfËá×ªî|í¸nDöÉI[ÓâŒF¤ùÒº!CıQz€ v)ø%âk­%ª'©“§a(MQx=ç2ÛÌrnVWµmB?U/Ñ­2ùÔ‘IÓ«p*O/·\$ªÏÌŠö†±.ù¥à/thOf£#@‡x¯PP_j!75	tÅ‘pœMŠº±œ j(wø×RRÒ¢ÿ}GËWÒô”dË}ıæÙgÏ~¬z[&6WD(ßÓ¢¿ğWqA.­ Ùt–ó=âĞ­¸Š:³Î¼·×Ç·à·—…Ê&ğ˜oûûƒwü®+ñ,	q1¹É,İÔD¡øPŠ/í7šñ—0“ìå'¼ûÅÖl	Œ¦!ff"êdµ#<YxèÄ‡f‰z)XKÙepèl ‚›\m<~İ¾}iÅ‹6Œ°6ıŞ.ùŠtï´¹B„™Ü­0ò5TY$O"­®Œa¸­@		Å_÷]•‹ ·Éê HV‡ÁÛöŞ¶§ßÈ¸GLœÄË;y7ôš¶bj˜k:•ó†W­­Š]…EÂ™Uë](Êïc9› J’2€¥r»cWTº:&ƒŒW*ËED3 àû‡”î©QVŠW1ÜVÍIš¿İOK~;¨Ú‹Ùe@F¤À`Íf%ãÂFÅEVmTEdÔFU· ƒ¶¶CÆ[½·ƒøûÆfkÑUBH‹œ¸×Ö:"?8‘ƒß#ßbï÷¨6°&–Në*ùÉb%õ‚rÒgÕ6ÆLnZŠwP :XÓ”[—‚Ûo(îš$Ğˆô’@Åa’T.½Š©neÉşB0M%ı¦³GvVÁ
-ª|å–Y‡2¥Yµø5U1:W(vÉ5tvçPšG­Ã‰ìº0a£hÈ	IŞ”·œ2#ı£Ûh‹u/½­4Ÿ/£-ÏPn;]ØW¡ï½°/33ƒÙQR× bVö$dÌÇrR–«Ï-¢ñç¯ß ‰+GàWEúoP1y8Ú×9Ì	åÌWHİõQ3‡(»XvdµTæÊd&]’‰£5´¢ËĞ$^
-€j‡Kë¦‰FŠ§ôvßÀ„¼ŒøÅ&G•z
-KŒ"ÓC{&âåárR„¡)ø…*qğh»à>ã¡IB9“ä/âe´¶“|1o(u²ƒˆê¶Vô_9so£ó½İzÛgd1g›£6•±Ä¦R Í2@a¯ûÊdG3ö
-U™a”'•Ãj£u[ÃøkâÀÊMÇòÃæç•¤;L¯Ú¤¡4ÊÔÈÆš,ó^Á._„‘-–•í>+»À~˜ÍÚDì0Aø"°ìş@øÕã¨•¿zv+çÊ€)p©ÂzfÖv–Ğ¸p:¦8Of35Tğ$#¥…j‡åHÂMq•ÈkË³]Šöœîè‰WÅi–¸úßJdwÕ| i&…v¼
-=ƒ£ƒú‡axQÄœ²'oŸ®¼ûµ»obxØ|IIVPíc´ßŞ+iu{À ‘ª’âR|á¦1X¹‘¥±ô ùÊ,\«–&ÏA„#>:ğ}ãƒÂt“?ÜÊoÜ»³%fövF<ƒ•4SlS]DY79æ£U¸êˆW}S‚ èGÏÜŸÂû›iöœ@À@AŞØˆ'Gy–ibº¬.K—Õ×ŸHüQzR²VkT&A>³ƒ;'uéÛÈÁ_I}b’ş'3‘Ù	LØ^¦¨4Ãè¥dXs|„FíqÆ	l81sî‰^Jæ]8ı ®ñ‚>Æ”)0'¥]Cşanü‹y#Û^lé"B~âuÓ…Cƒ^‘'m0‹…„SoÔÚ?f¦Mò¿¾úöıe³k\ÕĞLú™w1È­ò©G8WgŞ&ıt{ÂO4A0Üú"6<æ3*VA‹w»M§†¥iŸ®¬§¸­°A°CŸjÿ?ÍäáFÃŠ(àmÚ|ï_ì5æçOĞ’k·ßÛ	«ÚÁô¼ÜM²³KZğÇSûÒZ¹1³˜ôè/äNÏRjhT
-³ú"2©¹„áÅÆ.)¹>s‘a¡[B¨Vuh×&QÃZ_
-®i™1dÃ bİ:®«KàtE^TLJf†¼[1€Êx&½´Y¥æ>Jâ&r<^-Ï®d2ïQ~cË¡Á7:ıëP–ƒ!+öZêmøWkßKãº_f!çjFÊäDÌf­*Vå®Z¨µ¦S;ˆôˆaÿÏ:H³Ëã[ÚÜsxb5ÖZ÷ÊDLº‹0Z1	i$é:E1+‹&TæC£µîîšo‚ªñà5t†¿k´s	Ê·¢¤41y¿¦C/€)[˜Ô~UØÉ°( s·U¨³2Å9¿Wá“O…aUà¯û#ÿFt:«ic´eÚ(&êëwX¦>ÖÄ‰7;™Í¾%P›¯úÃ}É$ñNâ„KzïG êm“Ea»°íR·»×àÖEˆñXÚÙ‚Hoä`,ûîQ­: %&ŸÒÑe£@2<O‘•óz¼£ècué¼wô}×¶¡|[œóss~¶Ûm:á’<OÈ”±	ÛÙ"š‚o¨p˜pY‘œ@¼µÍ¬y¯C~á@”ˆ‡QœšãÆµ,'ÛŞ±‘b=UÂ0i¢°"×‘æ+*çü*–à·½b¾¾^Ç$‰¼˜Ë‘†àS˜¥‚tAë$­å9#‚	Bv±jæM_ÕMY
-We&¿Âø†hk³H$É¶‡—*ã{·=Ü1°­øˆœy—8±ë,<*‡V(I_˜—ëVwDø'‘7‚×&sú)o§%1QA·Z†ÙZ(ü¢/ßhÊ*]7/a*OtI7H£W7yú!Eú.%öb¦ÇİxÌóÏJÆeY®$,¯T¤¬mæ(MûãÔ»L2G¾í©*º¼a¤²ŸœaVêeÊÆtÏ!|™ÚNÀRIÓlHSºå$ =’~—tIéPâü²Áx°—ˆ©Ãowl?Üÿ>˜Y´¿52©¡?‡»«¢O§*áÆCCnœ;ûÃBòÔåŒ”¡5‰+¹ÕÅ¥ˆÜ+-5IÖHn‘¥™)÷j$:­û8‘£>q„ĞhcÛÙmj‰yÅHZÃñºô`€£·–?u™›û‰É‘æDó™S5FH~TD™iÂÊLÒ"J–¥˜wÈ‹*-,wiPÉPeY4HÙz[Ğ ‹M&sxuJ¸s:¢Ä¾¼´§quJ11iG“˜ôº5Ã–
-¯ın§à3‚‹†N§$ˆ7RÙ«°4±{$9VòÉ³0„¿§N8]¹VhœW“§µŞ€ä}:°”[h°o¯VX ë†KÏ°It5—çÕÂ”qctLi"”Z@>éÈ·ı)<Xav›Ş7c¹î?]«á'…©–yïşèÌâÒ•9n€ZÂè¢5T^òÒq]Øñ¥L¡¬¢¯&&€
- ’qîUÈq/mOªgÉÁÔNÿ;˜ÖàS˜oZ Nö†İ¶	Œßå²jşå%l½¸c@=IRU³EšìÃŸ‰°ÿ·Óo»d_Ç›]*İ¢Óîgšşó
-Ñ—*eQQŠ½³‘a½ŒæiRDr–$’¼ØiI.IZNÃÜaÔ½ˆøÑ>0%‰Íš¢zp³³©PÉ[A1~²(Òq#¡HªÕ8ñ’\{™ş‰îİJÛ£TŞJkjê‰Š&úMvË“|8H_ò\ÚğV¹?•ˆ¤–Šeà–gº4ˆ×Ğ'Ëf.XÊ•°ÅY­5‘÷œ½té–§.Mg>oiš“vâÚa|J·êCQ“9RLEÉX5&¢Ğ'
-÷[Ït\8ˆ”¯¨qï+	¦ù‰]ª¢¿©	Š]êˆøN)b$„|P[üØ`’Ş8Å.åiy¿¨×‘ú]ê½º•¢¦Y„å§‰É˜²òÚ‘<0®áèÃ@Ô±]­#3»¼ÑUI‹)ö3ûõ‚cÁ¾çMQ²Ó Ñ`°h Fä“¦ª?”€È}1nåÂÖİŸd…Ôë]*b|ë‡Î/0t–›OõÄ’ir¦Ş0À£†Ô¼[Ñ+€>úrK€qÊiaª¬éC>ºÅBRD‘‹ZmSb—¨q€‡²Õq¥šH¹-PK¢œ 3Èıæ!¨ñ°[±ß
-Éeè/WŸco5D[A(¸FİH#p›ARôç?*	üç‡Ó$¤òx-şx!¼µù¯&1ûfÄóÜâ=š·^Æ}Sn˜¦2œÉjXŸSmÆ¨ªT±4Ú9Y§¦!ìğ6íÖ?ÿ÷¿“g˜€†DÖ•=#I“¸xÖ´£yZ±‹E¶#7Nı•;óvbÚfò§iqTíoü¾Ì"Ï=!9¬nd6zñ'Ó_vz¢?+Ñ’ÜM„Êhl¡„ˆÖ}·¿Ñ	^ÑÁè¯ñ7ÄÈ®B^d6‡mhaÁî‡PG<ı¤D%è-R›¼FPj›L©FH İßK’  	m,·]ŠSl?OH!H¤ùKñ÷Ğ¹şiG±ÆÑN¼hîL\r´³»«OûÍÆ<=(sp°‘œÙ$Ğ‘¦Üºf^ ûÚ÷ß“S×_Áèëš>WŸ4#™Z›1äIm¥ãI¡%$Â(†¡¾ \}ÓE§:ä“ØAD³J£Ã¨ÀEÈäÊıD~®›ÌX<ÓIO6E_òÓø\
-›”â·‡}J“í, ¨É…7å1M1çN"ß•}œeœ¢È'pÔ¶$~Ü#ÎìF	/ÉAJÎnîJ¥º(æÌ³Myh®PîÌ”":ãÈaôñ¤O ˆRæÄÀu¯¢1Â•?›Ú@Ê¹¬5€9™>0ñĞ?P­M™?ˆòiıcx=»“¼‘ŠUÁ²Ë»Ü@é	§vÌ¿¥oD¡ÀU~iêèg#c“2ŠW¶s×}Â¸’ªôFæ”—ª¿µ³A›Ñ´²Q},…`î-DÙÃóĞ‘yüÔ÷ìªwıïÊ¨„ò”eë²Ö”	g%Jp5¡‰ö/íâ—»›Æ/³±=¡nÉltÛÛ`t+DÉù®´¨·ìÖ^;áÁTælœTjááÆãç–àF®
-3)5SjG-ê1÷‰*¡Êì·
-B:RãÂ˜p.×jˆ,]Cu|‹a<:† ÚAâœÒšŠ‚Õ®‰B¨‹àÈ›y¥'÷:RtÉ· ¨‰–Ÿƒ‹¹Ö#e£Jğy÷»Òµ''Ú7¨JISã‹ş!çº§™kÚç¨»éungÂ%±M’xüC1ğ¾/Æ9moöÍ§S…¤O)*p íF0P«oàÅlĞ¤Óô-µÜEnK¸UÛ]÷oĞÃ¢7hÑ!±Àòğ%Òî+ÖªEà(vª>3¤Êë\.êÈRhğı
-<§.ì|É|T¸Şsà‰³cÉE°¬CV¡_J™Í_õÇâÂVíº‚w¦D7sÀQÉ (ÂtÕ))ğl2]÷Å°c‹ÁÃ¦ÚQ'€
-gÔcUù—šOĞî”aÄ·pnSâdSIŞõâ†'wĞXö¤ÍÙ¾¢ö%ì/Íø†"+Ü´»’>qûíÙLÉ­ùGÂH³4¼Ù#³N<i[Ù4ü”¸¼?a‡ğùğOÃ˜Z….ßş¾w»ˆÎ`ô±ê%â‹Â;ì¦ x¸ı¨*VâæéiŠ#næ> »ÀòâŠTG·ÍBßÛÌv;ûÉŠ¥#•ÿ¼kÿ*0Pú…sXêö˜R®æŠNåÄx¡ã½GpíJ ¦œ}Ÿ˜‰à;¨ÌŞüñí%…z
-İCûi··¸ÇÁúLš5«Hµ1‹B ÚmJ[TªO3Å›í[ÒCKƒ}+Ë‚Ã£7áJÆÛ96F›Ñ»-Òi÷†r<İ‡Şİ2˜fì$:œËŠäÚ	?úÁrµ¼S}WäS”ÿÑèëòIw.|ö«U¬‡]Õì©Û™Çkö“ùê“™‘3©Âò!&$Ã°zù`²B!³Ë…œ‡qEÌkağÓ‘W¡3w<K¢îHG.«·ÑØ©CäJ¢şK’'jÊ	°w#i‘ÈMcp‹.M%nxëD¯Eò+GMË»RrMü»j`_óŠÒ¨SP”¢¥Ng‘õç]Ê­ÜrPv.Í$¹h‘ôx;,¦~(ö|IÄ&ô9?9ìÂ‚Ã*…œåFûMrØ|BOœ‰ã:1zMH·m•R]œÖ/óZ“×H]ô¥nÎ16/‹İã±‹ÁR!,D­ç!~ËÄvæCL	&	òV{o×òÑ²d¡#™Çw’ËM¡œQÿW——	Çé«Õ_ÁKêp•KÇİ$©iãñÅ‚†3ú›¦N;%{Ö–;åHé¿¬š½optcp±°óøä\_¦"O{eÑ"´ãSË#+lÕ§x‘$¨@¯ t® yê‡É½•g]˜›.\û+ ”àKôfhKÇÛ\M/‰Z³¶ŞØYzRdã8\§ø¨üŠUŠğ
-3dpS@CÏíĞÃ²z¤Êw"º
-(t
-{·aFté)Ô)8«}zm’¼›©ht0uêÓ}Ğ•¤Ó‡è¶©(²íécü’Ÿ¼ìĞ(ã³Ê„6E_=«IÌ`VqŒ3yoÓÙ­£ªÊ½Ú6…çPÅ§P‡djAsä‘ıîÎ*ŠæpTÇ&ì1A®©üÒøš@DV®sÀ"ƒ©~OfAƒa4Ô˜=u¬¨,¸‘I8™S[âQ6tããÃ$¨4í©ÆJ©L‡j” 5vÌÀŒUïüÁnñÕß;W‹wyÆS/F‡ŞrôhUó¡}i‡¡¾ö¥®ßJoÉ«(D']„[%D‹DÄî;ëÊaùA}ıkÅAyÙÀN“®BÍÒŒÊ'ÊğÜ³‹Nš‰ıªK¾"²®î’?ÉïkOOMÓñÑ«W_¦RŠ=õÊìÃJƒC.¼”à[´û^%]Îı©‘ó+É¾Â4¿®Ig©Ù>áYçÓ^n0íJåKérÓÅbµœxxEÎãĞ	Jª{**>Ê·Ï;³=1”*ĞâZ°‘ø®;±d±•…Pgg9ß#ÚÙY#„3h9	m¸LÔ‰9?
-ùëü¬ËÆw® 9‚™*{zÜU¤zu w°Œ¶#G	¡B-™ê˜&ÒíJ<«Ë–Ü—û‹&ú#o˜·r€®†9t¥Êœ™”—g±§òYŒk·ašF^LP_—Á(]•¯VÃE‡ıÀ2Ë~“olÏf^ÿ0ŸœNH«¿P€{VDœ”vúfh›EMC9âD<dh_G…p“‘@[Ewíºèq<nÄ7ØÓ8Œ7¦jDË,~è&³ø‚¾™Ä‰pm‚Õä0‡fé`ó™”€´uóÒ™-F’ßÏ ¸-Y3ÒÚŠâµk“ó a£…mÃÒ
-­`áLIÓ=>»™Úî®L)Vrgc…¿sÙ€N!İú£çQhw®<”¢«
-gçH™ş
-”ÖKxş†H¡=Î$0–Ğ<»J¸ĞĞ[¬;Şƒßq-¾¥MÂ¦Šğ—¤õ·Øü>dLÿßÕiCğŸ3O6E©€4R€¸s¼uä¡á•İêÏ ª`Fû(5ôF<2©^y„(ê‹ç49 œ[½ào¬9,¬Õ¢ób‘TŒ÷V®¸p¼õ>Å6L aÂ<÷Ñ("lÍ¨Ò VÒ @…¨xÂcßŸ4ø.¹%5**¨h¦×îİ‹jt@3kØ )’—®KÀ£êQ„¾D+zo£ ÍÑÃ9•ÑF=[P·X™¡…]E&5Á?H^liàNBÆ=Ã;MÌâC,‘"z× ähßE¨M¯ÕÕxÕj´Ç5ÚÛV£}£ê2‘gëÚÄ.İ5â÷Ò ×éÔ%Gr!hšš)Ğ§·J™–°*&¨$0˜ÉvĞØ#T²S“ ß;u¸^Ş .Î¼ÉîHİdohÚä@èeGŞ$Ãƒ&-¾cšuè_ë‰“91 Î"y¼±¦Ç)o`sr¢>7Ç2oè\©á÷ÅK`šr$c•6ı¨OlÅ#¹ŒõEKÚ ôSÖ™®¾l?FSÖ4ñÛÏ¥Î¼Å¡Tv—|¡x÷³ºI%/’ûâU3”şSXş>sa¡-‰-©¤XœÖT¨Û#T¬{—£7¾"ƒÕÖQ
-r›¿mº)·˜}³KZô÷%|ºn‚¤vÈ³ğ‘2^,·ŠTk»J ÉêÌ½º0„%@cÄTR,¾öo`½ü¿‘`Î2“©VÄ¸í§ß_8=µ‚c¦@òwÿî;^z[/Xñ‚Ì/¤¿è¬.ğìşÛ½âoÀ$t¿ğß[İ|…V÷­Çxş0P‘ûWİ1<´ÛYtt:Cc•ÿ¤q¬:3ó,“j OıéŠúëœÇèl$(¡¯Ÿ>¯¥‚³ËOBÅ‡ešU 2g`3	Òw:Á®apx¢E)èŒ¢¢½¯OšOmàQ, ¤Õ:ˆ¸òmuTà`­Ñ;jƒyLxZw†6x0-£Ã9¡–YÄJ•ÃÄ÷nx$tg^€GÔ2ÄÒÊğäUšˆvÖz¤ùÈÆµ·?i}Ü†à¿~2i-6k­¦M›	g»WçZ=s]qæº3s]Ò¼ğÂè­{MaÉUpBQZœä³ËEŞ¬tHÍJ‡ô¯Ú¬¤¦‚HšÕ[°ÊÖ.~Rµ¼xF•›ê	TEÑÔ|A¢kàµÊù6šqaÎc?00÷sÍªTÖP[|î;º	½i¡ÿü¸hò™ÈM><ğğPnñAWEµÁGmòIp_Yü3hBşJm¢S8ã¦ÔTç«jãšè‚şål%E˜gxË(2Påy®l½§kO§.%q%>…‡C@9Ç`)tN³3³ëei….õÁ s‹hpq¦¾w*7‰ôÑ¶*Â¼¹Cg%M/ÃRë™¾¬éyÓå–6Wj»;P[b2[R©‰1ÆGáeb‘¸Ùš&;Ø“ûSªOÒKÔ©;âÑa5¨>»ÌÍ5™Á‡ÎÄb#Úl†U…ëYmêÙmHÑï´¢4çˆzØÑ–­^#&©i¡"Ê¸püşó5Æù•JtÆ²5t÷sE¢vIÃŒ€KøfÒ^¶èî8NÚ§{SÕª´fv©lW&ìøõÂ}.¨‘ô—+—ù?8™¥Ê33îÔ`Ğÿ·=Ö ¢LÀb±ñlŠm½é£¬]SSM¶E	ÒİÌŠÙÍ‚¬'rÅáf‰^²n•,HùŞ\ˆÓ§ÖyŞr$³,X“Ôg	I—B<K¼¡f§5ı{Í*vÇ²°q.Øçğ«$p–Š&‚·‡šõ‰~¡ü·ªÌÔë’îĞm[ÃCÒÓ6Ñzj[ûY»$Êô‚Æ˜î=DùOüòTêwÏSñë§ÏÉÄšÍÕrÎÖÄ­OÏBÜË,Ä=ŞB,Í¼1·ø~göá.täÛ‘Õ#=jîíÀˆ÷Ğ>œİ€{‹n¿Ñêı0®2	ûîš‚+S«G CàÏ˜À õ•iÅ›.TgÂáÅozÀMàk}­Wÿ@¬ÿ`–éûš¤³Ô OA%0ës©_‡2!™ãá»·&óÂH“¿”v¢$A¤,1ã§“Ñ$ÇŸ°ZFÛÊÇ¨Ä÷LÃ»‹ğı«È­øÇôSÌ­(ßæVäˆ£Â±s<Tä6¬—Å°t»
-Õb#ÙÕ7	œwXæîÅéµ…d)ÔÑøV>«wRÅÒÖÌFótíYKgJìpë(@ïï-Í€c§ğÿ‰%JÊ§ï‘”F3ò7gMåj‘˜|:É£cztî5°BÎZ˜dr©ÙØÁKİú3?ê¦k±ñì›Äˆ¼§Ê£Ìbşz¬$	hlÑFï8¢-¾%š¹±¦±YC‡´¡“ÙŒ7Ò‚°çg– í¸K?Š	:Ùİ;¹N­\:,9ƒ½t( !¨X1ÌG¿œ†§ŞÚ¡Â‚$ó4³­|ù$ikŞã	PŒØ!HÄl¯M~´)…‘WÓ<}ÑÄ¶VÀéWnJ<3Æ¼,×]—ÑB¤X!…e»
-À+å˜*y*ƒ"œK†:S€GèLIÎæˆ;JU9$H{)ñ“¼¤IèĞ€~“¾Ò£!7 _’óU@§E~nAäDX™¢Dlï[©'¨|,O	Úª0jƒD%uå(æD9™%¾*œ§æÓ6Œæ2ÿ(ãëDµ1êãvjÆèÈ‚d‹ÎæyL]º%<ğjTg•UG&™Áf¡·uOİãaÉU0G¸ŞÌÒ«Ñ­ÔÖA	îUIš2‰¼C…n¥Å·JÆ½›&r`éä8Ìõ{ãñÉ9‰"'Š-/VaJÕ0hA Š±Ín|–q½&…uÛıŞÅ{ÿie‡ëæÎN~ç°Úì¦TÓƒ9öªÀŸ[®{ÈeªJŒR¬’†U’r¡5[7XPiC2e­j˜É\Ì`)ı*©jËz¢$óKP"×O¢÷°Ç¬A–Â`ª	ºh  ›öéûš0“Š´İ° šY
-ƒã•å®`4)«ìå°"hr<Xv
-!›Ó¾İ†gÌAM¡Í)ù@MÚ|íğ¸ñ­²:9#ÖlF,>™ß‚¿(oSÅ&‘£'ÕØ9ÚT9iäw„WÌ@˜ÔaîÔˆè¨&_óé«²hõ{š“hm\lGŒ‹‹û‘>!^ZVIkx)&EŸT™í6ËÂ8à‰sšé¾Ç²ìXÑ{%/ÄKf?JaúÉÑlÍ\/ ¸ë­ÇÒ(¡ØĞ×J0„^*wğÈ
-õm^2áü+Ôx¶±æ¨ÆÉ™ât`S(¶²¾µàv0¥šUq ¨º‘ììRÈÛºØ&jø£ÒD"Ì}+Ë>´AKákY(“Ûci¨9^Šd­¾ôr©QÖHê"®)ö.Ë¥Võ§T•9¹*­›^dKéH#¨–M’Ñã•íûE¼Ô Õyö—1Löì†ã‰í‰2ñ$‚J™ o$è²
->zcÃîøÚnã=éİ£}ñ×zÃ¬?Y,ŸšNK#à 6qÍé¢zC†ÍÒÙ¶Ğ%ÓØÆ‡(•XåNkj,Ó©[ƒÂĞÉ–bU…è©'µ^ÙÈ‡/¦¦,X¥Ï¼9ZÃ¶}éÌ“¹PĞĞb`¬ë±„¡¤xÅ±.4.I½C¸”?Šşşóş÷4üàKr2GÙc¦èïŠb¥®Ä90zljàAS¤}’€¡g Ğ¢“éÊ~ú;1¡} #<Q½°%7„/Bû'7öÛ©múŞÿã|IÓ©øËªêFrì¯ÚàÌrƒæ”Ï¤:d!u¥Ø4Ûö•ù[É©…Pò0sJ´ÜGûV½s<ñÖ¶2¶i­´ç«ÉÒ‰eÙêÃ<Õ0ÜjP 7†z*‚ñYÅaêš…kÛƒëZ‚ïgFø&Î,Àú6zv$¨¾[3« ÔÌ…ˆö0Øş,o­L*A¥–•¦¿¨H©R)Vãô&X%P>…´!µãéC$‘rı‘B§.Ë>–¹f7s¸D>m…
-oKmô›<ËÈÈ$ËHyldó0®)çĞŸ÷®ér`1-l©y/•ÙTš£ËÜ‡ãŞŞ3¦N
-İ½f"º]x³“Ùì;û[ø!ãéş“OLlÜÊ0‰ğ,9ÜoFÙ—S0ë[ãÜºÊ im,	ßîw|Ÿ•ùk›£”'æ.ˆîÒô0ZÉa<‚áä¿ÄãA"ş=üÁçŒızå¾'\¢IòÔví8Ñ'0cŞ«‘B6Zø×Ø&×$k1iğşâLw¸™8UM{éä£†x3ú‹7ÂQ6Œ´(îŒªÄ*Ošúr ÇÜSlÉÁ„óHÊÌLI¿'FJmâûAÑÜWÕ¡–`yE‹ngú([PÁ8ÿáv „kS_àÏ˜[Ù“-ì¼W¨ßIÒğIhÓ¼MÑ*ùpmh…sìıK–áB~¢”6°e'CÅ1ê¨ôt—Ø{S×¼',ÛT²= €$ËF”ìËÒFÉó¶•Í0½Ü
-(Q7;K®²`Èò&‚NUíöÈñ‚U¬O2]ØÓ÷ÿF™A„À—3~´gÊ¼$²£Ú§bİüÀ6iİ${R“&2(vNR‹{êJ'h|}¥E,SªÎ >§”bdçğûÌmiœ…ñ=©DAéª+”ó›KğY„©ì¨¦Êy…à”y®Thjjï
->…VbM09]5Á×èÊ3j>™ÙpÁ„ÏWë‰ÕFåjòƒ=É¢ÑÄ©Ò«+¡ˆûç…Å¹d(›¯<ûíEŞ°Ùç‹<.z§pÎ.ÿÒ±9­Ù•šI%}«#.m@v/¡#Ø=°¬ì¨š{Î#hãy|P».E ±CójUt/…Š6—4xû~V£’ÿíªQË™Nz8ÕIâ½”äµTÊ«õ*t†èöˆÖóc˜+UU‡Pµ+ÙfÍV¬ÆãR*ªW2¼ ]ÊZøZé^,¸ï²nn¢æÈrÔ*Ä,©HÌ\¥`TÌ“‘Ş‘–àı
-“ !fÈ›»6ñìkşg#-ÄÌ36³~{ˆ¸Ú²©£|v4ÅÓIäægTUá-(	"×}õşTŞÀ×Àh–¹wĞy­RMH.õQ5›•Kş‰‡êI‡{˜2)UI÷yY¨iæ­*øª>c¦lhZBÖTeğ¶6»KiyÓP,–n·ì™
-,z§TÁZ›Õr]úP~©ÒÁWT®B¦‚&*à)ôsî‡ë„*àN6]€j	¦o¡YĞ•3ï$Ø{*Á™7(·¦I‹-ÆFU>ÅüÒL;aà@Õ„µ™V¥?(ëÓß\<ûæÕ›³gçJÌ$è8AU†nÒåLõj°%ÎçvxZÏµœÆ
-~Ä¥ükr2Wc~Ñœ‹ÜiÒjÿªW(¾ÁöV'î˜5V&>|ƒU‰Õğ&±"ŒR©^˜º!´?Gd–ÀÎ¡ßN­hA^ØÓlíîèów¤8^±ş™Gš_éª¿ûÌ'ïşkâŠÛR¹úÂn_2qíd	#“$[¨‰„­vgîçh³ÔÜUa*ÃûÛ–Q>]¥[˜±â4ígªWÃ™Y+)n\0™6;lZ4¦özø/dÍ¿Î"ş‹ clT¯”ĞrD”óUÎŞ”ç´*‹²<@Ú›¯vàA;­»[ÄÅ²âS
-—4]«ÌÄ÷ßGíKàÍ	²òI¤alĞ¢îÒ_ÃÏg³]%OxÒæ•ehÇ’nÆlS(Ü+jÆğˆ]u“íĞ­¦v³­–{$fÌjI¾"qÛ¢°G:»è´#Ge•2ŠmÀèØaè‡f20Ö€[ôÊãûá0Oñ—.5úËRÉŸ›¥ûrŒ½Ã^DUbû¦>ŒRå3?‘JÎ£ÊvçäJ¤áDXÄ¬zR•í«’S‰Ï§X†§XLœä8ÇVf¾xXUšM Wt˜¯Ë:GYÅ@AÍaVš*J¸	èÊÇ^fñÿùX*Á­)ÎÊÆSÿ îHHÔ“z·Fãi¢“§·Ûeã*}†´¢ªj'u ¤$µcFíí ºEnÉò³ÿ#øßÍÁİgÿÇÏşÙÿõ…ÏŞÕŞtœÄãÇ)PÕÆ>;>Jæö³ããgÇÇ‡q|üìíø+Öó	¤õ³ËãïÎåñHÔä$î¥.a#[S”6{¯+õ*F\Ìp÷³fô›ĞŒToœªK›©;Æo$"d]íD²–)Ë¯.Ù ^øs<äı¬g%#”r¹ßšjõÔ*d) %ló´SOL)=&²#·ghN'Ndü,#šJûr%iİ@,Äów‘Üö˜Z³¤H>Sà¯qù×Ä‰g]9sÄ‚³®­µªÉoíêØ;Àw‘Ë›{èœDÎÒq­p?Óó§,Q\QµyVİ›ì©sÉ€ğ‰*
-Äb2'nü&{‰6}nªôZF™„8—…:K“4)@³”kâ/’âÛÑ­êàznw9ñğ¸N4§=÷X8–Ÿ˜}¾@ÀÑÄï¿®xM+³:Ÿî1Ä'{ì0Tb >H¶õã¶E”!2åÀS„0¥šºç…©3WU‚Ì….#»~Š¨<¹¨`(êİÎYš"{vêÏll–ñúíäÊ‚½qâ²°ŠÑF’”c
-iX¹ªì€9ƒâú¿á;œõÓ²Ïn'\_8K»éÍ³_NÑ9	ÁT/`€Lqü¹lô¸ƒH%³‚ÜEI§ôKO&‘ñe…Tzó£Ñ•g
-èl!SÀmDÇµ•Ú±ªŞ¹`j@O*ÅÁF.7€®üÚ±"[8úèÄµÃXÈ½rOUj<çŞı®–§š$)çÅe&IiOTHc%Ò(ñÔÖ°­ÔN’İYÉ<ÏfÁJâAs2ÅAÍÓYÒ¼Ğ#É…ä`–çÃİÃ¦ïÑÊœÔÉT¨n*»¯:ê’hy”í'ulGU˜™]Q•y‹WÅL&»(]Tş†BEiKÈd¿aÌXÑù°ìl€¬¬#†ò$ğqy°†,‹M)nƒz''“6a·d–d9—ò©j.ØŠ65õ;#gM6ÒN·]Û›Çe¦{]Fğm@®ÿº)1‡¤æ
-¥7»J¸ÿ§I>Yëã$Ä¥UJ³rùµ3ÂÕ_Á=ó
-Gş¨íxÊÓôÏ¤¨%ÅDîáJ¤g‡‹S—†„_­â­ &^‚™„¶õšp6&Co•ÕŠõ½çi­:¹uT:MµÛŠ>m‹Şñè´<ÊdÉ|áÕ?ûˆ†m¼cª¢C…‘/]2ãùg>©ÚJ	 • ÕÄóşóyá­’É–´¦Şğ•4§¡3~,PmdCbâTÏ®š”!Ì€Òñ/¥ó=ı±äAË¼Æ²Ñäƒ€²®ÆË&†.ûxåİWyîÓ*ÛP{ğã•æ¸¶In4ª9ô¥»*)ÜÒ^ªGÕ<T(0f:ŸéG^CŒÃÜJÎ¦|JêjBêù¦§yk“5;HÙ‚¤(ÉÌ˜gl.‰v"I¼QJ¿`Kæ¢y²\Š[›Ö8Tpa¹\G*¼,ÒK«(
-¦£íÊå·SŞ8ªJG©M&"57Ci-˜V);K|—éA¦¶ÏÑNQ´5Ñ4³/¼7è;SwÄÚÜ±Ñ‚lÏvÔ°$!3çÜÂY*UQ^ŒÒ¬åª &1ÎŸÊnâcCöØ·è^öûï¸ç²RùÀp7ø¤1š¦{#JFuJU	+¥öÆQ Æb>¹Ì	Míj…W}sè°9ô<q£n©ÙÓòÖè\Êûà0»¨h½vâEÖKf1¹²»ÆO°^8+)MÇ¤‰h<>cÍĞí#;åIìß÷±­Šj9l ôsè_'Òáı-&hŸú»(—­+ÀGÒËê–šÊÎ÷dvœ/³Ä…Y§µd'ªc!fŞÒìŒx•Ö ¦0©Ò@û45mGŞ¡úÊªáêj(S?p`6×MN1|F—şFŠÜXu‚–^§´{_l]ó¨x'`5z¸¦Rò&}¬¯ÓwIÙrÔÌ¦æNÍ”a÷E'ˆ’,\XêCô\—®vna;`@àÙO…áJ1j‚xÆ&A)»èfVG²TyÛ“Ô·?/â8ˆö÷­Ài_/¬8²‚ îG¶7{‚/uüÇ[ÛCáû7g§>lÓ¼ds'Ù°—kn›OE„"¤æÂÅÑ¿zÿêí¯ˆxıÙÁ^¶ÇµñÏÿö?ˆT€ÍñgÕöòË;nü‚¿§"¨£7<ß°+Äóaì0Ô±^5í¾ıCoø´?½Ëù.ÜêL¬áá»3çˆúR¨ü±Œ[b@CÑ9‘;+*„ğ—šnEWs™éÒqİÖ”ØcxVèxï[À¾Aëkÿæ¸Ñ!ÒÀÿ5fz”´­xAfÇ—íÎğ J»İöh|Ğµ»£şTºÎ Çªwã1èzãÁ!ı|Ğ¶£ÓvgD†íş`ŒÚ.éöÚÎ>Mûí^¿tÉ¨İëöH·İŒÈ¸=88  6v¡ƒíŞhDÿñNç šé±C,8´ ş ê†øÈş€t»íÃÃƒş3ì§ßğ)C,Ú…>ô[Ğ@Êô°ëƒáÁ_–´V·Õë¶úƒ)68î‘Në°}0ê’A»p@?	½C„Şu†‡íaÿ 
-@áí‡ø¶ãş¡ïÓtp¤ú}èõÁÁ şG8jn¿=è@‘Şã·†ğóè°O6úìcoıŸbwº0sìá´;ôóv
-ß±oš¶½ïŒúpƒÎØaNÕpDÿ`í.ı­‹?ö{ôsï—å Æú}ƒn÷†‡­64èÃ ñ]``ák¯?†!€æá%i1˜øı·{€sÖjFCVt¯†½‚{İ!üóÖowaN†0xÑˆVç¾€ªà•€ª€,¡ıƒƒ4xH¿Òğï`0 $ˆ…Öğ¡ô)ƒN·İíÂc†ğ˜ø3bèwú@ŠPé'ıéÑç³ƒ~‹==€ÅŞ÷{Hg½VÂO£Aúº8¨ööÁ!,rÿv°lì€K‹öj ÕÀŸŞ!¥İ1¶ÙK>ur:8š°Ppôú@í‡X¶;fƒ=îÃ4á“áŒçáxÁlâ:éÃJÂ†OƒááŞöZCj„•Ókd)uÂÊ9„ÿìØ„ "íõ‘†¡áŒÛ˜R#¶€…€¸HğÍÇ$¡…Qot~`%ã :úš ÊïÂ{áoX¦¦Kßß‚÷ _æâ­-4Ğ«¹úgfí¼r,ò#î'A ÜÂ%ù~ñªk|ĞHbŸ†Cc]üê5¬²a]5İãŒ¢¤
-eN‘ec‹NûšJ§\N§4*ä„¡?üH£0¤ä¢ŒQ8
-Še¶	®ÉKâ¸öşªqú_[¡aœ€
-ŸŸ<†íçË/@ÂRÂ»ó­_Ãdv‡?5ö8¿÷"9sõÌ->w«/MèÚ3ä"˜†ˆõfÖ2€OG¤7Ş#(ğ]zv´Ò®³†;?Z8³ÈÖ,lbâ‰,[#‚˜x$‚ÁMğoÑ™­Á·½º|_>˜´†… Š›,4Fb`œs…y<‘9ßv~ê‚›Ÿ†øÎ'V³³Gÿ×îï¾+-ãÒò-Ñ¸èé¿?QĞrÍ{­—Zà‚ öË0§û#a¥ÍFÂz*DzÔ@¯u¤@n„°‹KY¼€
-j³Z}®–ıaäZ¹™ÉZf®Îœÿ›šÌEs¢ÜwºzBP¯ÂÃ¢|ÿáƒØ8uaœd‘RL•j¯9qÄ¥ÑW›¸Î)½Ç5Ø/ı²5eï×kLç§eğº­\´3.‹†+ßÒ»d˜º]^^
-q,Åb>wmFÀ'®[îtu(x‚¡3	ñşo»c\ÎE³‚HÕüHøÕ_8ğÌúÓe‘qtØçJ6‚5BsªŞá‘}0èàÂ¯ÌYY*&	P\öwîg~Q…h(†\f3>È¥Kñ?y—Î'4¦Ç*+LQ í…¦XÓ<^wAU¹ƒ––’d•S{ıù?V¨îhMÜ,ˆH]µq@U)wg”PNS1ÛqsWÂ~§+Ìˆ^ŠZ?*­š“éw¾g?ŠšwJSE)Oª?6Êøi‘­ŠàÇÒ”9x©Y õzlY6ïÃi§dŞÍ²èRZø‹^Pƒ8÷)SJ&îIĞë©$ó[ªG#é“Í(„"¶šP›—:$R’)åfC+Šô ¬.Òkä3ÔÂï
-jAnfŠh¦seıµ ¿,VécÀ‚I•²‰Ş|/à„dÇã¸Öoî ;ŞÜó¡üâp/oÀÖÖùj:µ£Hw Hw/ŒÒÈX¤QŒ†E:÷¦Èf$½ÅOJµEp[õ´ÇeÕsK×4S"deôjl¤=ZJNÀœÁ™”–¨»\¬}ÂßìÙÀÂŠ‡UåŸÎã–OC›…\!PúvÁK­xïÚßSÒh·ÛRu¼2ú[.­p]#°¡=è“@ˆ’S&#/Å)SwUTÊ~_K[Ş1†Â<¥¶òÅAiGëÄÍòodg÷mG™\Që±_Ùs1û•Ö¼"h]ÿİM_`Ãx£ÛŠÀ4´©K·óóÕd‰¢i{/ÇH´ÛAh_Çyj_Z+7nJáüÂ6¿p"¶4“°I6€èhĞ†…»lîî*Bó¦gµ™Ü’,vÕódƒU…´”óx³İ^h§ò^Û 0¯˜ZÁ Ò©NH~}y”][‹BÁKÄÃ2¤[§0åÖ?ç„Ê¤IˆK*rHTçÇKHân·çmrñõ¿´Æ½yÚUWJrçæ4¯æ²ŒgY½B¢ùvìs}j!§2RDåÎ–¡º¸!Ñ²Ï*"L$¹giŠ‹ÿ¥"m"Ö(`QU(„ª)ø>©jùùÏ-×‚&«DI¢KÕûºÍ”‚nÿ‚8İQS¥úøÀÀú´-¬Œjî£ZâU‹ô?6ÖÅg|‹ÍÉ(¢"‹ª«R2À,±_”$‘Oáâ>¹"? F³r8w?$JFŞ—_#HFÖûÁÈHL)\j½1ßÕ‹êjú-so<9#Ï×&gTŞãNG
- c—P4%(2Nàæ"¦5ÚA|Ü€§Îíı?ç%i´V¦yc_æo–KqLyÁŞ|¸¾Å%âHŒye¦-ï+^éÕé›Í_K|‹¿ö|}¼ôÓµ=	öÒßÓ›Å÷µœWÓğ¹ÑKŸ¤ESÿŒÚïşFŒ.æ§şµ‡£G^Zô*$¯’Åƒ¯´Èi‚Ğ†Ûåñ-ıç8†”Ó30±à°ÓŸ™pQ,!v
-oé¬0aìÌ±ÈkMàq‰;óùÂ¶…™¡…Xú[6i0nVo	ã‰¾ŞœäsV,\’}„×æZbSğzáÇ¾,ïjèì”•QéU2˜´a9;Eİœ'úvÓõ¤=E9MÔÉïˆèºæ¹ñ¥çĞµøÜøaÙç;a­ ^…ö©…†K©E£æÛ—tÓŞæ;§Ö syóå·äèÈ#öÃó¡[ã#Úâ3úóËB:	œÎc¾jïğ|Ú÷‚xƒ…ì¾»Ä.Ä·ÀjğåE[Pó³¼xTÂ¿¦øx&:ÊSvˆe%‹¦¡Zã±"²ã¢c<5ïQÑ;/›mÅùÁÏ"¾÷f>¹ğ­(&¯@òs­µùQ=ÖeUa1·gÂbê‡6ğ‡Ëğw(1kbø“lálZíPxTOÿ(^”$t÷{„‰UT¹¡7Òj×­·Ğğ´	bğŸZ=ïİwÙq7/Úh}zeA¼)=QíX¼wf.zÛ0-8KY¥«Nb-Š™ùtf¶Ú¡‡¥Ğ^¡ı.–³ª@‡¡Âv‘+˜Å‹JIQW,øp}\øA:¶	¹¡cÉ3:ù|<bÚÖ$òİUŒ5A«Ã¨´«ÖÛ>š?EK5ü@8ˆ¯]Jë×Î,^‘ŸÿxÛÄÅ†‘n/ğeŸŒwÉŸ	”¾ûÓÏ@Àe¾¢¯Õ	Ê”SF	r(8S”¬F@cí8Í3Í®Të$˜B¬#vâ9à¡%¼ÚBFdÉT&c1÷6ÂóÃƒymrl)³İwÚÃü°Me “5ªÍòŒ%SÀjØ˜£ÚŒÜæ›F5àc²rßSt3œßÔ¥Ùâ±'ÎàÎi‚iEwPƒ\«€‰”'¡’¡ˆ–‚­låMQnalümwÜ‘Õ°«øz|‡•:ğá=gVlµ±Æ“¶BóEñW¼¿«nïˆÈ{ãûMÖ­éöØMñ‰	 ;IG<úYÓ‚îùœUáiú‘˜t½ ú¡õĞ¦¡P™vç{/vb7ñ9ªK=ú£Î9§Üh]'œZ1&WÎÃ¨›ƒâ€#>×ÊêL!Q“·ú¤¯ı}òÆ`µ³DdiÇNŠ¦È4Erté'İ²k
-”ÉÛv»Õ}§zo¾"º’†ñÙìjsoë‡ÎÜñ,÷v¤òÅ1ıÑ¾t<Š.¥,xD;’­şñ´ ÙOífÖ‰=”YeÌAÂ”ÓÊ®Ğ…Ó£Ñ¼Ó6ÃÍcŠ¡3µ¦5:T:¬},}™'mg&ãsÎL×—=Ò´3éI¼$Iú§X§¤Öd,¸Øªvôôc÷Ô'ß½ºÈ³2b‚Ejù‚<_¹F±¬‰¡ı•úÚmıKâù=§0Oô4­½ûBv&–t$×÷«6ı0}Œ%ˆ<±L*&U#êfõÚrBl€6Ô^ZA³‰9r8°(WˆåIÙeSÿ*„6¢;¶¥ep±)Ù€=i¿uŞ‘'Oxv mónw·/ÓlZI·'ô_ÚgX”»´È„}šÔ¶ÆKûÒŸ=7›|ÍÛ¬=aMö`ÊŸØW&º˜+Ø[·y•Z+¯ÒªLƒï‘ùÒÅK·|«Xc-»ñºÕéÄØÍëULXjT/	Wa.ƒ¼V{ég_èÂšTÓ¾Ë9üñ±°¦Ù±ÃÆ¨øœ§\Ü$\eÒæ_¤‚µ<ÔşŞ©z,ë²ÑÎ^IŸ	…İ|û=aÒ±¹Ó7¢'ñä=ıêÙŞ÷Á··z"[ª0-Â
-ŸÃ
-W•àw´ƒ†´ÇÚ­¢°œ¾NÓ~ ±ÊFÛv{ıÜi}¨^¹±Ì$OÕVc-ß¨\“İ¯ªÍP\ŠuñnUMNs*7ÀıXÕ*Ós?\—I©ja‰H¥Úx·òà	’ÎÃİê^3¥å§Â¤ñäXÕ
-v´~dGæˆoã”}õöch-\-_&r¾&,…
-®VÚÏµ«}{v…$~?ÙX0T|Şi7ØiEY¼´^Q*o6“É‘İT-·:Ry§J.Üª4¾y¼(XÈdòø¦Zâı­ÉK–àïKğxÀ…V½Ì¶µÈÄ%öÿ  ÿÿì]ÛNÛ@ı‹xà’„š¢J-
-ŠTEª -EUúˆ¡¨!¡¹UÿŞ™]¯÷6³Şµ¥Uy Èqw3;;>{Î™gòÀk¯q¦Xİ{´å/õ•,Í.¿e[Å|ŠYŒ¹Ù¤Ø-P¹µ)Å xÓH‰ã6–ˆp§xî²+‘Io.yOå@™N„Şp^Ï¦¨„V>¡ØÂÇmà£ÄÂ±»kÌ®pO›.n³ë9üÛÑ[¢MıEûQa†pŞ©1*T?¯ê®ds[ÛŸNÉš M´ıÎŠ]H†çÎííÍò}1ÅN;ƒr®˜ïM‹×ä9=CÚÍoğ².Ú-#ÖPÆ¸¾yS#	Kˆ@-¸Ï95yš	nŒ-`+—Á
-W7,úC¹š}Í§˜Í}\ª+õoÔÂv.„{K§ißâl“Œ37‘¤³H³”sÿœ*oĞ£RñyM&RƒcxËxÎ5vÔî±#30&7.ÙQ&ÕKæQ=d¬†©~2Œ]JpÚÀTæ0·WK_•ç»¿Ø·v64Ü@vlÛ­$‡t©.3rº«²G–<[/<,ŠƒEØ|ì÷ˆÄL§^†bEQ4,x8-^km<áh‰Ã¥S¿ÈûGŒÁA‘
-(•ÓQ$¶|ÂŞ;BÔ!Œ,p˜¡ z4™ÃÛáï1Äæ.îœ›ışà(vòƒg¹ûÑÏ#b%õ;Qßp½~4 úkšõñ‡ëİCu–rÌ¡tÁC‹=	_¢° “q$:\##·TE­F\:†‡œç¡:¢I•ˆŒ!«²Qjß¤¨Z—šê†²RÌsOŠYuB¥‰ªQßRæW_L®èoŠ,T×)£;†ªçZmvv9šŠúR9(IMBT¥zQ]¯ò±X¬&^kßS¿ ;)ü)µ‚§U¨çŸÿ×/Dêš³òã8ùëfä3Å éBöÂq!3
-BÃ¿Ìõ‹u”nc²0lLÏçÀ©ù-‰ùµ†moü«¾†$bAÓŸÃÔyæ³ÈüKIŸ‘¤`7$±±&í	~=)ğã`»ÂXu3+]˜<ÀJV'Ù
-SS}mÒ:Ÿ¹'{ZgÅ_ÿÒİŸÃysÓ?S†“y®Ò}˜gS­&„Ğß;Ö]Û²ñ+xŠÂñ+e—Ù jœY2ü‡×*ß™
-ûõbQ?ƒ½tÛ<AîQûj4.`ñä!BÓ…UoÛ/¼‚€˜¶UvK<Kı¸Tx!1"#,–s(+Ëµ”ò*£Š©*¦›U²³B®îwºè¿¬:µRûéÆÍê@}h~ò¹„´ªRn
-IH¡ïf×§«¥2<=°*År>û^ÀôØÍ¿¹îEbX°HÕ¢X\e K|˜Øx#HU<Ä#H¶·)‡$ICµbŒ²õ4©k ÂD‹Uù‡Â‹~àmB˜f£»»¸¨f4îK½(ìˆZØk,Ç¢6"•À‹ÙÒ+W/¥{…5¾”<`¢›eîà(üòíSÎŸf yVæÚç9a8C=íÇ]×4öïúğY¯ãwæszÊ´ fjá³¿8êä²x"ø¡&¡/Yg™Œ@™ÂÊ4ûøí=B}¸t3ÜoŸŞ"ıR,¶Eeö|°··“ÙÔ‚Ãé‹e•·—‰İ³BNáuù²WhÃ9|ºu£Ï1‚~vW–´ÆËA×!}šû°Æ”½Öÿbëá7   ÿÿ +=ú
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowPhoneSecurityModal(false);
+                              setLinkingMode('link');
+                              setPhoneNumberToLink('');
+                              setLinkingOtp('');
+                              setLinkingOtpSent(false);
+                              setProfileError(null);
+                              setProfileSuccess(null);
+                            }}
+                            className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-bold text-xs cursor-pointer transition-all shadow-md shadow-indigo-500/15"
+                          >
+                            Continue
+                          </button>
+                        </div>
+                      </motion.div>
+                    </div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+          </AnimatePresence>
+        );
+      })()}
+
+      {/* Profile Photo Fullscreen Preview Modal */}
+      <AnimatePresence>
+        {showAvatarPreviewModal && (avatarPreview || userAvatarUrl) && (
+          <div 
+            className="fixed inset-0 z-[250] bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-4 select-none"
+            onClick={() => setShowAvatarPreviewModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.85 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="relative max-w-sm sm:max-w-md w-full bg-slate-900/95 border border-slate-800 rounded-3xl p-5 shadow-2xl flex flex-col items-center text-white"
+            >
+              {/* Header with Title and Actions */}
+              <div className="w-full flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-black text-xs shrink-0 ring-2 ring-indigo-500/30">
+                    {userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-white truncate">Profile Photo Preview</p>
+                    <p className="text-[11px] text-slate-400 truncate">{userName || 'User Profile'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = avatarPreview || userAvatarUrl;
+                      if (url) {
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `${userName ? userName.toLowerCase().replace(/\s+/g, '_') : 'profile'}_dp.jpg`;
+                        link.target = '_blank';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                      }
+                    }}
+                    className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                    title="Download Photo"
+                  >
+                    <Download size={18} />
+                  </button>
+                  <label
+                    htmlFor="profile-avatar-input"
+                    onClick={() => setShowAvatarPreviewModal(false)}
+                    className="p-2 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/40 rounded-xl transition-colors cursor-pointer"
+                    title="Change Photo"
+                  >
+                    <ImagePlus size={18} />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAvatarPreviewModal(false)}
+                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                    title="Close"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Large Photo Preview */}
+              <div className="w-56 h-56 sm:w-72 sm:h-72 rounded-full overflow-hidden border-4 border-indigo-500/40 shadow-2xl bg-black/50 flex items-center justify-center my-3 ring-8 ring-indigo-500/10 shrink-0 aspect-square">
+                <img
+                  src={avatarPreview || userAvatarUrl || ''}
+                  alt={userName || "Profile Preview"}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              {/* Footer Action Buttons */}
+              <div className="w-full mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-3">
+                <label
+                  htmlFor="profile-avatar-input"
+                  onClick={() => setShowAvatarPreviewModal(false)}
+                  className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white rounded-xl text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25"
+                >
+                  <Camera size={15} />
+                  <span>Change Photo</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowAvatarPreviewModal(false)}
+                  className="py-2.5 px-5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Mobile Linking Coming Soon Modal */}
+      <AnimatePresence>
+        {showPhoneLinkingComingSoon && (
+          <PhoneComingSoonModal
+            isOpen={showPhoneLinkingComingSoon}
+            onClose={() => setShowPhoneLinkingComingSoon(false)}
+            type="link"
+            theme={theme === 'dark' ? 'dark' : 'light'}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Automation Mail Beta Confirmation Modal */}
+      <AnimatePresence>
+        {isAutomationMailConfirmOpen && (
+          <div className={cn(
+            "fixed inset-0 z-[110] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
+            theme === 'dark' ? "bg-black/60" : "bg-indigo-900/10"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className={cn(
+                "w-full max-w-md rounded-3xl border p-6 space-y-6 shadow-2xl relative overflow-hidden",
+                theme === 'dark' ? "bg-[#12131a] border-zinc-800 text-[#c5c6c7]" : "bg-white border-slate-200 text-slate-800"
+              )}
+            >
+              {/* Background gradient blur */}
+              <div className="absolute -top-10 -right-10 w-24 h-24 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
+              
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-500/10 rounded-2xl text-indigo-500 border border-indigo-500/10 shrink-0">
+                  <Mail size={22} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className={cn(
+                      "font-black text-lg uppercase tracking-wide",
+                      theme === 'dark' ? "text-slate-100" : "text-slate-900"
+                    )}>
+                      ğŸš€ Automation Mail
+                    </h3>
+                    <span className="px-2 py-0.5 text-[9px] font-extrabold bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 rounded-full uppercase tracking-widest border border-indigo-500/10">BETA</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className={cn(
+                  "text-sm space-y-3 leading-relaxed",
+                  theme === 'dark' ? "text-slate-300" : "text-slate-600"
+                )}>
+                  <p>This feature is currently available as a Beta Version.</p>
+                  <p>We're continuously improving it and adding more enterprise automation features.</p>
+                  <p>Thank you for helping us test the experience.</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => { vibrate(5); setIsAutomationMailConfirmOpen(false); }}
+                  className={cn(
+                    "px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest transition-all cursor-pointer",
+                    theme === 'dark' 
+                      ? "bg-zinc-900 border border-zinc-800 text-slate-300 hover:bg-zinc-850 hover:text-slate-200" 
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  )}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    vibrate(10);
+                    setIsAutomationMailConfirmOpen(false);
+                    navigate('/automation-mail');
+                  }}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/15"
+                >
+                  Continue to Beta
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Transaction Form Modal */}
+      <AnimatePresence>
+        {showForm && (
+          <div className={cn(
+            "fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
+            theme === 'dark' ? "bg-black/60" : "bg-indigo-900/10"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, y: 100 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 100 }}
+              className={cn(
+                "relative w-full max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden transition-colors duration-300",
+                theme === 'dark' ? "bg-zinc-950" : "bg-white"
+              )}
+            >
+              {/* Quick Add Success Overlay */}
+              <AnimatePresence>
+                {quickAddSuccess && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                    className="absolute top-4 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[10px] sm:text-xs font-black tracking-widest px-5 py-2.5 rounded-full shadow-xl z-50 flex items-center gap-2 border border-emerald-500/30"
+                  >
+                    <CheckSquare size={13} className="animate-bounce" />
+                    <span>ENTRY SAVED &amp; COMPLETED! ADDING NEXT...</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Modal Header */}
+              <div className={cn(
+                "flex items-center justify-between p-4 sm:p-6 border-b transition-colors duration-300",
+                theme === 'dark' ? "border-slate-800" : "border-slate-100"
+              )}>
+                <div className="flex flex-col gap-1">
+                  <h3 className={cn(
+                    "text-xl sm:text-2xl font-bold transition-colors duration-300",
+                    theme === 'dark' ? "text-white" : "text-slate-800"
+                  )}>
+                    {editingTransaction 
+                      ? (showForm === 'in' ? 'Edit Cash In' : 'Edit Cash Out') 
+                      : (showForm === 'in' ? 'Add Cash In' : 'Add Cash Out')}
+                  </h3>
+                  {editingTransaction && getTransactionSource(editingTransaction) === 'Imported' && (
+                    <span className="text-[9px] sm:text-[10px] font-extrabold text-sky-600 dark:text-sky-400 mt-1 uppercase tracking-widest flex items-center gap-1 bg-sky-50 dark:bg-sky-950/30 px-2.5 py-1 rounded-lg border border-sky-100 dark:border-sky-900/30 w-max select-none">
+                      âœ“ Imported Entry
+                    </span>
+                  )}
+                  {editingTransaction && getTransactionSource(editingTransaction) === 'AI' && (
+                    <span className="text-[9px] sm:text-[10px] font-extrabold text-amber-600 dark:text-amber-400 mt-1 uppercase tracking-widest flex items-center gap-1 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1 rounded-lg border border-amber-100 dark:border-amber-900/30 w-max select-none">
+                      <Sparkles size={11} /> AI Generated Entry
+                    </span>
+                  )}
+                </div>
+                <button onClick={resetForm} className={cn(
+                  "p-2 rounded-full transition-colors",
+                  theme === 'dark' ? "hover:bg-slate-800" : "hover:bg-slate-100"
+                )}>
+                  <X size={24} className="text-slate-400" />
+                </button>
+              </div>
+
+              <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-h-[80vh] overflow-y-auto no-scrollbar">
+                {/* Type Tabs */}
+                <div className="flex flex-col gap-4">
+                  <div className={cn(
+                    "p-1 rounded-xl flex gap-1 transition-colors duration-300",
+                    theme === 'dark' ? "bg-slate-800" : "bg-slate-100"
+                  )}>
+                    <button
+                      type="button"
+                      onClick={() => setShowForm('in')}
+                      className={cn(
+                        "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm",
+                        showForm === 'in' 
+                          ? (theme === 'dark' ? "bg-slate-700 text-emerald-400 shadow-sm" : "bg-white text-emerald-600 shadow-sm")
+                          : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
+                      )}
+                    >
+                      CASH IN
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowForm('out')}
+                      className={cn(
+                        "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm",
+                        showForm === 'out' 
+                          ? (theme === 'dark' ? "bg-slate-700 text-rose-400 shadow-sm" : "bg-white text-rose-600 shadow-sm")
+                          : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
+                      )}
+                    >
+                      CASH OUT
+                    </button>
+                  </div>
+                </div>
+
+                <form onSubmit={handleAddTransaction} className="space-y-4 sm:space-y-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Date & Time</label>
+                      <input
+                        type="datetime-local"
+                        value={transactionDate}
+                        onChange={(e) => setTransactionDate(e.target.value)}
+                        tabIndex={-1}
+                        className={cn(
+                          "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
+                          theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                        )}
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount (â‚¹)</label>
+                      <input
+                        ref={amountInputRef}
+                        type="number"
+                        step="any"
+                        min="0"
+                        required
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        placeholder="0.00"
+                        tabIndex={1}
+                        className={cn(
+                          "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
+                          theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                        )}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</label>
+                      <div className="space-y-2">
+                        <InAppSelect
+                          id="cash-entry-category-select"
+                          value={category}
+                          onChange={(val) => setCategory(val)}
+                          options={activeCategoryOptions}
+                          theme={theme}
+                          size="lg"
+                          tabIndex={2}
+                          triggerClassName={cn(
+                            "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
+                            theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                          )}
+                        />
+                        {category === 'Custom' && (
+                          <input
+                            type="text"
+                            placeholder="Enter custom category"
+                            value={customCategory}
+                            onChange={(e) => setCustomCategory(e.target.value)}
+                            tabIndex={2}
+                            className={cn(
+                              "w-full h-[52px] px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition-all",
+                              theme === 'dark' ? "bg-slate-800 border-indigo-900/30 text-white" : "bg-slate-50 border-indigo-100 text-black"
+                            )}
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Mode</label>
+                      <div className="space-y-2">
+                        <InAppSelect
+                          id="cash-entry-mode-select"
+                          value={mode}
+                          onChange={(val) => setMode(val)}
+                          options={activeModeOptions}
+                          theme={theme}
+                          size="lg"
+                          tabIndex={3}
+                          triggerClassName={cn(
+                            "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
+                            theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                          )}
+                        />
+                        {mode === 'Custom' && (
+                          <input
+                            type="text"
+                            placeholder="Enter custom mode"
+                            value={customMode}
+                            onChange={(e) => setCustomMode(e.target.value)}
+                            tabIndex={3}
+                            className={cn(
+                              "w-full h-[52px] px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition-all",
+                              theme === 'dark' ? "bg-slate-800 border-indigo-900/30 text-white" : "bg-slate-50 border-indigo-100 text-black"
+                            )}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Details</label>
+                    <textarea
+                      ref={descriptionInputRef}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="Enter transaction details"
+                      rows={2}
+                      tabIndex={4}
+                      className={cn(
+                        "w-full px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium resize-none transition-colors duration-300",
+                        theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                      )}
+                    />
+                  </div>
+
+                  {/* Image Layout Selection */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Image Layout in PDF</label>
+                    <div className={cn(
+                      "p-1 rounded-xl flex gap-1 transition-colors duration-300",
+                      theme === 'dark' ? "bg-slate-800" : "bg-slate-100"
+                    )}>
+                      <button
+                        type="button"
+                        disabled={selectedImages.length < 2}
+                        onClick={() => setImageLayout('merge')}
+                        className={cn(
+                          "flex-1 py-2 rounded-lg font-bold transition-all text-[10px] flex items-center justify-center gap-2",
+                          selectedImages.length < 2
+                            ? "opacity-40 cursor-not-allowed text-slate-400 dark:text-slate-500 bg-slate-100/30 dark:bg-slate-800/20"
+                            : imageLayout === 'merge' 
+                              ? (theme === 'dark' ? "bg-slate-700 text-indigo-400 shadow-sm" : "bg-white text-indigo-600 shadow-sm")
+                              : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
+                        )}
+                        title={selectedImages.length < 2 ? "Upload at least 2 images to enable MERGE layout" : ""}
+                      >
+                        <LayoutGrid size={14} />
+                        MERGE (Side by Side)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setImageLayout('split')}
+                        className={cn(
+                          "flex-1 py-2 rounded-lg font-bold transition-all text-[10px] flex items-center justify-center gap-2",
+                          imageLayout === 'split' 
+                            ? (theme === 'dark' ? "bg-slate-700 text-indigo-400 shadow-sm" : "bg-white text-indigo-600 shadow-sm")
+                            : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
+                        )}
+                      >
+                        <List size={14} />
+                        SPLIT (Page by Page)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bills / Attachments (Max 5)</label>
+                    <div className="space-y-3">
+                      {selectedImages.length > 0 && (
+                        <div className="space-y-4">
+                          {/* Merge Preview if selected */}
+                          {imageLayout === 'merge' && selectedImages.length > 1 && (
+                            <div className={cn(
+                              "p-3 rounded-2xl border border-dashed transition-colors duration-300",
+                              theme === 'dark' ? "bg-indigo-950/20 border-indigo-900/50" : "bg-indigo-50/50 border-indigo-200"
+                            )}>
+                              <p className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 mb-2 flex items-center gap-1">
+                                <Sparkles size={10} />
+                                PDF MERGE PREVIEW
+                              </p>
+                              <div className="grid grid-cols-2 gap-2">
+                                {selectedImages.map((img, i) => (
+                                  <div key={i} className="relative aspect-[3/4] rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                                    <OptimizedImage src={img} alt="preview" className="w-full h-full object-cover" type="preview" />
+                                    <div className="absolute bottom-1 right-1 bg-black/50 text-[6px] text-white px-1 rounded">P.{Math.floor(i/2) + 1}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap gap-3">
+                            {selectedImages.map((img, i) => (
+                              <div key={i} className="relative group w-20 h-20 sm:w-24 sm:h-24">
+                                <div 
+                                  onClick={() => setSelectedFormatIndex(i)}
+                                  className={cn(
+                                    "w-full h-full rounded-xl overflow-hidden border cursor-pointer transition-all duration-300 relative bg-slate-100 dark:bg-zinc-800",
+                                    selectedFormatIndex === i 
+                                      ? "border-emerald-500 ring-4 ring-emerald-500/20" 
+                                      : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                                  )}
+                                >
+                                  <OptimizedImage 
+                                    src={img} 
+                                    alt="preview" 
+                                    type="preview"
+                                    className="w-full h-full object-cover" 
+                                  />
+                                </div>
+                                
+                                {/* Reorder Controls - Always Visible on Hover, but semi-visible always */}
+                                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-between px-0.5 pointer-events-none">
+                                  <button 
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); moveImage(i, 'up'); }}
+                                    disabled={i === 0}
+                                    className={cn(
+                                      "p-0.5 bg-black/60 hover:bg-black/90 text-white rounded-full transition-all pointer-events-auto",
+                                      i === 0 ? "opacity-0" : "opacity-60 group-hover:opacity-100"
+                                    )}
+                                  >
+                                    <ChevronLeft size={12} />
+                                  </button>
+                                  <button 
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); moveImage(i, 'down'); }}
+                                    disabled={i === selectedImages.length - 1}
+                                    className={cn(
+                                      "p-0.5 bg-black/60 hover:bg-black/90 text-white rounded-full transition-all pointer-events-auto",
+                                      i === selectedImages.length - 1 ? "opacity-0" : "opacity-60 group-hover:opacity-100"
+                                    )}
+                                  >
+                                    <ChevronRight size={12} />
+                                  </button>
+                                </div>
+
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    removeImage(i);
+                                    if (selectedFormatIndex >= selectedImages.length - 1) {
+                                      setSelectedFormatIndex(Math.max(0, selectedImages.length - 2));
+                                    }
+                                  }}
+                                  className={cn(
+                                    "absolute -top-1.5 -right-1.5 p-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-full transition-all z-20 shadow-md border border-white dark:border-zinc-900 flex items-center justify-center cursor-pointer"
+                                  )}
+                                  title="Remove image"
+                                >
+                                  <X size={10} className="stroke-[3]" />
+                                </button>
+                                
+                                <div className="absolute bottom-1 right-1 bg-black/50 text-[8px] text-white px-1.5 rounded-full">
+                                  {i + 1}
+                                </div>
+                              </div>
+                            ))}
+                            {selectedImages.length < 5 && (
+                              <button 
+                                type="button"
+                                onClick={() => triggerUploadSelector('transaction')}
+                                className={cn(
+                                  "w-20 h-20 sm:w-24 sm:h-24 flex flex-col items-center justify-center border-2 border-dashed rounded-xl text-slate-400 hover:border-emerald-500 hover:text-emerald-500 transition-all gap-1",
+                                  theme === 'dark' ? "border-slate-800 bg-zinc-900/40" : "border-slate-200 bg-slate-50/50"
+                                )}
+                              >
+                                <Plus size={20} />
+                                <span className="text-[8px] font-black uppercase tracking-wider">Add</span>
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Formatting Panel for Selected Image */}
+                          {selectedImages[selectedFormatIndex] && (
+                            (() => {
+                              return (
+                                <div className={cn(
+                                  "p-4 rounded-xl border border-slate-100 dark:border-zinc-800 flex items-center justify-between",
+                                  theme === 'dark' ? "bg-zinc-900/40" : "bg-slate-50/50"
+                                )}>
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                                      Attachment #{selectedFormatIndex + 1} Selected
+                                    </span>
+                                  </div>
+
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={isEditingLoading}
+                                      onClick={handleReeditImage}
+                                      className="py-1.5 px-3 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-400 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
+                                    >
+                                      {isEditingLoading ? (
+                                        <Loader2 size={12} className="animate-spin" />
+                                      ) : (
+                                        <Crop size={12} />
+                                      )}
+                                      Edit Image
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        handleOpenPreview(selectedImages);
+                                        setPreviewIndex(selectedFormatIndex);
+                                        setPreviewRotation(0);
+                                        setPreviewZoom(1);
+                                      }}
+                                      className="py-1.5 px-3 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-400 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                                    >
+                                      <ZoomIn size={12} />
+                                      View Fullscreen
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })()
+                          )}
+                        </div>
+                      )}
+                      
+                      {selectedImages.length === 0 && (
+                        <div 
+                          tabIndex={5}
+                          onClick={() => triggerUploadSelector('transaction')}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); triggerUploadSelector('transaction'); } }}
+                          className={cn(
+                            "border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center gap-2 hover:border-indigo-300 transition-all cursor-pointer group focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                            theme === 'dark' ? "border-slate-800 hover:border-indigo-500" : "border-slate-200"
+                          )}
+                        >
+                          <div className={cn(
+                            "p-2 rounded-full text-slate-400 group-hover:text-indigo-500 transition-colors",
+                            theme === 'dark' ? "bg-slate-800" : "bg-slate-50"
+                          )}>
+                            <Upload size={24} />
+                          </div>
+                          <p className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-500 transition-colors">
+                            Click to upload bills (Max 5)
+                          </p>
+                        </div>
+                      )}
+                      <input 
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        ref={multiFileInputRef}
+                        onChange={handleImageUpload}
+                        className="hidden"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      tabIndex={7}
+                      disabled={isSubmitting}
+                      onClick={resetForm}
+                      className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      tabIndex={6}
+                      disabled={isSubmitting}
+                      onClick={() => { vibrate(30); setSubmitAndAddNew(false); }}
+                      className={cn(
+                        "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed",
+                        isSubmitting ? "bg-slate-400" : (
+                          showForm === 'in' 
+                            ? (theme === 'dark' ? "bg-emerald-600 hover:bg-emerald-700 shadow-none" : "bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-100")
+                            : (theme === 'dark' ? "bg-rose-600 hover:bg-rose-700 shadow-none" : "bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-100")
+                        )
+                      )}
+                    >
+                      {isSubmitting ? "Saving..." : (editingTransaction ? 'Save Changes' : 'Save')}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Processing Overlay */}
+      <AnimatePresence mode="wait">
+        {isUploading && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-indigo-600 text-white"
+          >
+            <div className="text-center space-y-6 px-6">
+              <div className="relative flex items-center justify-center">
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                  className="w-16 h-16 border-4 border-white/20 border-t-white rounded-full"
+                />
+              </div>
+              <div className="space-y-2">
+                <AnimatePresence mode="wait">
+                  <motion.h3 
+                    key={uploadingMessage}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="text-2xl font-bold tracking-tight"
+                  >
+                    {uploadingMessage}
+                  </motion.h3>
+                </AnimatePresence>
+                <p className="text-indigo-100/80 text-sm max-w-[280px] mx-auto">
+                  AI is reading your receipt and extracting details
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Premium Transaction Saving/Updating Modal */}
+      <AnimatePresence>
+        {progressModal && (
+          <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-4">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 15 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+              className={cn(
+                "relative w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center text-center overflow-hidden border transition-all duration-300",
+                theme === 'dark' 
+                  ? "bg-zinc-950/90 border-slate-800/80" 
+                  : "bg-white border-slate-200"
+              )}
+            >
+              {/* Star-sparkle glow background effect */}
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+
+              {/* Success, Loading, or Error Circular Header */}
+              <div className="relative w-24 h-24 flex items-center justify-center mt-2">
+                {/* Outer Circular loader svg */}
+                <svg className="w-full h-full transform -rotate-90 absolute">
+                  <circle
+                    cx="48"
+                    cy="48"
+                    r="40"
+                    strokeWidth="4"
+                    stroke="currentColor"
+                    fill="transparent"
+                    className={cn(
+                      theme === 'dark' ? "text-slate-800/40" : "text-slate-200"
+                    )}
+                  />
+                  <motion.circle
+                    cx="48"
+                    cy="48"
+                    r="40"
+                    strokeWidth="4"
+                    stroke="currentColor"
+                    fill="transparent"
+                    strokeDasharray={251.2}
+                    initial={{ strokeDashoffset: 251.2 }}
+                    animate={{ strokeDashoffset: 251.2 - (251.2 * progressModal.progress) / 100 }}
+                    transition={{ duration: 0.3, ease: "easeOut" }}
+                    className={cn(
+                      progressModal.errorMsg ? "text-rose-500" : progressModal.success ? "text-emerald-400" : "text-indigo-500"
+                    )}
+                  />
+                </svg>
+
+                {/* Inner Icon */}
+                <div className="relative z-10 flex items-center justify-center">
+                  {progressModal.success ? (
+                    <motion.div
+                      initial={{ scale: 0, rotate: -20 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center text-emerald-400"
+                    >
+                      <Check size={24} className="stroke-[3]" />
+                    </motion.div>
+                  ) : progressModal.errorMsg ? (
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className="w-12 h-12 rounded-full bg-rose-500/15 border border-rose-400/30 flex items-center justify-center text-rose-400"
+                    >
+                      <AlertCircle size={24} />
+                    </motion.div>
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 relative">
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                        className="absolute inset-0 border-2 border-indigo-400/10 border-t-indigo-400/50 rounded-full"
+                      />
+                      <Sparkles size={20} className="animate-pulse" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Progress Percentage Text */}
+              <div className="mt-4 flex flex-col items-center">
+                <span className={cn(
+                  "text-3xl font-black font-mono tracking-tight",
+                  progressModal.errorMsg ? "text-rose-400" : progressModal.success ? "text-emerald-400" : (theme === 'dark' ? "text-white" : "text-slate-900")
+                )}>
+                  {progressModal.progress}%
+                </span>
+                
+                {/* Horizontal Progress bar */}
+                <div className={cn(
+                  "w-56 h-1.5 rounded-full overflow-hidden mt-3 border transition-all",
+                  theme === 'dark' ? "bg-slate-900 border-slate-800/40" : "bg-slate-100 border-slate-200"
+                )}>
+                  <motion.div 
+                    className={cn(
+                      "h-full rounded-full",
+                      progressModal.errorMsg ? "bg-rose-500" : progressModal.success ? "bg-emerald-400" : "bg-gradient-to-r from-indigo-500 to-indigo-400"
+                    )}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${progressModal.progress}%` }}
+                    transition={{ duration: 0.3, ease: "easeOut" }}
+                  />
+                </div>
+              </div>
+
+              {/* Titles and Subtitles */}
+              <div className="mt-6 space-y-2 px-2">
+                <h3 className={cn(
+                  "text-lg font-black tracking-tight",
+                  theme === 'dark' ? "text-white" : "text-slate-900"
+                )}>
+                  {progressModal.success ? (
+                    progressModal.type === 'create' ? "âœ“ Entry saved successfully" : "âœ“ Entry updated successfully"
+                  ) : progressModal.errorMsg ? (
+                    "Couldn't save your entry"
+                  ) : (
+                    progressModal.type === 'create' ? "Saving your entry..." : "Updating your entry..."
+                  )}
+                </h3>
+                
+                <p className={cn(
+                  "text-xs leading-relaxed font-medium",
+                  theme === 'dark' ? "text-slate-400" : "text-slate-600"
+                )}>
+                  {progressModal.success ? (
+                    "Your secure ledger has been successfully updated."
+                  ) : progressModal.errorMsg ? (
+                    "Couldn't save your entry. Please check your connection and retry."
+                  ) : (
+                    progressModal.type === 'create' 
+                      ? (selectedImages.some(img => img.startsWith('blob:')) 
+                          ? "Your receipt is being securely uploaded to TrackBook Cloud." 
+                          : "Saving your transaction ledger entry securely.")
+                      : "Saving your latest changes securely."
+                  )}
+                </p>
+              </div>
+
+              {/* Steps Timeline checklist */}
+              <div className={cn(
+                "mt-8 w-full max-w-[280px] rounded-2xl p-4 text-left space-y-3.5 border transition-all duration-300",
+                theme === 'dark' 
+                  ? "bg-slate-900/40 border-slate-800/40" 
+                  : "bg-slate-50 border-slate-150"
+              )}>
+                {progressModal.steps.map((step, idx) => (
+                  <div key={idx} className="flex items-center justify-between text-xs font-bold tracking-tight">
+                    <span className={cn(
+                      "transition-colors duration-200 font-sans",
+                      step.status === 'success' ? (theme === 'dark' ? "text-emerald-400" : "text-emerald-600") :
+                      step.status === 'loading' ? (theme === 'dark' ? "text-white" : "text-slate-900") :
+                      step.status === 'error' ? (theme === 'dark' ? "text-rose-400" : "text-rose-600") : 
+                      (theme === 'dark' ? "text-slate-500" : "text-slate-400")
+                    )}>
+                      {step.label}
+                    </span>
+                    
+                    <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                      {step.status === 'success' && (
+                        <span className={cn(
+                          "flex items-center gap-1",
+                          theme === 'dark' ? "text-emerald-400" : "text-emerald-600"
+                        )}>
+                          <Check size={12} className="stroke-[3]" />
+                          <span>Done</span>
+                        </span>
+                      )}
+                      {step.status === 'loading' && (
+                        <span className="text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 animate-pulse">
+                          <Loader2 size={11} className="animate-spin" />
+                          <span>Active</span>
+                        </span>
+                      )}
+                      {step.status === 'pending' && (
+                        <span className={cn(
+                          theme === 'dark' ? "text-slate-600" : "text-slate-400"
+                        )}>Waiting</span>
+                      )}
+                      {step.status === 'error' && (
+                        <span className="text-rose-600 dark:text-rose-500 font-black">Failed</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Error Actions */}
+              {progressModal.errorMsg && (
+                <div className="mt-8 flex gap-3 w-full">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      vibrate(30);
+                      saveTransaction();
+                    }}
+                    className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black tracking-widest uppercase cursor-pointer transition-all active:scale-95 shadow-lg shadow-indigo-600/10"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      vibrate(20);
+                      setProgressModal(null);
+                    }}
+                    className="flex-1 py-3 border border-slate-800 hover:bg-slate-900 text-slate-300 rounded-xl text-xs font-black tracking-widest uppercase cursor-pointer transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Image Gallery Preview Modal */}
+      <AnimatePresence>
+        {previewImages && (
+          <div className="fixed inset-0 z-[200] bg-slate-950/95 backdrop-blur-xl flex flex-col">
+            {/* Gallery Header */}
+            <div className="flex items-center justify-between p-4 text-white">
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={handleClosePreview}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                >
+                  <X size={24} />
+                </button>
+                <div>
+                  <p className="font-bold">Attachment Preview</p>
+                  <div className="flex flex-col text-xs text-slate-400 gap-0.5 mt-0.5">
+                    <p>{previewIndex + 1} of {previewImages.length}</p>
+                    {(() => {
+                      const activePreviewTx = activeBook?.transactions.find(tx => tx.id === previewTransactionId);
+                      const activeAttDetail = activePreviewTx?.attachment_details?.find(att => att.file_url === previewImages[previewIndex]) || activePreviewTx?.attachment_details?.[previewIndex];
+                      if (!activeAttDetail) return null;
+                      return (
+                        <div className="flex flex-col gap-0.5 mt-1 border-t border-white/10 pt-1">
+                          {(activeAttDetail.created_at || activePreviewTx?.created_at) && (
+                            <p className="flex items-center gap-1 text-slate-350">
+                              <Clock size={10} className="text-indigo-400 shrink-0" />
+                              <span>Uploaded: <strong>{formatDateTime12h(activeAttDetail.created_at || activePreviewTx?.created_at)}</strong></span>
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setPreviewZoom(prev => Math.max(0.5, prev - 0.25))}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                  title="Zoom Out"
+                  disabled={previewValidationStatus[previewIndex] === false}
+                >
+                  <ZoomOut size={20} />
+                </button>
+                <button 
+                  onClick={() => setPreviewZoom(prev => Math.min(3, prev + 0.25))}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                  title="Zoom In"
+                  disabled={previewValidationStatus[previewIndex] === false}
+                >
+                  <ZoomIn size={20} />
+                </button>
+                <button 
+                  onClick={handleDownloadAttachment}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors cursor-pointer text-white"
+                  title="Download Original"
+                >
+                  <Download size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Main Preview Area */}
+            <div className="flex-1 relative flex items-center justify-center overflow-hidden">
+              {isPreviewValidating && (
+                <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/60 backdrop-blur-sm text-white">
+                  <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" />
+                  <p className="text-sm font-bold animate-pulse text-indigo-300">Validating Receipt Accessibility...</p>
+                </div>
+              )}
+
+              {!isPreviewValidating && previewValidationStatus[previewIndex] === false ? (
+                <div className="flex flex-col items-center justify-center p-8 max-w-md bg-zinc-900/90 border border-zinc-800 rounded-2xl text-center shadow-2xl mx-4 relative z-10">
+                  <div className="w-16 h-16 rounded-full bg-rose-500/10 flex items-center justify-center text-rose-500 mb-6 border border-rose-500/20">
+                    <CloudOff size={32} />
+                  </div>
+                  <h3 className="text-lg font-black text-slate-100 mb-2">This receipt couldn't be previewed.</h3>
+                  <p className="text-xs text-slate-400 leading-relaxed mb-6">
+                    The receipt attachment could not be accessed. This can happen if the image is private, storage is unavailable, or you are offline.
+                  </p>
+                  <div className="flex items-center gap-3 w-full">
+                    <button
+                      onClick={() => handleRetryPreview(previewIndex)}
+                      className="flex-1 py-3 px-4 rounded-xl bg-indigo-650 hover:bg-indigo-600 active:scale-95 text-xs font-bold text-white transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <RotateCw size={14} />
+                      <span>Retry</span>
+                    </button>
+                    <button
+                      onClick={() => handleOpenOriginal(previewIndex)}
+                      className="flex-1 py-3 px-4 rounded-xl bg-zinc-850 hover:bg-zinc-850 text-slate-200 border border-zinc-700 active:scale-95 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <Download size={14} />
+                      <span>Open Original</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={previewIndex}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ 
+                      opacity: 1, 
+                      scale: previewZoom,
+                      rotate: previewRotation
+                    }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                    className="relative max-w-full max-h-full p-4"
+                  >
+                    <OptimizedImage 
+                      src={previewImages[previewIndex]} 
+                      alt="preview" 
+                      type="fullscreen"
+                      className="max-w-full max-h-[80vh] object-contain shadow-2xl rounded-lg"
+                      referrerPolicy="no-referrer"
+                    />
+                  </motion.div>
+                </AnimatePresence>
+              )}
+
+              {/* Navigation Arrows */}
+              {previewImages.length > 1 && (
+                <>
+                  <button 
+                    onClick={() => {
+                      setPreviewIndex(prev => (prev - 1 + previewImages.length) % previewImages.length);
+                      setPreviewRotation(0);
+                      setPreviewZoom(1);
+                    }}
+                    className="absolute left-4 p-4 bg-white/5 hover:bg-white/10 rounded-full text-white backdrop-blur-md transition-all cursor-pointer"
+                  >
+                    <ChevronLeft size={32} />
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setPreviewIndex(prev => (prev + 1) % previewImages.length);
+                      setPreviewRotation(0);
+                      setPreviewZoom(1);
+                    }}
+                    className="absolute right-4 p-4 bg-white/5 hover:bg-white/10 rounded-full text-white backdrop-blur-md transition-all cursor-pointer"
+                  >
+                    <ChevronRight size={32} />
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Thumbnails Strip */}
+            {previewImages.length > 1 && (
+              <div className="p-6 flex justify-center gap-2 overflow-x-auto no-scrollbar">
+                {previewImages.map((img, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      setPreviewIndex(i);
+                      setPreviewRotation(0);
+                      setPreviewZoom(1);
+                    }}
+                    className={cn(
+                      "w-16 h-16 rounded-lg overflow-hidden border-2 transition-all shrink-0 cursor-pointer",
+                      previewIndex === i 
+                        ? (theme === 'dark' ? "border-indigo-500 scale-110 shadow-none" : "border-indigo-500 scale-110 shadow-lg shadow-indigo-500/20") 
+                        : "border-transparent opacity-50 hover:opacity-100"
+                    )}
+                  >
+                    <OptimizedImage src={img} alt="thumb" className="w-full h-full object-cover" type="preview" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Report Generation Overlay */}
+      <AnimatePresence>
+        {reportLoading && (
+          <div className={cn(
+            "fixed inset-0 z-[300] flex items-center justify-center backdrop-blur-xl transition-colors duration-300",
+            theme === 'dark' ? "bg-slate-950/80" : "bg-slate-900/60"
+          )}>
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 15 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className={cn(
+                "rounded-3xl shadow-2xl p-6 sm:p-8 max-w-sm w-full mx-4 border flex flex-col items-center text-center",
+                theme === 'dark' ? "bg-zinc-950 border-zinc-900 shadow-black/80" : "bg-white border-slate-100 shadow-slate-200/50"
+              )}
+            >
+              {/* Animated 3D-style Spreadsheet Graphic (for Excel) */}
+              {reportLoading.type === 'excel' && (
+                <div className="w-48 h-36 relative flex items-center justify-center mb-2 overflow-hidden">
+                  <motion.div 
+                    initial={{ rotateX: 12, rotateY: -12, scale: 0.85 }}
+                    animate={{ rotateX: [12, 8, 12], rotateY: [-12, -16, -12], scale: [0.85, 0.88, 0.85] }}
+                    transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+                    style={{ transformStyle: "preserve-3d" }}
+                    className="w-36 h-26 bg-emerald-950/20 border-2 border-emerald-500/30 rounded-2xl relative p-3 shadow-2xl shadow-emerald-500/5 flex flex-col justify-between overflow-hidden"
+                  >
+                    {/* Shiny/glow effect scanning across sheet */}
+                    <motion.div 
+                      initial={{ left: "-150%" }}
+                      animate={{ left: "150%" }}
+                      transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+                      className="absolute inset-y-0 w-12 bg-gradient-to-r from-transparent via-emerald-400/20 to-transparent -skew-x-12 z-10"
+                    />
+
+                    {/* Spreadsheet headers */}
+                    <div className="grid grid-cols-4 gap-1.5 border-b border-emerald-500/20 pb-2">
+                      <div className="h-1.5 rounded bg-emerald-500/40 col-span-1" />
+                      <div className="h-1.5 rounded bg-emerald-500/20 col-span-2" />
+                      <div className="h-1.5 rounded bg-emerald-500/30 col-span-1" />
+                    </div>
+
+                    {/* Spreadsheet Rows flying/entering */}
+                    <div className="flex-1 flex flex-col justify-center gap-2 pt-2">
+                      {[
+                        { delay: 0, width: "w-24", color: "bg-emerald-500/40" },
+                        { delay: 0.2, width: "w-16", color: "bg-emerald-500/25" },
+                        { delay: 0.4, width: "w-20", color: "bg-emerald-400/30" }
+                      ].map((row, idx) => (
+                        <motion.div
+                          key={idx}
+                          initial={{ x: -45, opacity: 0 }}
+                          animate={{ x: 0, opacity: 1 }}
+                          transition={{
+                            delay: row.delay,
+                            duration: 0.8,
+                            repeat: Infinity,
+                            repeatDelay: 1,
+                            ease: "easeOut"
+                          }}
+                          className={`h-2 rounded-full ${row.color} ${row.width}`}
+                        />
+                      ))}
+                    </div>
+
+                    {/* 3D floating Excel tag */}
+                    <motion.div
+                      animate={{ y: [-1, 2, -1], rotate: [0, 4, 0] }}
+                      transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                      className="absolute -right-1 -bottom-1 w-9 h-9 bg-emerald-600 text-white rounded-xl shadow-lg flex items-center justify-center border border-emerald-400/20 z-20"
+                    >
+                      <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+                        <path d="M10 3v18M4 10h17" />
+                      </svg>
+                    </motion.div>
+                  </motion.div>
+                </div>
+              )}
+
+              {/* Animated 3D-style Document Stack Graphic (for PDF) */}
+              {reportLoading.type === 'pdf' && (
+                <div className="w-48 h-36 relative flex items-center justify-center mb-2 overflow-hidden">
+                  <div style={{ perspective: "800px" }} className="relative w-36 h-26">
+                    {/* Page 3 (Deepest) */}
+                    <motion.div 
+                      animate={{ rotate: [-6, -4, -6], y: [1, 0, 1] }}
+                      transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                      className="absolute inset-0 bg-indigo-950/5 border border-indigo-500/10 rounded-2xl transform translate-x-2 -translate-y-2 select-none pointer-events-none"
+                    />
+                    {/* Page 2 (Middle) */}
+                    <motion.div 
+                      animate={{ rotate: [-3, -1, -3], y: [-1, 0, -1] }}
+                      transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
+                      className="absolute inset-0 bg-indigo-950/10 border border-indigo-500/20 rounded-2xl transform translate-x-1 -translate-y-1 select-none pointer-events-none"
+                    />
+                    {/* Page 1 (Top Active Page) */}
+                    <motion.div 
+                      initial={{ rotate: 0, scale: 0.95 }}
+                      animate={{ rotate: [0, 1, 0], scale: [0.95, 0.97, 0.95] }}
+                      transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+                      className="absolute inset-0 bg-indigo-950/15 border border-indigo-500/30 rounded-2xl p-2.5 flex flex-col gap-1.5 overflow-hidden shadow-2xl"
+                    >
+                      {/* Scan gradient sweep */}
+                      <motion.div 
+                        initial={{ top: "-150%" }}
+                        animate={{ top: "150%" }}
+                        transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+                        className="absolute inset-x-0 h-8 bg-gradient-to-b from-transparent via-indigo-400/15 to-transparent -skew-y-3 z-10"
+                      />
+
+                      {/* Header layout */}
+                      <div className="flex gap-1.5 items-center">
+                        <div className="w-2.5 h-2.5 rounded bg-indigo-500/40 flex-shrink-0" />
+                        <div className="w-16 h-1.5 rounded bg-indigo-500/20" />
+                      </div>
+
+                      {/* Moving entries landing inside */}
+                      <div className="flex flex-col gap-1.5 mt-1">
+                        {[
+                          { delay: 0, iconColor: "bg-emerald-500/30", textWidth: "w-20" },
+                          { delay: 0.25, iconColor: "bg-rose-500/30", textWidth: "w-24" },
+                          { delay: 0.5, iconColor: "bg-indigo-500/30", textWidth: "w-14" }
+                        ].map((item, idx) => (
+                          <motion.div 
+                            key={idx}
+                            initial={{ y: -20, opacity: 0, scale: 0.85 }}
+                            animate={{ y: 0, opacity: 1, scale: 1 }}
+                            transition={{
+                              delay: item.delay,
+                              duration: 0.5,
+                              repeat: Infinity,
+                              repeatDelay: 1,
+                              type: "spring",
+                              stiffness: 90
+                            }}
+                            className="flex gap-1.5 items-center"
+                          >
+                            <div className={`w-2 h-2 rounded-full ${item.iconColor}`} />
+                            <div className={`h-1 rounded ${item.textWidth} bg-indigo-300/15`} />
+                          </motion.div>
+                        ))}
+                      </div>
+
+                      {/* Photo attachments simulation in document bottom */}
+                      <div className="absolute right-2.5 bottom-2.5 flex gap-1 items-end">
+                        <div className="w-4 h-4 rounded border border-dashed border-indigo-500/30 bg-indigo-500/5 flex items-center justify-center">
+                          <svg className="w-2.5 h-2.5 text-indigo-400/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <path d="M21 15l-5-5L5 21" />
+                          </svg>
+                        </div>
+                        <div className="w-8 h-1 rounded bg-indigo-500/20" />
+                      </div>
+                    </motion.div>
+
+                    {/* Floating PDF badge */}
+                    <motion.div
+                      animate={{ y: [-1, 2, -1], rotate: [0, -4, 0] }}
+                      transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                      className="absolute -right-2 -bottom-2 w-9 h-9 bg-indigo-600 text-white rounded-xl shadow-lg flex items-center justify-center border border-indigo-400/20 z-20"
+                    >
+                      <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                      </svg>
+                    </motion.div>
+                  </div>
+                </div>
+              )}
+
+              {/* Progress Dial Widget */}
+              <div className="relative inline-block mt-4">
+                <svg className="w-24 h-24 transform -rotate-90">
+                  <circle
+                    cx="48"
+                    cy="48"
+                    r="40"
+                    stroke="currentColor"
+                    strokeWidth="6"
+                    fill="transparent"
+                    className={theme === 'dark' ? "text-zinc-800" : "text-slate-150"}
+                  />
+                  <motion.circle
+                    cx="48"
+                    cy="48"
+                    r="40"
+                    stroke="currentColor"
+                    strokeWidth="6"
+                    fill="transparent"
+                    strokeDasharray={251.2}
+                    initial={{ strokeDashoffset: 251.2 }}
+                    animate={{ strokeDashoffset: 251.2 - (251.2 * reportLoading.progress) / 100 }}
+                    className={reportLoading.type === 'excel' ? "text-emerald-500" : "text-indigo-500"}
+                  />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className={cn(
+                    "text-xl font-black transition-colors duration-300",
+                    theme === 'dark' ? "text-white" : "text-slate-900"
+                  )}>{reportLoading.progress}%</span>
+                </div>
+              </div>
+
+              {/* Dynamic Status Display details */}
+              <div className="space-y-1.5 mt-4">
+                <h3 className={cn(
+                  "text-lg font-black transition-colors duration-300 tracking-tight",
+                  theme === 'dark' ? "text-white" : "text-slate-900"
+                )}>
+                  {reportLoading.type === 'excel' ? (
+                    reportLoading.progress <= 30 ? "Preparing entries..." : 
+                    reportLoading.progress <= 75 ? "Generating Excel sheet..." : 
+                    "Exporting file..."
+                  ) : (
+                    reportLoading.progress <= 30 ? "Preparing report pages..." : 
+                    reportLoading.progress <= 60 ? "Rendering PDF..." : 
+                    reportLoading.progress <= 90 ? "Adding entries into document..." : 
+                    "Almost ready..."
+                  )}
+                </h3>
+                <p className={cn(
+                  "text-xs font-semibold px-4 transition-colors duration-300 max-w-xs leading-relaxed",
+                  theme === 'dark' ? "text-zinc-400" : "text-slate-500"
+                )}>
+                  Please keep this page open. We are constructing your beautiful report dynamically.
+                </p>
+                {reportLoading.message && (
+                  <p className="text-xs font-mono font-black text-rose-500 dark:text-rose-400 mt-2 px-4 select-none">
+                    {reportLoading.message}
+                  </p>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Help & Support Dialog */}
+      <AnimatePresence>
+        {isHelpOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className={cn(
+                "rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border transition-colors duration-300",
+                theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
+              )}
+            >
+              <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-indigo-600 text-white">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/20 rounded-xl">
+                    <HelpCircle size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black tracking-tight">Help & Support</h3>
+                    <p className="text-xs text-indigo-100 font-medium uppercase tracking-widest">AI Assistant</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => { setIsHelpOpen(false); setHelpQuery(''); setHelpResponse(''); }}
+                  className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+                <div className="space-y-4">
+                  <label className={cn(
+                    "text-sm font-black uppercase tracking-widest transition-colors duration-300",
+                    theme === 'dark' ? "text-slate-500" : "text-black"
+                  )}>Ask anything about the app</label>
+                  <div className="relative">
+                    <textarea
+                      value={helpQuery}
+                      onChange={(e) => setHelpQuery(e.target.value)}
+                      placeholder="How do I add a transaction? How to export reports?"
+                      className={cn(
+                        "w-full border-2 rounded-2xl p-4 outline-none focus:border-indigo-500 transition-all resize-none h-32",
+                        theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-slate-50 border-slate-100 text-black"
+                      )}
+                    />
+                    <button
+                      onClick={() => { vibrate(); setAiConstructionModal('ask'); }}
+                      className="absolute bottom-3 right-3 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-xl font-bold transition-all flex items-center gap-2 shadow-lg shadow-indigo-200 dark:shadow-none"
+                    >
+                      <MessageSquare size={18} />
+                      Ask AI
+                    </button>
+                  </div>
+                </div>
+
+                {helpResponse && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl p-5 border border-indigo-100 dark:border-indigo-800/50"
+                  >
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-2 h-2 bg-indigo-600 rounded-full animate-pulse" />
+                      <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">AI Response</span>
+                    </div>
+                    <div className={cn(
+                      "text-sm leading-relaxed prose prose-slate dark:prose-invert max-w-none transition-colors duration-300",
+                      theme === 'dark' ? "text-slate-300" : "text-black"
+                    )}>
+                      <ReactMarkdown>{helpResponse}</ReactMarkdown>
+                    </div>
+                  </motion.div>
+                )}
+
+                <div className={cn(
+                  "p-4 rounded-2xl border transition-colors duration-300 flex items-center justify-between gap-3 text-left-side",
+                  theme === 'dark' ? "bg-slate-950 border-slate-800" : "bg-slate-50 border-slate-100"
+                )}>
+                  <div>
+                    <h4 className={cn("text-xs font-black uppercase tracking-wider", theme === 'dark' ? "text-slate-200" : "text-slate-800")}>
+                      AI Engine Configuration
+                    </h4>
+                    <p className="text-[10px] text-emerald-500 dark:text-emerald-400 mt-0.5 font-bold">
+                      â— Active & Integrated
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
+                  <p className="text-slate-400 text-xs font-medium mb-2">Need more help?</p>
+                  <a 
+                    href="mailto:triptraccker@gmail.com"
+                    className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-black hover:underline transition-all"
+                  >
+                    mail to triptraccker@gmail.com
+                    <ArrowRight size={14} />
+                  </a>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isSubmitting && (
+          <div className={cn(
+            "fixed inset-0 z-[200] flex items-center justify-center p-4 backdrop-blur-md transition-colors duration-300",
+            theme === 'dark' ? "bg-black/80" : "bg-slate-900/40"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className={cn(
+                "rounded-3xl p-8 shadow-2xl text-center space-y-6 max-w-xs w-full border transition-colors duration-300",
+                theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
+              )}
+            >
+              <div className="relative w-20 h-20 mx-auto">
+                <div className={cn(
+                  "absolute inset-0 border-4 rounded-full transition-colors duration-300",
+                  theme === 'dark' ? "border-indigo-900/30" : "border-indigo-100"
+                )} />
+                <motion.div 
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                  className="absolute inset-0 border-4 border-indigo-600 border-t-transparent rounded-full"
+                />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Sparkles className="text-indigo-600 animate-pulse" size={32} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <h3 className={cn(
+                  "text-xl font-black transition-colors duration-300",
+                  theme === 'dark' ? "text-white" : "text-black"
+                )}>{submitAndAddNew ? "Your entry is being saved..." : (submittingMessage || "Saving your entry...")}</h3>
+                <p className={cn(
+                  "text-sm font-medium transition-colors duration-300",
+                  theme === 'dark' ? "text-slate-400" : "text-slate-600"
+                )}>Please wait a moment...</p>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+
+
+      {/* Bulk Transaction Delete Confirmation Modal */}
+      <AnimatePresence>
+        {showBulkTransactionDeleteConfirm && (
+          <div className={cn(
+            "fixed inset-0 z-[150] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300 overflow-y-auto",
+            theme === 'dark' ? "bg-black/60" : "bg-slate-900/40"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className={cn(
+                "w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 transition-colors duration-300",
+                theme === 'dark' ? "bg-zinc-950" : "bg-white"
+              )}
+            >
+              <div className="w-16 h-16 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-full flex items-center justify-center mx-auto">
+                <Trash2 size={32} />
+              </div>
+              <div className="space-y-2">
+                <h3 className={cn(
+                  "text-xl font-bold transition-colors duration-300",
+                  theme === 'dark' ? "text-white" : "text-black"
+                )}>Delete Selected Entries?</h3>
+                <p className={cn(
+                  "text-sm transition-colors duration-300",
+                  theme === 'dark' ? "text-slate-400" : "text-black"
+                )}>
+                  Are you sure you want to delete <span className="font-bold text-rose-600">{selectedTransactions.size}</span> entries? This action cannot be undone.
+                </p>
+                <div className="pt-2 text-left flex justify-center">
+                  <label className="inline-flex items-center gap-2 cursor-pointer text-xs select-none">
+                    <input 
+                      type="checkbox" 
+                      checked={deleteConfirmed} 
+                      onChange={(e) => setDeleteConfirmed(e.target.checked)}
+                      className="rounded text-rose-600 focus:ring-rose-500 border-slate-300 dark:border-slate-800 w-4 h-4 cursor-pointer"
+                    />
+                    <span className="text-slate-500 dark:text-slate-400 font-bold">I confirm this deletion</span>
+                  </label>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => { setShowBulkTransactionDeleteConfirm(false); }}
+                  className={cn(
+                    "flex-1 py-3 border rounded-xl font-bold transition-all cursor-pointer",
+                    theme === 'dark' ? "border-slate-800 text-slate-400 hover:bg-slate-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  )}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleBulkDelete}
+                  disabled={!deleteConfirmed}
+                  className={cn(
+                    "flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold shadow-lg shadow-rose-100 dark:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  )}
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Merge Transactions Confirmation Modal */}
+      <AnimatePresence>
+        {showMergeConfirmDialog && (
+          <div className={cn(
+            "fixed inset-0 z-[150] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300 overflow-y-auto",
+            theme === 'dark' ? "bg-black/60" : "bg-slate-900/40"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className={cn(
+                "w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 transition-colors duration-300",
+                theme === 'dark' ? "bg-zinc-950 text-white" : "bg-white text-black"
+              )}
+            >
+              <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 rounded-full flex items-center justify-center">
+                <Merge size={24} />
+              </div>
+              
+              <div className="space-y-1">
+                <h3 className="text-lg font-extrabold tracking-tight">Merge Selected Entries?</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Merge <span className="font-bold text-indigo-600 dark:text-indigo-400">{selectedTransactions.size}</span> selected transactions into a single new transaction.
+                </p>
+              </div>
+
+              <div className="space-y-3.5 pt-1">
+                {/* Description Input */}
+                <div className="space-y-1 text-left">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Description</label>
+                  <input
+                    type="text"
+                    value={mergeDescription}
+                    onChange={(e) => setMergeDescription(e.target.value)}
+                    placeholder="Enter merged description"
+                    className={cn(
+                      "w-full px-4.5 h-11 border-2 rounded-xl outline-none focus:border-indigo-500 transition-all text-sm font-semibold",
+                      theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-slate-50 border-slate-100 text-black"
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Category Select */}
+                  <div className="space-y-1 text-left">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Category</label>
+                    <InAppSelect
+                      id="merge-category-select"
+                      value={mergeCategory}
+                      onChange={(val) => setMergeCategory(val)}
+                      options={CATEGORIES}
+                      theme={theme}
+                      size="md"
+                      triggerClassName={cn(
+                        "w-full px-4 h-11 border-2 rounded-xl outline-none focus:border-indigo-500 transition-all text-sm font-semibold",
+                        theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-slate-50 border-slate-100 text-black"
+                      )}
+                    />
+                  </div>
+
+                  {/* Transaction Type Select */}
+                  <div className="space-y-1 text-left">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Type</label>
+                    <InAppSelect
+                      id="merge-type-select"
+                      value={mergeType}
+                      onChange={(val) => setMergeType(val as any)}
+                      options={[
+                        { value: 'out', label: 'Cash Out (-)' },
+                        { value: 'in', label: 'Cash In (+)' },
+                      ]}
+                      theme={theme}
+                      size="md"
+                      triggerClassName={cn(
+                        "w-full px-4 h-11 border-2 rounded-xl outline-none focus:border-indigo-500 transition-all text-sm font-semibold",
+                        theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-slate-50 border-slate-100 text-black"
+                      )}
+                    />
+                  </div>
+                </div>
+
+                {/* Total Merged Amount Preview */}
+                <div className={cn(
+                  "p-3.5 rounded-xl flex items-center justify-between border border-dashed transition-colors duration-300",
+                  theme === 'dark' ? "bg-zinc-900/40 border-zinc-800" : "bg-slate-50/50 border-slate-200"
+                )}>
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Merged Total Amount:</span>
+                  <span className={cn(
+                    "text-base font-black font-mono",
+                    mergeType === 'in' ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-450"
+                  )}>
+                    {mergeType === 'in' ? '+' : '-'}{formatCurrency(
+                      books.find(b => b.id === activeBookId)
+                        ?.transactions.filter(t => selectedTransactions.has(t.id))
+                        .reduce((sum, t) => sum + t.amount, 0) || 0
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              {error && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-955/20 border border-rose-200/50 text-rose-650 dark:text-rose-400 text-xs font-semibold text-left">
+                  {error}
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  onClick={() => setShowMergeConfirmDialog(false)}
+                  disabled={isMerging}
+                  className={cn(
+                    "flex-1 py-3 border rounded-xl font-bold transition-all cursor-pointer text-sm disabled:opacity-50",
+                    theme === 'dark' ? "border-slate-800 text-slate-400 hover:bg-slate-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  )}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleMergeTransactions}
+                  disabled={isMerging}
+                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-650/50 text-white rounded-xl font-bold shadow-lg shadow-indigo-100 dark:shadow-none transition-all cursor-pointer flex items-center justify-center gap-2 text-sm disabled:cursor-not-allowed"
+                >
+                  {isMerging ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Merging...
+                    </>
+                  ) : (
+                    'Confirm Merge'
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Bulk Delete Confirmation Modal */}
+      <AnimatePresence>
+        {showBulkDeleteConfirm && (
+          <div className={cn(
+            "fixed inset-0 z-[150] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300 overflow-y-auto",
+            theme === 'dark' ? "bg-black/60" : "bg-slate-900/40"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className={cn(
+                "w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 transition-colors duration-300",
+                theme === 'dark' ? "bg-zinc-950" : "bg-white"
+              )}
+            >
+              <div className="w-16 h-16 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-full flex items-center justify-center mx-auto">
+                <Trash2 size={32} />
+              </div>
+              <div className="space-y-2">
+                <h3 className={cn(
+                  "text-xl font-bold transition-colors duration-300",
+                  theme === 'dark' ? "text-white" : "text-black"
+                )}>Delete Selected Books?</h3>
+                <p className={cn(
+                  "text-sm transition-colors duration-300",
+                  theme === 'dark' ? "text-slate-400" : "text-black"
+                )}>
+                  Are you sure you want to delete <span className="font-bold text-rose-600">{selectedBooks.size}</span> cashbooks? This action cannot be undone.
+                </p>
+                <div className="pt-2 text-left flex justify-center">
+                  <label className="inline-flex items-center gap-2 cursor-pointer text-xs select-none">
+                    <input 
+                      type="checkbox" 
+                      checked={deleteConfirmed} 
+                      onChange={(e) => setDeleteConfirmed(e.target.checked)}
+                      className="rounded text-rose-600 focus:ring-rose-500 border-slate-300 dark:border-slate-800 w-4 h-4 cursor-pointer"
+                    />
+                    <span className="text-slate-500 dark:text-slate-400 font-bold">I confirm this deletion</span>
+                  </label>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => { setShowBulkDeleteConfirm(false); }}
+                  className={cn(
+                    "flex-1 py-3 border rounded-xl font-bold transition-all cursor-pointer",
+                    theme === 'dark' ? "border-slate-800 text-slate-400 hover:bg-slate-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  )}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleBulkDeleteBooks}
+                  disabled={!deleteConfirmed}
+                  className={cn(
+                    "flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold shadow-lg shadow-rose-100 dark:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  )}
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Exit App Confirmation Modal */}
+      <AnimatePresence>
+        {showExitConfirm && (
+          <div className={cn(
+            "fixed inset-0 z-[200] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
+            theme === 'dark' ? "bg-black/60" : "bg-indigo-900/10"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className={cn(
+                "w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 transition-colors duration-300",
+                theme === 'dark' ? "bg-zinc-950" : "bg-white"
+              )}
+            >
+              <div className={cn(
+                "w-16 h-16 rounded-full flex items-center justify-center mx-auto",
+                theme === 'dark' ? "bg-indigo-900/20 text-indigo-400" : "bg-indigo-50 text-indigo-600"
+              )}>
+                <LogOut size={32} />
+              </div>
+              <div className="space-y-2">
+                <h3 className={cn(
+                  "text-xl font-bold transition-colors duration-300",
+                  theme === 'dark' ? "text-white" : "text-black"
+                )}>Exit App?</h3>
+                <p className={cn(
+                  "text-sm transition-colors duration-300",
+                  theme === 'dark' ? "text-slate-400" : "text-black"
+                )}>
+                  Do you want to exit the application?
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowExitConfirm(false)}
+                  className={cn(
+                    "flex-1 py-3 border rounded-xl font-bold transition-all",
+                    theme === 'dark' ? "border-slate-800 text-slate-400 hover:bg-slate-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  )}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => {
+                    // In a real app, this might close the window or navigate away
+                    // Here we'll just sign out or similar, or just close the modal
+                    // The user specifically asked for "Exit" button
+                    window.close(); 
+                    // Fallback if window.close() is blocked
+                    setShowExitConfirm(false);
+                  }}
+                  className={cn(
+                    "flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all",
+                    theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
+                  )}
+                >
+                  Exit
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Share Entries Modal */}
+      <AnimatePresence>
+        {showShareModal && (
+          <div className={cn(
+            "fixed inset-0 z-[150] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
+            theme === 'dark' ? "bg-black/60" : "bg-slate-900/40"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className={cn(
+                "w-full max-w-md rounded-3xl p-6 shadow-2xl relative space-y-6 transition-colors duration-300",
+                theme === 'dark' ? "bg-zinc-950 border border-zinc-900" : "bg-white"
+              )}
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-900 pb-3">
+                <h3 className={cn(
+                  "text-xl font-black transition-colors duration-300",
+                  theme === 'dark' ? "text-white" : "text-slate-800"
+                )}>
+                  {generatedCode ? "Share Code Available" : "Share Selected Entries"}
+                </h3>
+                <button
+                  onClick={() => { setShowShareModal(false); setGeneratedCode(''); setShareExpiryTime(null); setCountdownText(''); }}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-all cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {shareError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 rounded-xl text-xs flex items-center gap-2 font-bold antialiased">
+                  <AlertCircle size={16} />
+                  <span>{shareError}</span>
+                </div>
+              )}
+
+              {!generatedCode ? (
+                <>
+                  <p className={cn(
+                    "text-sm transition-colors duration-300 leading-relaxed",
+                    theme === 'dark' ? "text-slate-400" : "text-slate-600"
+                  )}>
+                    You are generating a secure share code to import these entries into another TrackBook cashbook.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
+                    <div className={cn(
+                      "p-4 rounded-2xl text-center transition-colors duration-300 border flex flex-col justify-center items-center",
+                      theme === 'dark' ? "bg-zinc-900/40 border-zinc-900" : "bg-slate-50 border-slate-100"
+                    )}>
+                      <div className="text-[10px] uppercase font-black tracking-wider text-slate-400">Entries</div>
+                      <div className={cn("text-lg font-black mt-1", theme === 'dark' ? "text-indigo-400" : "text-indigo-600")}>
+                        {selectedList.length}
+                      </div>
+                    </div>
+                    <div className={cn(
+                      "p-4 rounded-2xl text-center transition-colors duration-300 border flex flex-col justify-center items-center",
+                      theme === 'dark' ? "bg-zinc-900/40 border-zinc-900" : "bg-emerald-50/40 border-emerald-100/50"
+                    )}>
+                      <div className="text-[10px] uppercase font-black tracking-wider text-emerald-500">Cash In</div>
+                      <div className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1">
+                        {formatCurrency(selectedTotals.in)}
+                      </div>
+                    </div>
+                    <div className={cn(
+                      "p-4 rounded-2xl text-center transition-colors duration-300 border flex flex-col justify-center items-center",
+                      theme === 'dark' ? "bg-zinc-900/40 border-zinc-900" : "bg-rose-50/40 border-rose-100/50"
+                    )}>
+                      <div className="text-[10px] uppercase font-black tracking-wider text-rose-500">Cash Out</div>
+                      <div className="text-lg font-black text-rose-600 dark:text-rose-450 mt-1 break-all">
+                        {formatCurrency(selectedTotals.out)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      onClick={() => setShowShareModal(false)}
+                      className={cn(
+                        "flex-1 py-3 border rounded-xl font-bold transition-all cursor-pointer text-xs sm:text-sm text-center",
+                        theme === 'dark' ? "border-slate-800 text-slate-400 hover:bg-slate-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                      )}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleGenerateShareCode}
+                      disabled={isGenerating}
+                      className={cn(
+                        "flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm",
+                        isGenerating && "opacity-55 cursor-not-allowed"
+                      )}
+                    >
+                      {isGenerating ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        "Generate Share Code"
+                      )}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-6 text-center">
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <div className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Share Code</div>
+                      <div className={cn(
+                        "text-3xl sm:text-4xl font-extrabold tracking-widest font-mono p-4 rounded-2xl transition-all select-all flex items-center justify-center gap-3 border border-indigo-100 relative",
+                        theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-indigo-400" : "bg-indigo-50/50 border-indigo-100 text-indigo-600"
+                      )}>
+                        {generatedCode}
+                      </div>
+                    </div>
+                    {countdownText && (
+                      <div className={cn(
+                        "text-xs font-black px-3.5 py-1.5 rounded-full inline-block animate-pulse font-mono tracking-wider transition-colors duration-300 border",
+                        countdownText.includes('expired')
+                          ? "bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 border-rose-200/50"
+                          : "bg-amber-100/80 dark:bg-amber-950/45 text-[#1f2937] dark:text-amber-300 border-amber-300 dark:border-amber-900/60"
+                      )}>
+                        {countdownText}
+                      </div>
+                    )}
+                  </div>
+
+                  <p className={cn(
+                    "text-xs leading-relaxed max-w-sm mx-auto",
+                    theme === 'dark' ? "text-slate-400" : "text-slate-500"
+                  )}>
+                    Give this code to anyone you want to share these entries with. They can import it instantly inside TrackBook under <span className="font-bold">Import Shared Entries</span>.
+                  </p>
+
+                  <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                    <button
+                      onClick={handleCopy}
+                      disabled={countdownText.includes('expired')}
+                      className={cn(
+                        "flex-1 py-3 border rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-xs sm:text-sm",
+                        countdownText.includes('expired')
+                          ? "opacity-50 cursor-not-allowed border-slate-200 text-slate-400 dark:border-zinc-850 dark:text-zinc-600"
+                          : theme === 'dark'
+                            ? "border-slate-800 text-slate-300 hover:bg-slate-850 cursor-pointer"
+                            : "border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                      )}
+                    >
+                      {copied ? (
+                        <>
+                          <Check className="text-indigo-600 dark:text-indigo-400" size={16} />
+                          Copied!
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={16} />
+                          Copy Code
+                        </>
+                      )}
+                    </button>
+                    {countdownText.includes('expired') ? (
+                      <button
+                        disabled
+                        className="flex-1 py-3 bg-slate-100 dark:bg-zinc-900 border border-slate-250/10 text-slate-400 dark:text-zinc-650 rounded-xl font-bold transition-all flex items-center justify-center gap-2 cursor-not-allowed text-xs sm:text-sm text-center"
+                      >
+                        Expired
+                      </button>
+                    ) : (
+                      <a
+                        href={`https://api.whatsapp.com/send?text=${encodeURIComponent('Import my TrackBook entries using this code:\n\n' + generatedCode + '\n\nOpen TrackBook â†’ Import Shared Entries')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 py-3 bg-[#25D366] hover:bg-[#20ba59] active:scale-95 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm text-center shadow-lg shadow-emerald-500/10"
+                      >
+                        <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
+                          <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.724-1.457L0 24zm11.951-21.734c-5.382 0-9.761 4.377-9.765 9.761-.001 2.059.537 4.07 1.558 5.839l.24.417-1.033 3.774 3.861-1.013.407.242c1.71 1.015 3.693 1.55 5.733 1.552h.005c5.381 0 9.761-4.377 9.765-9.762.002-2.61-1.013-5.063-2.87-6.921-1.856-1.857-4.31-2.871-6.932-2.872zm4.721 13.43c-.259-.13-1.533-.757-1.77-.843-.238-.087-.41-.13-.582.13-.172.26-.665.843-.815 1.016-.15.174-.3.195-.559.066-.259-.13-1.096-.404-2.088-1.291-.772-.69-1.293-1.543-1.444-1.803-.15-.26-.016-.401.114-.53.117-.116.259-.303.39-.453.13-.15.172-.259.259-.433.086-.174.043-.324-.022-.454-.064-.13-.581-1.402-.796-1.921-.21-.506-.44-.437-.582-.444-.137-.007-.294-.008-.452-.008-.158 0-.417.06-.635.297-.218.238-.832.813-.832 1.984s.854 2.302.973 2.459c.119.157 1.68 2.565 4.07 3.593.57.245 1.014.391 1.359.502.571.181 1.09.155 1.5.094.457-.068 1.533-.626 1.748-1.23.216-.604.216-1.124.152-1.23-.065-.107-.238-.172-.497-.303z" />
+                        </svg>
+                        Share via WhatsApp
+                      </a>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => { setShowShareModal(false); setGeneratedCode(''); setShareExpiryTime(null); setCountdownText(''); }}
+                    className={cn(
+                      "w-full py-2.5 border rounded-xl font-bold transition-all text-xs cursor-pointer",
+                      theme === 'dark' ? "border-slate-800 hover:bg-slate-900 text-slate-400" : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                    )}
+                  >
+                    Close Action Window
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Sticky Mobile/Tablet Action Bar */}
+      <AnimatePresence>
+        {selectedTransactions.size > 0 && activeBookId && (
+          <motion.div
+            initial={{ y: "150%", opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: "150%", opacity: 0 }}
+            transition={{ type: "spring", damping: 28, stiffness: 300 }}
+            className={cn(
+              "lg:hidden fixed bottom-6 left-4 right-4 max-w-sm mx-auto rounded-[24px] p-4.5 pb-5 backdrop-blur-xl border z-[100] transition-colors duration-300 shadow-[0_16px_50px_rgba(0,0,0,0.3)]",
+              theme === 'dark' 
+                ? "bg-zinc-950/85 border-zinc-800/80 text-white" 
+                : "bg-white/90 border-slate-200/60 text-slate-900"
+            )}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100/80 dark:border-zinc-900/60 mb-3">
+              <span className={cn(
+                "text-[10px] font-extrabold tracking-widest uppercase",
+                theme === 'dark' ? "text-zinc-400" : "text-slate-500"
+              )}>
+                Selected ({selectedTransactions.size})
+              </span>
+              <div className="flex items-center gap-1.5 font-bold font-mono text-[11px]">
+                <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">
+                  +{formatCurrency(selectedTotals.in)}
+                </span>
+                <span className="text-slate-300 dark:text-zinc-800">/</span>
+                <span className="text-rose-600 dark:text-rose-450 font-extrabold">
+                  -{formatCurrency(selectedTotals.out)}
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              <button
+                onClick={toggleSelectAll}
+                className={cn(
+                  "flex flex-col items-center justify-center h-16 rounded-[18px] transition-all font-bold font-sans text-[10px] tracking-wider uppercase gap-1.5 duration-150 active:scale-95 cursor-pointer border",
+                  selectedTransactions.size === filteredTransactions.length
+                    ? "bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-600/20"
+                    : theme === 'dark'
+                      ? "border-zinc-800 text-slate-200 bg-zinc-900/60 hover:bg-zinc-850"
+                      : "border-slate-150 text-slate-700 bg-slate-50/50 hover:bg-slate-100/50"
+                )}
+              >
+                <CheckSquare size={16} />
+                <span>All</span>
+              </button>
+              <button
+                onClick={() => setSelectedTransactions(new Set())}
+                className={cn(
+                  "flex flex-col items-center justify-center h-16 rounded-[18px] transition-all font-bold font-sans text-[10px] tracking-wider uppercase gap-1.5 duration-150 active:scale-95 cursor-pointer border",
+                  theme === 'dark'
+                    ? "border-zinc-800 text-slate-200 bg-zinc-900/60 hover:bg-zinc-850"
+                    : "border-slate-150 text-slate-700 bg-slate-50/50 hover:bg-slate-100/50"
+                )}
+              >
+                <Square size={16} />
+                <span>None</span>
+              </button>
+              <button
+                onClick={() => setShowShareModal(true)}
+                className="flex flex-col items-center justify-center h-16 rounded-[18px] transition-all font-bold font-sans text-[10px] tracking-wider uppercase gap-1.5 bg-indigo-600 border border-indigo-650 text-white cursor-pointer hover:bg-indigo-700 active:scale-95 duration-150 shadow-lg shadow-indigo-600/20"
+              >
+                <Share size={16} />
+                <span>Share</span>
+              </button>
+              <button
+                onClick={() => { setShowBulkTransactionDeleteConfirm(true); setDeleteConfirmed(false); }}
+                className="flex flex-col items-center justify-center h-16 rounded-[18px] transition-all font-bold font-sans text-[10px] tracking-wider uppercase gap-1.5 bg-rose-600 border border-rose-650 text-white cursor-pointer hover:bg-rose-700 active:scale-95 duration-150 shadow-lg shadow-rose-600/20"
+              >
+                <Trash size={16} />
+                <span>Delete</span>
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Import Shared Entries Modal */}
+      <AnimatePresence>
+        {showImportModal && (
+          <div className={cn(
+            "fixed inset-0 z-[150] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
+            theme === 'dark' ? "bg-black/60" : "bg-slate-900/40"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className={cn(
+                "w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4 transition-colors duration-300 relative",
+                theme === 'dark' ? "bg-zinc-950 border border-zinc-900" : "bg-white"
+              )}
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-900 pb-3">
+                <h3 className={cn(
+                  "text-lg font-black transition-colors duration-300",
+                  theme === 'dark' ? "text-white" : "text-black"
+                )}>
+                  Import Shared Entries
+                </h3>
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-all cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {importError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 rounded-xl text-xs flex items-center gap-2 font-bold antialiased">
+                  <AlertCircle size={16} />
+                  <span>{importError}</span>
+                </div>
+              )}
+
+              {importSuccess ? (
+                <div className="text-center py-6 space-y-4">
+                  <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto">
+                    <CheckSquare size={24} className="text-emerald-600 dark:text-emerald-450" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-slate-850 dark:text-slate-100">Entries Imported!</h4>
+                    <p className="text-xs text-slate-400 mt-1">Creating book and refreshing workspace...</p>
+                    {importSummary && (
+                      <div className="mt-3 p-3 bg-indigo-50 dark:bg-indigo-950/20 rounded-2xl text-left border border-indigo-100/30">
+                        <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                          {importSummary.split(' | ')[0]}
+                        </div>
+                        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-1">
+                          {importSummary.split(' | ')[1]}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!isImporting && importCode.trim()) {
+                      handleImportSharedEntries();
+                    }
+                  }}
+                  className="space-y-4"
+                >
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <label className={cn(
+                        "text-[10px] uppercase font-black tracking-wider transition-colors duration-300",
+                        theme === 'dark' ? "text-slate-400" : "text-slate-500"
+                      )}>
+                        Enter 5-Character Share Code
+                      </label>
+                      <input 
+                        type="text"
+                        placeholder="e.g. TBK-82KD1"
+                        value={importCode}
+                        onChange={(e) => setImportCode(e.target.value.toUpperCase())}
+                        disabled={isImporting}
+                        className={cn(
+                          "w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-center font-bold font-mono text-lg tracking-widest",
+                          theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white placeholder-slate-700" : "bg-white border-slate-200 text-black placeholder-slate-300"
+                        )}
+                        maxLength={10}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button 
+                      type="button"
+                      onClick={() => setShowImportModal(false)}
+                      disabled={isImporting}
+                      className={cn(
+                        "flex-1 py-3 border rounded-xl font-bold transition-all cursor-pointer text-xs sm:text-sm",
+                        theme === 'dark' ? "border-slate-800 text-slate-400 hover:bg-slate-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                      )}
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      type="submit"
+                      disabled={isImporting || !importCode.trim()}
+                      className={cn(
+                        "flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-lg shadow-indigo-100 dark:shadow-none transition-all flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm",
+                        (isImporting || !importCode.trim()) && "opacity-55 cursor-not-allowed"
+                      )}
+                    >
+                      {isImporting ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Importing...
+                        </>
+                      ) : (
+                        "Import Entries"
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Hidden AI File Input */}
+      <input 
+        type="file"
+        multiple
+        accept="image/*"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        className="hidden"
+      />
+
+      {/* Hidden AI OCR File Input */}
+      <input 
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/jpg,image/*"
+        ref={aiOcrFileInputRef}
+        onChange={handleAiOcrFileSelected}
+        className="hidden"
+      />
+
+      {/* Floating Download Manager Portal */}
+      <DownloadCenter theme={theme} isOpen={showDownloadCenter} setIsOpen={setShowDownloadCenter} />
+
+      {/* Premium Media Picker Action Sheet */}
+      <MediaPickerSheet
+        isOpen={isMediaPickerOpen}
+        onClose={() => setIsMediaPickerOpen(false)}
+        theme={theme}
+        onSelectPhoto={() => {
+          if (activeUploadTarget === 'ai') {
+            fileInputRef.current?.click();
+          } else if (activeUploadTarget === 'transaction') {
+            multiFileInputRef.current?.click();
+          }
+        }}
+        onCaptureCamera={(e) => {
+          if (activeUploadTarget === 'ai') {
+            handleFileUpload(e);
+          } else if (activeUploadTarget === 'transaction') {
+            handleImageUpload(e);
+          }
+        }}
+      />
+
+      {editorState && (
+        <ImageEditorModal
+          file={editorState.file}
+          onDone={(editedFile) => {
+            editorState.onDone(editedFile);
+            setEditorState(null);
+          }}
+          onCancel={() => {
+            editorState.onCancel();
+            setEditorState(null);
+          }}
+          theme={theme as 'light' | 'dark'}
+        />
+      )}
+
+      {/* Premium Undo Toast Overlay */}
+      <AnimatePresence>
+        {showUndoToast && undoAction && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] w-[calc(100%-2rem)] max-w-sm"
+          >
+            <div className={cn(
+              "rounded-2xl border p-4.5 shadow-2xl flex flex-col gap-3 relative overflow-hidden transition-all duration-300",
+              theme === 'dark' 
+                ? "bg-zinc-950/95 border-zinc-800 text-white backdrop-blur-md" 
+                : "bg-white/95 border-slate-200 text-slate-800 backdrop-blur-md shadow-indigo-150"
+            )}>
+              {/* Top border animated indicator */}
+              <div className="absolute top-0 left-0 h-[3px] bg-indigo-600 transition-all duration-1000" style={{ width: `${(undoTimeLeft / 8) * 100}%` }} />
+              
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "p-2.5 rounded-xl shrink-0 flex items-center justify-center",
+                    theme === 'dark' ? "bg-red-950/40 text-rose-400" : "bg-rose-50 text-rose-600"
+                  )}>
+                    <Trash2 size={18} className="animate-pulse" />
+                  </div>
+                  <div className="space-y-0.5 text-left">
+                    <p className="text-xs font-black tracking-wider uppercase text-zinc-400 dark:text-zinc-500">
+                      Deleted {undoAction.type.includes('bulk') ? 'Items' : (undoAction.type === 'book' ? 'Cashbook' : 'Entry')}
+                    </p>
+                    <p className="text-sm font-bold truncate max-w-[180px]">
+                      {undoAction.type === 'book' 
+                        ? (undoAction.data.book?.name || undoAction.data.name) 
+                        : undoAction.type === 'bulk_books' 
+                          ? `${undoAction.data.length} Cashbooks`
+                          : undoAction.type === 'bulk_transactions'
+                            ? `${undoAction.data.length} Entries`
+                            : (undoAction.data.description || 'Untitled Entry')}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      vibrate(40);
+                      try {
+                        if (undoAction.type === 'book') {
+                          // Restore cashbook metadata
+                          setBooks(prevBooks => {
+                            const next = [...prevBooks];
+                            const insertIdx = undoAction.originalIndex !== undefined ? undoAction.originalIndex : next.length;
+                            next.splice(insertIdx, 0, undoAction.data.book || undoAction.data);
+                            return next;
+                          });
+                          // Restore entries cache
+                          const bookId = undoAction.data.book?.id || undoAction.data.id;
+                          if (undoAction.data.cachedEntries) {
+                            entriesCache.set(bookId, undoAction.data.cachedEntries);
+                          }
+                          // Do NOT navigate or select! Fulfills user requirement of no automatic navigation!
+
+                        } else if (undoAction.type === 'bulk_books') {
+                          setBooks(prevBooks => {
+                            const next = [...prevBooks];
+                            const items = undoAction.data;
+                            const sortedPairs = items.map((item: any, i: number) => ({
+                              item,
+                              index: undoAction.originalIndexes?.[i] ?? next.length
+                            })).sort((a: any, b: any) => a.index - b.index);
+
+                            sortedPairs.forEach((pair: any) => {
+                              next.splice(pair.index, 0, pair.item.book);
+                              if (pair.item.cachedEntries) {
+                                entriesCache.set(pair.item.book.id, pair.item.cachedEntries);
+                              }
+                            });
+                            return next;
+                          });
+
+                        } else if (undoAction.type === 'transaction') {
+                          // Put back in active book transactions
+                          setBooks(prevBooks => prevBooks.map(b => {
+                            if (b.id === undoAction.parentBookId) {
+                              const nextTx = [...b.transactions];
+                              const insertIdx = undoAction.originalIndex !== undefined ? undoAction.originalIndex : 0;
+                              nextTx.splice(insertIdx, 0, undoAction.data);
+                              return { ...b, transactions: nextTx };
+                            }
+                            return b;
+                          }));
+
+                          // Update entries cache
+                          const cached = entriesCache.get(undoAction.parentBookId || '');
+                          if (cached) {
+                            const nextCached = [...cached];
+                            const entryForCache = {
+                              id: undoAction.data.id,
+                              amount: undoAction.data.amount,
+                              type: undoAction.data.type,
+                              description: undoAction.data.description,
+                              category: undoAction.data.category,
+                              mode: undoAction.data.mode,
+                              date: undoAction.data.date,
+                              cashbook_id: undoAction.parentBookId,
+                              user_id: session?.user?.id
+                            };
+                            const insertIdx = undoAction.originalIndex !== undefined ? undoAction.originalIndex : 0;
+                            nextCached.splice(insertIdx, 0, entryForCache);
+                            entriesCache.set(undoAction.parentBookId || '', nextCached);
+                          }
+
+                        } else if (undoAction.type === 'bulk_transactions') {
+                          // Put back in active book transactions
+                          setBooks(prevBooks => prevBooks.map(b => {
+                            if (b.id === undoAction.parentBookId) {
+                              const nextTx = [...b.transactions];
+                              const sortedPairs = undoAction.data.map((tx: any, i: number) => ({
+                                tx,
+                                index: undoAction.originalIndexes?.[i] ?? 0
+                              })).sort((a: any, b: any) => a.index - b.index);
+
+                              sortedPairs.forEach((pair: any) => {
+                                nextTx.splice(pair.index, 0, pair.tx);
+                              });
+                              return { ...b, transactions: nextTx };
+                            }
+                            return b;
+                          }));
+
+                          // Update main entries cache
+                          const cached = entriesCache.get(undoAction.parentBookId || '');
+                          if (cached) {
+                            const nextCached = [...cached];
+                            const sortedPairs = undoAction.data.map((tx: any, i: number) => ({
+                              tx,
+                              index: undoAction.originalIndexes?.[i] ?? 0
+                            })).sort((a: any, b: any) => a.index - b.index);
+
+                            sortedPairs.forEach((pair: any) => {
+                              nextCached.splice(pair.index, 0, pair.tx);
+                            });
+                            entriesCache.set(undoAction.parentBookId || '', nextCached);
+                          }
+                        }
+                      } catch (err) {
+                        console.error('Error undoing deletion:', err);
+                      } finally {
+                        setShowUndoToast(false);
+                        setUndoAction(null);
+                      }
+                    }}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-black tracking-wider uppercase transition-all duration-200 shadow-sm grow-0 shrink-0 cursor-pointer",
+                      theme === 'dark' 
+                        ? "bg-indigo-600 hover:bg-indigo-500 text-white" 
+                        : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                    )}
+                  >
+                    UNDO
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (undoAction) {
+                        commitPendingDeletion(undoAction);
+                      }
+                      setShowUndoToast(false);
+                      setUndoAction(null);
+                    }}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-colors duration-200 shrink-0 cursor-pointer",
+                      theme === 'dark' ? "hover:bg-slate-800 text-slate-400" : "hover:bg-slate-100 text-slate-500"
+                    )}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Duplicate AI Entry Warning Modal */}
+      <AnimatePresence>
+        {showDuplicateAiWarning && (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={showDuplicateAiWarning.onCancel}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className={cn(
+                "w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 transition-colors duration-300 relative z-10",
+                theme === 'dark' ? "bg-zinc-950 border border-zinc-850 text-white" : "bg-white border border-slate-100 text-slate-800"
+              )}
+            >
+              <div className={cn(
+                "w-16 h-16 rounded-full flex items-center justify-center mx-auto transition-colors duration-300",
+                theme === 'dark' ? "bg-amber-900/20 text-amber-400" : "bg-amber-50 text-amber-600"
+              )}>
+                <AlertCircle size={32} />
+              </div>
+              <div className="space-y-2">
+                <h3 className={cn(
+                  "text-xl font-bold transition-colors duration-300",
+                  theme === 'dark' ? "text-slate-100" : "text-slate-800"
+                )}>Duplicate Entry?</h3>
+                <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed">
+                  This image and entry are already added. Do you want to add it anyway?
+                </p>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button 
+                  onClick={showDuplicateAiWarning.onCancel}
+                  className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={showDuplicateAiWarning.onConfirm}
+                  className={cn(
+                    "flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold transition-all cursor-pointer",
+                    theme === 'dark' ? "shadow-none" : "shadow-lg shadow-amber-100"
+                  )}
+                >
+                  Add Anyway
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Background Scanning Success Toast */}
+      <AnimatePresence>
+        {backgroundScanResult && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-6 right-6 z-[200] w-[calc(100%-2rem)] max-w-sm"
+          >
+            <div className={cn(
+              "rounded-2xl border p-4 shadow-2xl flex items-center justify-between gap-3 relative overflow-hidden transition-all duration-300",
+              theme === 'dark' 
+                ? "bg-zinc-950/95 border-zinc-800 text-white backdrop-blur-md" 
+                : "bg-white/95 border-slate-200 text-slate-800 backdrop-blur-md shadow-indigo-150"
+            )}>
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "p-2.5 rounded-xl shrink-0 flex items-center justify-center",
+                  theme === 'dark' ? "bg-emerald-950/40 text-emerald-400" : "bg-emerald-50 text-emerald-600"
+                )}>
+                  <CheckCircle2 size={18} className="animate-pulse" />
+                </div>
+                <div className="space-y-0.5 text-left">
+                  <p className="text-xs font-black tracking-wider uppercase text-emerald-600 dark:text-emerald-400">
+                    AI TrackBook
+                  </p>
+                  <p className="text-sm font-bold">
+                    {backgroundScanResult}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setBackgroundScanResult(null)}
+                className={cn(
+                  "p-1.5 rounded-lg transition-colors duration-200 shrink-0 cursor-pointer",
+                  theme === 'dark' ? "hover:bg-slate-800 text-slate-400" : "hover:bg-slate-100 text-slate-500"
+                )}
+              >
+                <X size={15} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* WhatsApp Share Modal */}
+      <ShareWhatsAppModal
+        isOpen={showWhatsAppModal}
+        onClose={() => setShowWhatsAppModal(false)}
+        cashbookId={activeBook?.id || ''}
+        cashbookName={activeBook?.name || ''}
+        filteredTransactions={filteredTransactions}
+        theme={theme}
+      />
+
+      {/* Quit App Confirmation Dialog Modal */}
+      <AnimatePresence>
+        {showQuitDialog && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 20 }}
+              className={cn(
+                "w-full max-w-sm p-6 rounded-3xl shadow-2xl space-y-5 text-center border transition-all duration-300",
+                theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
+              )}
+            >
+              <div className="mx-auto w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center border border-rose-500/20 shadow-inner">
+                <LogOut size={26} className="stroke-[2.5]" />
+              </div>
+              
+              <div className="space-y-1.5">
+                <h3 className="text-xl font-black tracking-tight">Quit TrackBook?</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                  Are you sure you want to quit the app?
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    vibrate();
+                    setShowQuitDialog(false);
+                  }}
+                  className={cn(
+                    "w-full py-3 rounded-xl font-bold text-xs transition-all border cursor-pointer",
+                    theme === 'dark' 
+                      ? "bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-slate-300" 
+                      : "bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700"
+                  )}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    vibrate();
+                    setShowQuitDialog(false);
+                    exitNativeApp();
+                  }}
+                  className="w-full py-3 rounded-xl font-black text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-600/25 active:scale-95 transition-all cursor-pointer"
+                >
+                  Yes, Quit
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Global In-App Dialog / Alert */}
+      <InAppDialog
+        isOpen={Boolean(inAppDialog)}
+        options={inAppDialog}
+        onClose={() => setInAppDialog(null)}
+        theme={theme}
+      />
+    </div>
+  );
+}
