@@ -1998,7 +1998,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
       if (results && results.length > 0) {
         // Map the results to handwrittenQueue structure
-        const mappedQueue = results.map(item => ({
+        const mappedQueue = results.map((item, idx) => ({
+          id: (item as any).id || (item.result as any)?.id || `ai_receipt_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
           file: item.file,
           result: item.result,
           previewUrl: item.result.cloudinaryUrl || (item.file && item.file.type.startsWith('image/') ? URL.createObjectURL(item.file) : '')
@@ -2134,7 +2135,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [handwrittenIsFood, setHandwrittenIsFood] = useState<boolean>(true);
 
   // Handwritten verification queue
-  const [handwrittenQueue, setHandwrittenQueue] = useState<Array<{ file: File; result: any; previewUrl: string }>>([]);
+  const [handwrittenQueue, setHandwrittenQueue] = useState<Array<{ id: string; file: File; result: any; previewUrl: string }>>([]);
   const [currentQueueIndex, setCurrentQueueIndex] = useState<number>(0);
   const [showFullScreenPreview, setShowFullScreenPreview] = useState<boolean>(false);
 
@@ -6628,6 +6629,92 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setActiveAiTaskId(taskId);
   };
 
+  const selectQueueItem = (index: number) => {
+    if (index < 0 || index >= handwrittenQueue.length) return;
+    vibrate();
+    setCurrentQueueIndex(index);
+    const item = handwrittenQueue[index];
+    if (item) {
+      setAiAmount(String(item.result.amount ?? ''));
+      setAiMerchant(item.result.merchant || 'Unknown Vendor');
+      setAiBillType(item.result.billType || 'Food');
+      setAiCategory(item.result.category || 'Food');
+      setAiDate(item.result.date || '27-05-2026');
+      setAiTime(item.result.time || '12:00 PM');
+      setAiMealType(item.result.mealType || '');
+      setAiDescription(item.result.description || 'Food Expense');
+      setAiOcrConfidence(item.result.ocr_confidence ?? 100);
+      setAiOcrDuration(item.result.ocr_duration_ms ?? 0);
+      setAiAnalytics(item.result.analytics || null);
+      setAiCloudinaryUrl(item.result.cloudinaryUrl || '');
+      setAiFile(item.file);
+      setAiFilePreviewUrl(item.previewUrl);
+    }
+  };
+
+  const handleDiscardAiItem = (targetId?: string) => {
+    vibrate();
+
+    const currentItem = handwrittenQueue[currentQueueIndex];
+    const idToRemove = targetId || currentItem?.id;
+
+    if (!idToRemove) {
+      return;
+    }
+
+    if (handwrittenQueue.length <= 1) {
+      setHandwrittenQueue([]);
+      setCurrentQueueIndex(0);
+      setAiFile(null);
+      setAiFilePreviewUrl('');
+      setAiAmount('');
+      setAiMerchant('');
+      setAiDescription('');
+      if (activeAiTaskId) {
+        backgroundExportManager.updateAiScanResults(activeAiTaskId, []).catch(console.error);
+      }
+      setAiWorkflowStep('group');
+      setAiConstructionModal(null);
+      return;
+    }
+
+    // Remove ONLY the targeted receipt. Every other queued receipt remains untouched.
+    const targetPosition = handwrittenQueue.findIndex(item => item.id === idToRemove);
+    if (targetPosition === -1) return;
+
+    const remainingQueue = handwrittenQueue.filter(item => item.id !== idToRemove);
+    setHandwrittenQueue(remainingQueue);
+
+    if (activeAiTaskId) {
+      const remainingResults = remainingQueue.map(item => ({ file: item.file, result: item.result }));
+      backgroundExportManager.updateAiScanResults(activeAiTaskId, remainingResults).catch(console.error);
+    }
+
+    let nextIndex = targetPosition;
+    if (nextIndex >= remainingQueue.length) {
+      nextIndex = remainingQueue.length - 1;
+    }
+    setCurrentQueueIndex(nextIndex);
+
+    const nextItem = remainingQueue[nextIndex];
+    if (nextItem) {
+      setAiAmount(String(nextItem.result.amount ?? ''));
+      setAiMerchant(nextItem.result.merchant || 'Unknown Vendor');
+      setAiBillType(nextItem.result.billType || 'Food');
+      setAiCategory(nextItem.result.category || 'Food');
+      setAiDate(nextItem.result.date || '27-05-2026');
+      setAiTime(nextItem.result.time || '12:00 PM');
+      setAiMealType(nextItem.result.mealType || '');
+      setAiDescription(nextItem.result.description || 'Food Expense');
+      setAiOcrConfidence(nextItem.result.ocr_confidence ?? 100);
+      setAiOcrDuration(nextItem.result.ocr_duration_ms ?? 0);
+      setAiAnalytics(nextItem.result.analytics || null);
+      setAiCloudinaryUrl(nextItem.result.cloudinaryUrl || '');
+      setAiFile(nextItem.file);
+      setAiFilePreviewUrl(nextItem.previewUrl);
+    }
+  };
+
   const handleSaveAiEntry = async (forceSave = false) => {
     if (!activeBookId) return;
 
@@ -6817,12 +6904,27 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       })();
     }
 
-    // Shift queue for next handwritten bill if available
-    const nextIndex = currentQueueIndex + 1;
-    if (nextIndex < handwrittenQueue.length) {
+    // Remove only the receipt that was just saved, keeping all other receipts in the queue.
+    const savedItem = handwrittenQueue[currentQueueIndex];
+    const remainingQueue = savedItem
+      ? handwrittenQueue.filter(item => item.id !== savedItem.id)
+      : handwrittenQueue.filter((_, idx) => idx !== currentQueueIndex);
+
+    setHandwrittenQueue(remainingQueue);
+
+    if (activeAiTaskId) {
+      const remainingResults = remainingQueue.map(item => ({ file: item.file, result: item.result }));
+      backgroundExportManager.updateAiScanResults(activeAiTaskId, remainingResults).catch(console.error);
+    }
+
+    if (remainingQueue.length > 0) {
+      let nextIndex = currentQueueIndex;
+      if (nextIndex >= remainingQueue.length) {
+        nextIndex = remainingQueue.length - 1;
+      }
       setCurrentQueueIndex(nextIndex);
-      const nextItem = handwrittenQueue[nextIndex];
-      setAiAmount(String(nextItem.result.amount));
+      const nextItem = remainingQueue[nextIndex];
+      setAiAmount(String(nextItem.result.amount ?? ''));
       setAiMerchant(nextItem.result.merchant || 'Unknown Vendor');
       setAiBillType(nextItem.result.billType || 'Food');
       setAiCategory(nextItem.result.category || 'Food');
@@ -9050,12 +9152,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-zinc-900/60 font-sans">
                           <button
                             type="button"
-                            onClick={() => {
-                              vibrate();
-                              setAiWorkflowStep('upload');
-                              setAiFile(null);
-                              setAiFilePreviewUrl('');
-                            }}
+                            onClick={() => handleDiscardAiItem(handwrittenQueue[currentQueueIndex]?.id)}
                             className={cn(
                               "flex-1 py-3.5 rounded-2xl font-bold text-xs tracking-wide border cursor-pointer active:scale-95 transition-all text-center flex items-center justify-center gap-1.5",
                               theme === 'dark' 
@@ -9065,7 +9162,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             id="btn-cancel-ai"
                           >
                             <Trash2 size={14} />
-                            Change Bill
+                            {handwrittenQueue.length > 1 ? `Discard Receipt ${currentQueueIndex + 1}` : 'Change Bill'}
                           </button>
                           
                           <button
@@ -9257,8 +9354,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   {/* WhatsApp Share Card */}
                   <div 
                     onClick={() => {
+                      vibrate();
                       if (activeBook) {
-                        setShowWhatsAppModal(true);
+                        navigate(`/whatsapp-reports?book=${encodeURIComponent(activeBook.name || '')}&id=${encodeURIComponent(activeBook.id || '')}`);
+                      } else {
+                        navigate('/whatsapp-reports');
                       }
                     }}
                     className={cn(
@@ -10357,6 +10457,32 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </div>
                     </div>
 
+                    {/* Multi-receipt Queue Selector Tabs */}
+                    {handwrittenQueue.length > 1 && (
+                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none shrink-0">
+                        <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider shrink-0 mr-1">
+                          Scanned ({handwrittenQueue.length}):
+                        </span>
+                        {handwrittenQueue.map((item, qIdx) => (
+                          <button
+                            key={item.id || `modal_queue_tab_${qIdx}`}
+                            type="button"
+                            onClick={() => selectQueueItem(qIdx)}
+                            className={cn(
+                              "px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 flex items-center gap-1",
+                              currentQueueIndex === qIdx
+                                ? "bg-indigo-600 text-white shadow-xs"
+                                : theme === 'dark'
+                                  ? "bg-zinc-900 border border-zinc-800 text-slate-400 hover:text-white"
+                                  : "bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900"
+                            )}
+                          >
+                            <span>Receipt {qIdx + 1}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="flex flex-col md:grid md:grid-cols-5 gap-4 overflow-hidden flex-1 min-h-0 w-full">
                       {/* Left Side: Thumbnail Preview */}
                       <div className="md:col-span-2 space-y-3 shrink-0">
@@ -10521,13 +10647,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-zinc-900/60 font-sans">
                           <button
                             type="button"
-                            onClick={() => {
-                              vibrate();
-                              setAiWorkflowStep('group');
-                              setAiFile(null);
-                              setAiFilePreviewUrl('');
-                              setAiConstructionModal(null);
-                            }}
+                            onClick={() => handleDiscardAiItem(handwrittenQueue[currentQueueIndex]?.id)}
                             className={cn(
                               "flex-1 py-3 rounded-xl font-bold text-xs tracking-wide border cursor-pointer active:scale-95 transition-all text-center flex items-center justify-center gap-1.5",
                               theme === 'dark' 
@@ -10536,7 +10656,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             )}
                           >
                             <Trash2 size={13} />
-                            Discard
+                            {handwrittenQueue.length > 1 ? `Discard Receipt ${currentQueueIndex + 1}` : 'Discard'}
                           </button>
                           
                           <button
