@@ -3,10 +3,10 @@
  * 
  * Supports:
  * 1. Native Android Google Sign-In via Android Credential Manager / Google Play Services
- *    - Opens Google account picker inside the native app (no Chrome browser redirect)
+ *    - Opens Google account picker natively inside the Android app (no Chrome browser redirect)
  *    - Retrieves Google ID Token (OIDC JWT)
- *    - Exchanges ID Token with Supabase using supabase.auth.signInWithIdToken()
- * 2. Web Browser Fallback (OAuth redirect) when running in a standard desktop/mobile browser.
+ *    - Authenticates directly with Supabase via supabase.auth.signInWithIdToken()
+ * 2. Web Browser Fallback (OAuth redirect) when running in a desktop/mobile web browser.
  */
 
 import { supabase } from '../lib/supabase';
@@ -40,25 +40,35 @@ declare global {
 }
 
 /**
- * Detect if app is running inside native Android WebView container
+ * Retrieve the active Android JavaScript bridge if injected
+ */
+export function getNativeBridge(): any {
+  if (typeof window === 'undefined') return null;
+
+  return (
+    window.TrackBookAndroid ||
+    window.Android ||
+    window.TrackBookNative ||
+    window.AndroidBridge ||
+    (window as any).TrackBookAndroidBridge ||
+    null
+  );
+}
+
+/**
+ * Detect if app is running inside the native Android WebView container
  */
 export function isNativeAndroidApp(): boolean {
   if (typeof window === 'undefined') return false;
 
-  // Check JavaScript bridge interfaces
-  if (
-    window.TrackBookAndroid ||
-    window.Android ||
-    window.AndroidBridge ||
-    window.TrackBookNative ||
-    (window as any).TrackBookAndroidBridge
-  ) {
+  // 1. Check if bridge is injected
+  if (getNativeBridge()) {
     return true;
   }
 
-  // Check user agent signature
+  // 2. Check user agent signature
   const ua = navigator.userAgent || '';
-  if (/TrackBookAndroid|TrackBookApp|TrackBookNative|TrackBook\/Android|wv/i.test(ua) && /Android/i.test(ua)) {
+  if (/TrackBookAndroid|TrackBookApp|TrackBookNative|TrackBook\/Android/i.test(ua)) {
     return true;
   }
 
@@ -68,52 +78,32 @@ export function isNativeAndroidApp(): boolean {
 /**
  * Check if the Android bridge has native Google Sign-In capability
  */
-export async function isNativeGoogleAuthAvailable(): Promise<boolean> {
-  if (!isNativeAndroidApp()) return false;
-
-  const bridge =
-    window.TrackBookAndroid ||
-    window.Android ||
-    window.AndroidBridge ||
-    window.TrackBookNative;
-
+export function isNativeGoogleAuthAvailable(): boolean {
+  const bridge = getNativeBridge();
   if (!bridge) return false;
 
-  if (typeof bridge.signInWithGoogle === 'function') {
-    if (typeof bridge.isGoogleAuthSupported === 'function') {
-      try {
-        const supported = await Promise.resolve(bridge.isGoogleAuthSupported());
-        return Boolean(supported);
-      } catch {
-        return true;
-      }
-    }
-    return true;
-  }
-
-  return false;
+  return (
+    typeof bridge.signInWithGoogle === 'function' ||
+    typeof bridge.nativeGoogleSignIn === 'function'
+  );
 }
 
 /**
  * Perform Native Google Authentication inside the Android App
  * 
- * 1. Calls Android Credential Manager / Google Sign-In API via Bridge
+ * 1. Calls Android Credential Manager via Bridge
  * 2. Gets Google ID Token without opening external Chrome browser
  * 3. Authenticates with Supabase via supabase.auth.signInWithIdToken()
- * 4. Initializes local session and unlocks TPIN
+ * 4. Initializes local session and unlocks MPIN
  */
 export async function performNativeGoogleSignIn(): Promise<NativeGoogleAuthResult> {
   if (!supabase) {
     return { success: false, error: 'Supabase is not configured.' };
   }
 
-  const bridge =
-    window.TrackBookAndroid ||
-    window.Android ||
-    window.AndroidBridge ||
-    window.TrackBookNative;
+  const bridge = getNativeBridge();
 
-  if (!bridge || typeof bridge.signInWithGoogle !== 'function') {
+  if (!bridge || (!bridge.signInWithGoogle && !bridge.nativeGoogleSignIn)) {
     return { 
       success: false, 
       error: 'Native Google Sign-In bridge is not available on this device.' 
@@ -124,9 +114,13 @@ export async function performNativeGoogleSignIn(): Promise<NativeGoogleAuthResul
     let hasResolved = false;
 
     const cleanup = () => {
-      delete window.onNativeGoogleSignInResult;
-      delete window.onNativeGoogleSignInSuccess;
-      delete window.onNativeGoogleSignInFailure;
+      try {
+        delete window.onNativeGoogleSignInResult;
+        delete window.onNativeGoogleSignInSuccess;
+        delete window.onNativeGoogleSignInFailure;
+      } catch (e) {
+        // ignore
+      }
     };
 
     const finish = (result: NativeGoogleAuthResult) => {
@@ -137,13 +131,13 @@ export async function performNativeGoogleSignIn(): Promise<NativeGoogleAuthResul
       }
     };
 
-    // Safety timeout: 45 seconds if user stays on account picker
+    // Timeout: 60 seconds for user account selection
     const timeoutTimer = setTimeout(() => {
       finish({
         success: false,
         error: 'Google Sign-In request timed out. Please try again.'
       });
-    }, 45000);
+    }, 60000);
 
     // Handler to process the Google ID Token with Supabase
     const handleGoogleIdToken = async (idToken: string, nonce?: string) => {
@@ -154,14 +148,27 @@ export async function performNativeGoogleSignIn(): Promise<NativeGoogleAuthResul
           return;
         }
 
-        console.log('[NativeGoogleAuth] Exchanging Google ID Token with Supabase...');
+        console.log('[NativeGoogleAuth] Authenticating Google ID Token with Supabase...');
 
-        // Authenticate with Supabase using native Google ID Token
-        const { data, error } = await supabase.auth.signInWithIdToken({
+        // 1. Authenticate with Supabase using native Google ID Token
+        let { data, error } = await supabase.auth.signInWithIdToken({
           provider: 'google',
           token: idToken,
           nonce: nonce || undefined
         });
+
+        // If error might be nonce related, retry once without nonce
+        if (error && nonce && (error.message?.toLowerCase().includes('nonce') || error.message?.toLowerCase().includes('token'))) {
+          console.warn('[NativeGoogleAuth] Retrying signInWithIdToken without nonce parameter...');
+          const retry = await supabase.auth.signInWithIdToken({
+            provider: 'google',
+            token: idToken
+          });
+          if (!retry.error) {
+            data = retry.data;
+            error = null;
+          }
+        }
 
         if (error) {
           console.error('[NativeGoogleAuth] Supabase signInWithIdToken error:', error);
@@ -172,7 +179,7 @@ export async function performNativeGoogleSignIn(): Promise<NativeGoogleAuthResul
         if (data?.session && data?.user) {
           console.log('[NativeGoogleAuth] Successfully signed in user:', data.user.email);
           
-          // Mark session unlocked in TPIN manager
+          // Mark session unlocked in MPIN manager
           if (data.user.id) {
             markSessionUnlocked(data.user.id);
           }
@@ -260,7 +267,9 @@ export async function performNativeGoogleSignIn(): Promise<NativeGoogleAuthResul
     // Trigger the native bridge
     try {
       console.log('[NativeGoogleAuth] Requesting native Google Sign-In from Android bridge...');
-      const bridgeResult = bridge.signInWithGoogle();
+      
+      const invokeBridge = bridge.signInWithGoogle || bridge.nativeGoogleSignIn;
+      const bridgeResult = typeof invokeBridge === 'function' ? invokeBridge.call(bridge) : null;
 
       // If bridge returns a Promise directly
       if (bridgeResult && typeof (bridgeResult as any).then === 'function') {
@@ -277,7 +286,7 @@ export async function performNativeGoogleSignIn(): Promise<NativeGoogleAuthResul
         window.onNativeGoogleSignInResult?.(bridgeResult);
       }
     } catch (bridgeErr: any) {
-      console.error('[NativeGoogleAuth] Error invoking bridge.signInWithGoogle():', bridgeErr);
+      console.error('[NativeGoogleAuth] Error invoking bridge:', bridgeErr);
       clearTimeout(timeoutTimer);
       finish({
         success: false,
@@ -292,7 +301,7 @@ export async function performNativeGoogleSignIn(): Promise<NativeGoogleAuthResul
  * 
  * Checks if running on Android with Native Google Auth support:
  * - If YES -> Uses native Android Google Sign-In (no external browser redirect!)
- * - If NO  -> Uses standard Supabase OAuth Web Flow as fallback
+ * - If NO / Fallback -> Uses standard Supabase OAuth Web Flow
  */
 export async function handleUniversalGoogleLogin(options?: {
   redirectTo?: string;
@@ -308,10 +317,10 @@ export async function handleUniversalGoogleLogin(options?: {
 
   options?.onStart?.();
 
-  const isNative = isNativeAndroidApp();
-  console.log(`[GoogleAuth] Starting Google login flow. isNativeAndroid: ${isNative}`);
+  const isNativeAuthAvailable = isNativeGoogleAuthAvailable();
+  console.log(`[GoogleAuth] Starting Google login flow. isNativeAuthAvailable: ${isNativeAuthAvailable}`);
 
-  if (isNative) {
+  if (isNativeAuthAvailable) {
     try {
       const result = await performNativeGoogleSignIn();
       if (result.success && result.session) {
@@ -325,20 +334,23 @@ export async function handleUniversalGoogleLogin(options?: {
         return;
       }
 
-      options?.onError?.(result.error || 'Native Google Sign-In failed.');
+      // If there's an error from native auth
+      console.warn('[GoogleAuth] Native Google Sign-In returned error:', result.error);
+      options?.onError?.(result.error || 'Google sign-in could not be completed.');
+      return;
     } catch (nativeErr: any) {
-      console.error('[GoogleAuth] Native login error:', nativeErr);
+      console.error('[GoogleAuth] Native login exception:', nativeErr);
       options?.onError?.(nativeErr?.message || 'Native Google sign-in failed.');
+      return;
     }
-    return;
   }
 
-  // Web Browser Fallback (Standard OAuth Flow)
+  // Web Browser Fallback (Standard Supabase OAuth Flow)
   try {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://trackbook.xyz';
     const redirectUrl = options?.redirectTo || origin;
 
-    console.log('[GoogleAuth] Fallback to Web OAuth redirect:', redirectUrl);
+    console.log('[GoogleAuth] Starting Web OAuth redirect:', redirectUrl);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {

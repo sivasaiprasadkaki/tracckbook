@@ -187,6 +187,7 @@ class MainActivity : AppCompatActivity() {
         webView.addJavascriptInterface(bridge, "TrackBookAndroid")
         webView.addJavascriptInterface(bridge, "Android")
         webView.addJavascriptInterface(bridge, "TrackBookNative")
+        webView.addJavascriptInterface(bridge, "AndroidBridge")
 
         // Setup Clients
         webView.webViewClient = object : WebViewClient() {

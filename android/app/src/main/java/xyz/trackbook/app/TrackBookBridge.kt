@@ -17,6 +17,7 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialCustomException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.fragment.app.FragmentActivity
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -39,13 +40,13 @@ import javax.crypto.spec.GCMParameterSpec
  * Provides:
  * 1. Native In-App Google Sign-In via Android Credential Manager (No Chrome Browser Redirects)
  * 2. Hardware-backed Biometric Authentication (BiometricPrompt)
- * 3. Android Keystore Encrypted TPIN Storage
+ * 3. Android Keystore Encrypted MPIN Storage
  * 4. Native App Lifecycle Controls
  */
 class TrackBookBridge(
     private val activity: FragmentActivity,
     private val webView: WebView,
-    private val googleWebClientId: String
+    private var googleWebClientId: String
 ) {
     private val tag = "TrackBookBridge"
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -62,27 +63,88 @@ class TrackBookBridge(
     }
 
     @JavascriptInterface
-    fun signInWithGoogle(optionsJson: String? = null): String {
-        Log.d(tag, "Native signInWithGoogle triggered from WebView")
+    fun isNativeGoogleAuthAvailable(): Boolean {
+        return true
+    }
+
+    @JavascriptInterface
+    fun getGoogleWebClientId(): String {
+        return googleWebClientId
+    }
+
+    @JavascriptInterface
+    fun setGoogleWebClientId(clientId: String) {
+        if (clientId.isNotBlank()) {
+            googleWebClientId = clientId
+            Log.d(tag, "Updated googleWebClientId to: $clientId")
+        }
+    }
+
+    @JavascriptInterface
+    fun signInWithGoogle(): String {
+        return performGoogleSignIn(null)
+    }
+
+    @JavascriptInterface
+    fun signInWithGoogle(optionsJson: String?): String {
+        return performGoogleSignIn(optionsJson)
+    }
+
+    @JavascriptInterface
+    fun nativeGoogleSignIn(): String {
+        return performGoogleSignIn(null)
+    }
+
+    @JavascriptInterface
+    fun nativeGoogleSignIn(optionsJson: String?): String {
+        return performGoogleSignIn(optionsJson)
+    }
+
+    private fun performGoogleSignIn(optionsJson: String?): String {
+        Log.d(tag, "Native performGoogleSignIn triggered from WebView with options: $optionsJson")
+
+        var targetClientId = googleWebClientId
+        var filterAuthorizedOnly = false
+        var autoSelect = false
+
+        if (!optionsJson.isNullOrBlank()) {
+            try {
+                val options = JSONObject(optionsJson)
+                if (options.has("clientId") && !options.getString("clientId").isNullOrBlank()) {
+                    targetClientId = options.getString("clientId")
+                } else if (options.has("serverClientId") && !options.getString("serverClientId").isNullOrBlank()) {
+                    targetClientId = options.getString("serverClientId")
+                }
+                if (options.has("filterByAuthorizedAccounts")) {
+                    filterAuthorizedOnly = options.getBoolean("filterByAuthorizedAccounts")
+                }
+                if (options.has("autoSelectEnabled")) {
+                    autoSelect = options.getBoolean("autoSelectEnabled")
+                }
+            } catch (e: Exception) {
+                Log.w(tag, "Failed to parse optionsJson: ${e.message}")
+            }
+        }
 
         coroutineScope.launch {
             try {
-                // Generate secure nonce for token exchange validation
+                // Generate cryptographically secure nonce for token exchange
                 val rawNonce = generateSecureNonce()
                 val hashedNonce = hashNonce(rawNonce)
 
-                val googleIdOption = GetGoogleIdOption.Builder()
-                    .setFilterByAuthorizedAccounts(false)
-                    .setServerClientId(googleWebClientId)
-                    .setAutoSelectEnabled(false)
+                val googleIdOptionBuilder = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(filterAuthorizedOnly)
+                    .setServerClientId(targetClientId)
+                    .setAutoSelectEnabled(autoSelect)
                     .setNonce(hashedNonce)
-                    .build()
+
+                val googleIdOption = googleIdOptionBuilder.build()
 
                 val request = GetCredentialRequest.Builder()
                     .addCredentialOption(googleIdOption)
                     .build()
 
-                Log.d(tag, "Invoking Android Credential Manager Bottom Sheet...")
+                Log.d(tag, "Invoking Android Credential Manager Bottom Sheet with clientId: $targetClientId")
                 val result: GetCredentialResponse = credentialManager.getCredential(
                     request = request,
                     context = activity
@@ -90,17 +152,23 @@ class TrackBookBridge(
 
                 handleCredentialResponse(result, rawNonce)
             } catch (e: GetCredentialCancellationException) {
-                Log.w(tag, "User cancelled Google Sign-In", e)
+                Log.w(tag, "User cancelled Google Sign-In account selection", e)
                 sendGoogleAuthResult(
                     success = false,
                     cancelled = true,
-                    error = "Google Sign-In was cancelled by user."
+                    error = "Google sign-in was cancelled."
+                )
+            } catch (e: GetCredentialCustomException) {
+                Log.e(tag, "Credential Manager custom error: ${e.type} - ${e.message}", e)
+                sendGoogleAuthResult(
+                    success = false,
+                    error = e.message ?: "Authentication error: ${e.type}"
                 )
             } catch (e: GetCredentialException) {
                 Log.e(tag, "Credential Manager error: ${e.message}", e)
                 sendGoogleAuthResult(
                     success = false,
-                    error = e.message ?: "Authentication error"
+                    error = e.message ?: "Google authentication could not be completed."
                 )
             } catch (e: Exception) {
                 Log.e(tag, "Unexpected Google Sign-In error: ${e.message}", e)
@@ -149,7 +217,7 @@ class TrackBookBridge(
             Log.e(tag, "Unexpected credential type returned: ${credential::class.java.name}")
             sendGoogleAuthResult(
                 success = false,
-                error = "Unexpected credential format received."
+                error = "Unexpected credential format received from Google."
             )
         }
     }
@@ -177,15 +245,27 @@ class TrackBookBridge(
 
         val jsonString = json.toString()
         mainHandler.post {
-            // Send to window.onNativeGoogleSignInResult
+            val escapedJson = jsonString
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", "\\n")
+                .replace("\r", "")
+
             val script = """
-                if (typeof window.onNativeGoogleSignInResult === 'function') {
-                    window.onNativeGoogleSignInResult($jsonString);
-                } else if (${success} && typeof window.onNativeGoogleSignInSuccess === 'function') {
-                    window.onNativeGoogleSignInSuccess('${idToken ?: ""}', '${nonce ?: ""}');
-                } else if (!${success} && typeof window.onNativeGoogleSignInFailure === 'function') {
-                    window.onNativeGoogleSignInFailure('${error ?: "Failed"}');
-                }
+                (function() {
+                    try {
+                        var res = JSON.parse('$escapedJson');
+                        if (typeof window.onNativeGoogleSignInResult === 'function') {
+                            window.onNativeGoogleSignInResult(res);
+                        } else if (${success} && typeof window.onNativeGoogleSignInSuccess === 'function') {
+                            window.onNativeGoogleSignInSuccess(res.idToken, res.nonce);
+                        } else if (!${success} && typeof window.onNativeGoogleSignInFailure === 'function') {
+                            window.onNativeGoogleSignInFailure(res.error || 'Failed');
+                        }
+                    } catch (e) {
+                        console.error('[TrackBookBridge] Error dispatching auth result:', e);
+                    }
+                })();
             """.trimIndent()
 
             webView.evaluateJavascript(script, null)
@@ -279,7 +359,6 @@ class TrackBookBridge(
 
                 override fun onAuthenticationFailed() {
                     super.onAuthenticationFailed()
-                    // Prompt handles retry internally
                 }
             }
         )
@@ -305,7 +384,7 @@ class TrackBookBridge(
     }
 
     // =========================================================================
-    // 3. HARDWARE-BACKED KEYSTORE TPIN STORAGE
+    // 3. HARDWARE-BACKED KEYSTORE MPIN STORAGE
     // =========================================================================
 
     private val keyAlias = "TrackBookSecureKey"

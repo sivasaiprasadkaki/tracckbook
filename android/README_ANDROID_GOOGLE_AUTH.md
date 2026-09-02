@@ -1,87 +1,111 @@
-# TrackBook Android Native Google Sign-In & Supabase Integration
+# TrackBook Android Native Google Sign-In & Supabase Integration Guide
 
-## Overview
-This implementation eliminates external Chrome browser redirects during Google Sign-In. The user authenticates completely inside the TrackBook Android app using Android Credential Manager / Google Play Services bottom-sheet dialogs.
+## 1. Overview & Architecture
 
----
-
-## Architecture Flow
+TrackBook Android uses **Android Credential Manager** (`androidx.credentials` + `com.google.android.libraries.identity.googleid:googleid`) to perform Google Authentication completely inside the Android app. No external Chrome browser popups or redirects are used.
 
 ```
-+-------------------------------------------------------------+
-| TrackBook React Web App (Inside WebView)                    |
-| User clicks "Continue with Google"                         |
-+------------------------------+------------------------------+
-                               | calls
-                               v
-+-------------------------------------------------------------+
-| window.TrackBookAndroid.signInWithGoogle()                  |
-| (TrackBookBridge.kt)                                        |
-+------------------------------+------------------------------+
-                               | triggers
-                               v
-+-------------------------------------------------------------+
-| Android Credential Manager (Native Google Bottom-Sheet)     |
-| User selects Google Account natively without Chrome redirect|
-+------------------------------+------------------------------+
-                               | returns
-                               v
-+-------------------------------------------------------------+
-| Google OpenID Connect ID Token (JWT)                        |
-| Dispatched back to WebView via:                             |
-| window.onNativeGoogleSignInResult({ success, idToken })     |
-+------------------------------+------------------------------+
-                               | calls
-                               v
-+-------------------------------------------------------------+
-| supabase.auth.signInWithIdToken({                           |
-|   provider: 'google',                                       |
-|   token: idToken                                            |
-| })                                                          |
-+------------------------------+------------------------------+
-                               | creates
-                               v
-+-------------------------------------------------------------+
-| Supabase User Session & Profiles Row                        |
-| Automatic redirect to TrackBook Dashboard (/cashbooks)     |
-+-------------------------------------------------------------+
++-------------------------------------------------------------------------+
+| TrackBook Android App (Native MainActivity + WebView)                   |
+| 1. User taps "Continue with Google" / "Login with Google"               |
++-----------------------------------+-------------------------------------+
+                                    |
+                                    v
++-------------------------------------------------------------------------+
+| JavaScript Bridge (TrackBookBridge.kt)                                  |
+| 2. performGoogleSignIn() generates secure nonce & triggers              |
+|    androidx.credentials.CredentialManager.getCredential()               |
++-----------------------------------+-------------------------------------+
+                                    |
+                                    v
++-------------------------------------------------------------------------+
+| Android Credential Manager (Native System UI)                           |
+| 3. System bottom sheet displays Google accounts. User taps account      |
+| 4. Google Play Services issues an OpenID Connect ID Token (JWT)         |
++-----------------------------------+-------------------------------------+
+                                    |
+                                    v
++-------------------------------------------------------------------------+
+| Supabase Authentication (In-App)                                        |
+| 5. Token is dispatched to WebView via window.onNativeGoogleSignInResult |
+| 6. supabase.auth.signInWithIdToken({ provider: 'google', token, nonce })|
+| 7. Supabase issues auth session + user profile record                   |
++-----------------------------------+-------------------------------------+
+                                    |
+                                    v
++-------------------------------------------------------------------------+
+| Authenticated TrackBook Dashboard                                       |
+| 8. React auth state detects SIGNED_IN event and routes to /cashbooks    |
++-------------------------------------------------------------------------+
 ```
 
 ---
 
-## 1. Google Cloud Console & Supabase Setup
+## 2. Google Cloud & Supabase Configuration
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/) -> **APIs & Services** -> **Credentials**.
+### Step A: Google Cloud Console Setup
+1. Open [Google Cloud Console - Credentials](https://console.cloud.google.com/apis/credentials).
 2. Ensure you have an **OAuth 2.0 Web Client ID**:
-   - This **Web Client ID** is set as `googleWebClientId` in `TrackBookBridge.kt` and `MainActivity.kt`.
-3. Create an **Android OAuth Client ID** in Google Cloud Console:
-   - Package Name: `xyz.trackbook.app` (or your Android package name)
-   - SHA-1 Certificate Fingerprint: Run `./gradlew signingReport` to copy your debug / release SHA-1 key.
-4. In [Supabase Dashboard](https://supabase.com/dashboard) -> **Authentication** -> **Providers** -> **Google**:
-   - Enable Google Provider.
-   - Enter your **Google Client ID** and **Google Client Secret**.
-   - Enable **"Skip nonce checks"** or use Supabase ID Token verification.
+   - Application type: **Web application**
+   - Name: `TrackBook Web Client`
+   - Copy the Client ID (e.g. `1234567890-abcdef.apps.googleusercontent.com`).
+   - *Note: This is the `serverClientId` used by Credential Manager in Android.*
+3. Create an **Android OAuth Client ID**:
+   - Application type: **Android**
+   - Package name: `xyz.trackbook.app`
+   - SHA-1 certificate fingerprint:
+     - Run `./gradlew signingReport` in the `android/` directory to get your debug / release SHA-1 fingerprint.
+
+### Step B: Supabase Dashboard Setup
+1. Open [Supabase Dashboard](https://supabase.com/dashboard) -> Your Project -> **Authentication** -> **Providers** -> **Google**.
+2. Enable Google authentication.
+3. Enter your **Google Client ID** (Web Client ID) and **Google Client Secret**.
+4. In **Authorized Client IDs** (under Google provider settings), ensure your Web Client ID is listed.
+5. Save changes.
 
 ---
 
-## 2. Updated File Locations
+## 3. Files in the Android & Web Codebase
 
-1. **React Authentication Service**: `/src/services/nativeGoogleAuthService.ts`
-   - Detects Android bridge vs Web browser.
-   - Communicates with native bridge.
-   - Exchanges Google ID Token with `supabase.auth.signInWithIdToken()`.
-   - Handles user cancellation, timeouts, and error states gracefully.
+1. **`android/app/src/main/java/xyz/trackbook/app/TrackBookBridge.kt`**:
+   - Implements native bridge methods `signInWithGoogle()`, `nativeGoogleSignIn()`, `isGoogleAuthSupported()`.
+   - Uses `androidx.credentials.CredentialManager` and `GetGoogleIdOption`.
+   - Generates cryptographically secure raw & hashed nonces.
+   - Handles user cancellation (`GetCredentialCancellationException`) smoothly without errors.
+   - Dispatches JSON result to `window.onNativeGoogleSignInResult`.
 
-2. **React Auth Screen**: `/src/components/Auth.tsx`
-   - Updated `handleGoogleLogin` to use `handleUniversalGoogleLogin`.
-   - Automatically navigates to `/cashbooks` upon successful authentication.
+2. **`android/app/src/main/java/xyz/trackbook/app/MainActivity.kt`**:
+   - Binds `TrackBookBridge` across interfaces: `TrackBookAndroid`, `Android`, `TrackBookNative`, and `AndroidBridge`.
+   - Enables DOM storage, database persistence, and third-party cookies for seamless session persistence.
 
-3. **Android Bridge**: `/android/app/src/main/java/xyz/trackbook/app/TrackBookBridge.kt`
-   - Implements `signInWithGoogle()` using `androidx.credentials.CredentialManager`.
-   - Preserves Hardware BiometricPrompt and Keystore MPIN storage.
+3. **`android/app/build.gradle.kts`**:
+   - Contains `androidx.credentials:credentials:1.5.0-rc01`, `androidx.credentials:credentials-play-services-auth:1.5.0-rc01`, and `com.google.android.libraries.identity.googleid:googleid:1.1.1`.
 
-4. **Android MainActivity**: `/android/app/src/main/java/xyz/trackbook/app/MainActivity.kt`
-   - Configures WebView with JavaScript interfaces, WebChromeClient file picker, DownloadListener, and Camera permissions.
+4. **`src/services/nativeGoogleAuthService.ts`**:
+   - `isNativeGoogleAuthAvailable()`: Checks if native Android bridge is available.
+   - `performNativeGoogleSignIn()`: Connects with native bridge and calls `supabase.auth.signInWithIdToken()`.
+   - `handleUniversalGoogleLogin()`: Intelligently switches between native Credential Manager (on Android) and standard Supabase Web OAuth (on web browsers), preventing "bridge not available" errors.
 
-5. **Android Dependencies**: `/android/app/build.gradle.kts`
-   - Includes `androidx.credentials`, `googleid`, and `androidx.biometric`.
+5. **`src/components/Auth.tsx`**, **`src/components/DesktopSignIn.tsx`**, **`src/components/DesktopSignUp.tsx`**:
+   - Google authentication buttons seamlessly call `handleUniversalGoogleLogin`.
+
+---
+
+## 4. Building & Running the Android App
+
+```bash
+# 1. Navigate to android directory
+cd android
+
+# 2. Check signing SHA-1 fingerprint
+./gradlew signingReport
+
+# 3. Build the debug APK
+./gradlew assembleDebug
+
+# 4. The output APK will be located at:
+# android/app/build/outputs/apk/debug/app-debug.apk
+
+# 5. Install onto connected Android device or emulator:
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
