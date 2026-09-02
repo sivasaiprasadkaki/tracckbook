@@ -1,5 +1,5 @@
-import React from 'react';
-import { Loader2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Loader2, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface DesktopSignInProps {
   email: string;
@@ -32,233 +32,289 @@ export default function DesktopSignIn({
   setMode,
   navigate
 }: DesktopSignInProps) {
-
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    handleAuth(e);
-  };
+  const [rememberMe, setRememberMe] = useState(true);
 
   return (
-    <div className="bg-background text-on-background h-screen overflow-hidden font-body-md selection:bg-primary-container selection:text-on-primary-container">
+    <div className="min-h-screen bg-[#fbf8ff] text-[#1b1a23] antialiased flex flex-col justify-between selection:bg-[#4648d4]/15 selection:text-[#4648d4] font-['Inter',sans-serif]">
       <style>{`
-        .glass-panel {
-            background: rgba(255, 255, 255, 0.7);
-            backdrop-filter: blur(32px);
-            -webkit-backdrop-filter: blur(32px);
-            border: 1px solid rgba(255, 255, 255, 0.5);
-            box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.04);
+        .pulse-ring {
+          box-shadow: 0 0 0 0 rgba(132, 85, 239, 0.4);
+          animation: pulseRing 2.5s infinite cubic-bezier(0.66, 0, 0, 1);
         }
-        .float-anim {
-            animation: float 6s ease-in-out infinite;
+        @keyframes pulseRing {
+          to {
+            box-shadow: 0 0 0 16px rgba(132, 85, 239, 0);
+          }
         }
-        .float-anim-delayed {
-            animation: float 6s ease-in-out 3s infinite;
+        .float-card {
+          animation: floatCard 5s ease-in-out infinite;
         }
-        @keyframes float {
-            0% { transform: translateY(0px); }
-            50% { transform: translateY(-10px); }
-            100% { transform: translateY(0px); }
-        }
-        .fade-in-up {
-            animation: fadeInUp 0.8s ease-out forwards;
-            opacity: 0;
-        }
-        @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
+        @keyframes floatCard {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-8px); }
         }
       `}</style>
 
-      <div className="flex h-full w-full">
-        {/* Left Side: Branding Panel (60%) */}
-        <div className="hidden lg:flex w-[60%] bg-[#F7F8FC] flex-col justify-between p-[40px] relative overflow-hidden">
-          {/* Ambient Background Gradients */}
-          <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-primary/5 blur-[120px]"></div>
-          <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-secondary-container/10 blur-[120px]"></div>
-          
-          <div className="z-10 fade-in-up" style={{ animationDelay: '0.1s' }}>
-            <img 
-              alt="AI TrackBook Logo" 
-              className="h-10 mb-8 cursor-pointer" 
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuAg50DxnvJBIIV-VZUq1WR6ehWpbnIgEsszjWuRX4MBvkIA_q1LshJLCJCNZEQ0pxIfpCa8SYNDfB8dgaMUfl5rsj3urQTWrSnriqUQcvQ153exlXMFDhRiUIDAw22k7my9sEGGJNU-4AIq9fB06H9rvt6X1m6cQrjTFy2frJmXZ7pvcTCw9b3F_rFqVz6zDYrN73srq01JI4kVd3QtbpYbcQLno79tUJkD5bh_wdmmcBsDV13-w_ZZOzRCLeuuBURmsw_5A5ayOltx"
-              onClick={() => navigate('/')}
-            />
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-container border border-surface-variant mb-6">
-              <span className="material-symbols-outlined text-[16px] text-primary">auto_awesome</span>
-              <span className="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">Introducing AI TrackBook</span>
-            </div>
-            <h1 className="font-display-lg text-display-lg text-on-surface mb-6 leading-tight max-w-2xl">
-              Track Smarter.<br />
-              Import Faster.<br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary-container">Let AI TrackBook Do The Work.</span>
-            </h1>
-            <p className="font-body-lg text-body-lg text-on-surface-variant max-w-xl">
-              Experience seamless financial tracking powered by visionary AI. Connect your accounts, automate categorization, and gain real-time insights with zero cognitive load.
-            </p>
+      {/* Top Header */}
+      <header className="w-full px-6 sm:px-12 py-5 flex items-center justify-between">
+        <div 
+          onClick={() => navigate('/')} 
+          className="flex items-center gap-3 cursor-pointer select-none"
+        >
+          <div className="w-10 h-10 rounded-xl bg-[#4648d4] flex items-center justify-center text-white shadow-md shadow-[#4648d4]/20 hover:opacity-90 transition-opacity">
+            <span className="material-symbols-outlined text-2xl">menu_book</span>
           </div>
+          <span className="text-xl font-bold tracking-tight text-[#4648d4] font-['Hanken_Grotesk',sans-serif]">
+            TrackBook
+          </span>
+        </div>
+      </header>
 
-          {/* Visual Centerpiece */}
-          <div className="relative flex-1 flex items-center justify-center mt-12 z-10 fade-in-up" style={{ animationDelay: '0.3s' }}>
-            <div className="relative w-full max-w-3xl aspect-[16/9]">
-              <img 
-                alt="AI TrackBook Dashboard Visualization" 
-                className="absolute inset-0 w-full h-full object-contain float-anim" 
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuA0yoahekQxJ4WJhdwDwBiENJzES4pNaEIiw5CmqBxln5_bVUGIPA7ts74VB38UueRvH-QAlZ1tVDK-yAWB0TbccmR7G4a3UBD9skGizoG5Th2Namro1h6y_ciVKaNFN3_ec8lGhGDbXgh70dwXfGpymWW7njvMni9DBfJQPN1Yu_8vukWaWxl4NP1yi6rwWbRPkqYPO20xJwzHQ5h0jPtDcAi8j7vHYC1VINj-ZqGD1OeCJhn_TK4lLNQDJb2metGTp34MAnfwnNof" 
-              />
-              
-              {/* Floating Widgets / Glassmorphism Accents */}
-              <div className="absolute top-[15%] left-[5%] glass-panel rounded-none p-4 flex items-center gap-4 float-anim-delayed">
-                <div className="w-10 h-10 rounded-none bg-primary-container/20 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-primary">receipt_long</span>
-                </div>
+      {/* Main Split Grid */}
+      <main className="flex-1 grid grid-cols-1 lg:grid-cols-2 max-w-7xl mx-auto w-full items-center px-4 sm:px-8 py-4 lg:py-8 gap-8">
+        {/* Left Illustration Column (Desktop) */}
+        <div className="hidden lg:flex flex-col justify-center items-center relative p-10 lg:p-12 bg-slate-900 rounded-3xl overflow-hidden text-white shadow-2xl min-h-[560px] select-none">
+          {/* Ambient Glows */}
+          <div className="absolute top-0 right-0 w-80 h-80 bg-[#4648d4]/25 rounded-full blur-[100px] pointer-events-none" />
+          <div className="absolute bottom-0 left-0 w-80 h-80 bg-[#8455ef]/20 rounded-full blur-[100px] pointer-events-none" />
+
+          {/* Floating Expense Card Mockup */}
+          <div className="relative z-10 w-full max-w-sm flex flex-col gap-5 float-card font-['Inter',sans-serif]">
+            {/* Top Summary Card */}
+            <div className="bg-white/10 backdrop-blur-md border border-white/15 p-6 rounded-2xl shadow-xl">
+              <div className="flex justify-between items-start mb-3">
                 <div>
-                  <p className="font-label-md text-label-md text-outline">LATEST SCAN</p>
-                  <p className="font-body-md text-body-md font-medium text-on-surface">Uber Ride - ₹24.50</p>
+                  <span className="text-[11px] font-semibold tracking-wider text-slate-300 uppercase font-['Inter',sans-serif]">
+                    TOTAL EXPENSES
+                  </span>
+                  <div className="text-3xl font-bold tracking-tight text-white mt-1 font-['JetBrains_Mono',monospace]">
+                    ₹12,450<span className="text-xl text-white/70">.00</span>
+                  </div>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-[#8455ef]/30 text-[#8455ef] border border-[#8455ef]/40 flex items-center justify-center pulse-ring">
+                  <span className="material-symbols-outlined text-xl text-indigo-200">receipt_long</span>
                 </div>
               </div>
-              
-              <div className="absolute bottom-[20%] right-[5%] glass-panel rounded-none p-4 flex items-center gap-4 float-anim">
-                <div className="w-10 h-10 rounded-none bg-secondary-container/20 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-secondary">analytics</span>
+
+              {/* Sparkline Curve */}
+              <div className="pt-2">
+                <svg className="w-full h-12 stroke-indigo-300 fill-none" viewBox="0 0 300 60">
+                  <path
+                    d="M 0 45 C 50 30, 80 50, 130 20 C 180 -5, 230 40, 300 15"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M 0 45 C 50 30, 80 50, 130 20 C 180 -5, 230 40, 300 15 L 300 60 L 0 60 Z"
+                    fill="rgba(132, 85, 239, 0.15)"
+                    stroke="none"
+                  />
+                </svg>
+              </div>
+            </div>
+
+            {/* Transaction Rows */}
+            <div className="space-y-2.5 font-['Inter',sans-serif]">
+              <div className="bg-white/10 backdrop-blur-md border border-white/10 p-3.5 rounded-xl flex items-center justify-between hover:bg-white/15 transition-all">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🛒</span>
+                  <div>
+                    <div className="text-xs font-semibold text-white">Groceries & Supermarket</div>
+                    <div className="text-[10px] text-slate-400">Today, 2:30 PM</div>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-label-md text-label-md text-outline">AI INSIGHT</p>
-                  <p className="font-body-md text-body-md font-medium text-on-surface">Travel budget optimal</p>
+                <span className="text-xs font-bold font-['JetBrains_Mono',monospace] text-rose-300">-₹3,240.00</span>
+              </div>
+
+              <div className="bg-white/10 backdrop-blur-md border border-white/10 p-3.5 rounded-xl flex items-center justify-between hover:bg-white/15 transition-all">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">☁️</span>
+                  <div>
+                    <div className="text-xs font-semibold text-white">AWS Cloud Services</div>
+                    <div className="text-[10px] text-slate-400">Yesterday</div>
+                  </div>
                 </div>
+                <span className="text-xs font-bold font-['JetBrains_Mono',monospace] text-rose-300">-₹4,500.00</span>
+              </div>
+
+              <div className="bg-white/10 backdrop-blur-md border border-white/10 p-3.5 rounded-xl flex items-center justify-between hover:bg-white/15 transition-all">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🚗</span>
+                  <div>
+                    <div className="text-xs font-semibold text-white">Uber Rides</div>
+                    <div className="text-[10px] text-slate-400">Aug 12</div>
+                  </div>
+                </div>
+                <span className="text-xs font-bold font-['JetBrains_Mono',monospace] text-rose-300">-₹850.00</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right Side: Auth Card (40%) */}
-        <div className="w-full lg:w-[40%] bg-surface flex items-center justify-center p-[16px] lg:p-[40px] z-20 shadow-[-20px_0_40px_rgba(0,0,0,0.02)]">
-          <div className="w-full max-w-md bg-white rounded-none p-8 lg:p-10 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.08)] border border-surface-variant fade-in-up" style={{ animationDelay: '0.2s' }}>
-            
-            <div className="text-center mb-8">
-              <img 
-                alt="AI TrackBook Logo Mobile" 
-                className="h-8 mx-auto mb-6 lg:hidden cursor-pointer" 
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuAg50DxnvJBIIV-VZUq1WR6ehWpbnIgEsszjWuRX4MBvkIA_q1LshJLCJCNZEQ0pxIfpCa8SYNDfB8dgaMUfl5rsj3urQTWrSnriqUQcvQ153exlXMFDhRiUIDAw22k7my9sEGGJNU-4AIq9fB06H9rvt6X1m6cQrjTFy2frJmXZ7pvcTCw9b3F_rFqVz6zDYrN73srq01JI4kVd3QtbpYbcQLno79tUJkD5bh_wdmmcBsDV13-w_ZZOzRCLeuuBURmsw_5A5ayOltx"
-                onClick={() => navigate('/')}
-              />
-              <h2 className="font-headline-lg text-headline-lg lg:text-headline-lg text-on-surface mb-2">Welcome back</h2>
-              <p className="font-body-md text-body-md text-on-surface-variant">Sign in to continue to your dashboard.</p>
+        {/* Right Form Column */}
+        <div className="flex flex-col justify-center px-4 sm:px-10 lg:px-12 py-6">
+          <div className="max-w-md w-full mx-auto">
+            <div className="mb-6">
+              <h1 className="text-3xl sm:text-[34px] lg:text-[36px] font-bold tracking-tight text-[#1b1a23] leading-tight font-['Hanken_Grotesk',sans-serif]">
+                Welcome back to TrackBook
+              </h1>
+              <p className="mt-2 text-[15px] text-[#474556] leading-relaxed font-normal font-['Inter',sans-serif]">
+                Track your expenses, understand your money, and stay in control.
+              </p>
             </div>
 
-            {/* Error and Success alerts */}
+            {/* Error & Success Feedback Alerts */}
             {error && (
-              <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-none flex items-start gap-2 text-xs font-semibold mb-4">
-                <span className="material-symbols-outlined text-rose-500 text-[18px]">error</span>
-                <span className="flex-1 leading-relaxed">{error}</span>
+              <div className="mb-5 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm flex items-start gap-3 animate-fade-in font-['Inter',sans-serif]">
+                <AlertCircle className="w-5 h-5 shrink-0 text-rose-600 mt-0.5" />
+                <div className="flex-1 whitespace-pre-line">{error}</div>
               </div>
             )}
+
             {success && (
-              <div className="bg-emerald-50 border border-emerald-100 text-emerald-600 px-4 py-3 rounded-none flex items-start gap-2 text-xs font-semibold mb-4">
-                <span className="material-symbols-outlined text-emerald-500 text-[18px]">check_circle</span>
-                <span className="flex-1 leading-relaxed whitespace-pre-line">{success}</span>
+              <div className="mb-5 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm flex items-start gap-3 animate-fade-in font-['Inter',sans-serif]">
+                <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600 mt-0.5" />
+                <div className="flex-1 whitespace-pre-line">{success}</div>
               </div>
             )}
 
-            <form onSubmit={handleFormSubmit} className="space-y-5">
+            <form onSubmit={handleAuth} className="space-y-4">
+              {/* Email */}
               <div>
-                <label className="block font-label-md text-label-md text-on-surface-variant mb-2" htmlFor="email">EMAIL ADDRESS</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <span className="material-symbols-outlined text-outline-variant text-[20px]">mail</span>
-                  </div>
-                  <input 
-                    className="block w-full pl-10 pr-3 py-3 border border-outline-variant rounded-none bg-surface-container-lowest text-on-surface placeholder-outline focus:ring-2 focus:ring-primary-container focus:border-primary-container transition-all text-sm" 
-                    id="email" 
-                    placeholder="you@company.com" 
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
+                <label className="block text-[11px] font-semibold tracking-wider text-slate-700 uppercase mb-1.5 font-['Inter',sans-serif]">
+                  EMAIL
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="siva@gmail.com"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-[#4648d4] focus:ring-2 focus:ring-[#4648d4]/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400 font-['Inter',sans-serif]"
+                />
               </div>
 
+              {/* Password */}
               <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="block font-label-md text-label-md text-on-surface-variant" htmlFor="password">PASSWORD</label>
-                  <button 
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-[11px] font-semibold tracking-wider text-slate-700 uppercase font-['Inter',sans-serif]">
+                    PASSWORD
+                  </label>
+                  <button
                     type="button"
-                    onClick={() => setMode('forgot')}
-                    className="font-label-md text-label-md text-primary hover:text-primary-container transition-colors bg-transparent border-none cursor-pointer outline-none font-bold"
+                    onClick={() => {
+                      setMode('forgot');
+                      navigate('/forgot');
+                    }}
+                    className="text-xs font-semibold text-[#4648d4] hover:underline cursor-pointer bg-transparent border-none p-0 font-['Inter',sans-serif]"
                   >
-                    Forgot Password?
+                    Forgot password?
                   </button>
                 </div>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <span className="material-symbols-outlined text-outline-variant text-[20px]">lock</span>
-                  </div>
-                  <input 
-                    className="block w-full pl-10 pr-10 py-3 border border-outline-variant rounded-none bg-surface-container-lowest text-on-surface placeholder-outline focus:ring-2 focus:ring-primary-container focus:border-primary-container transition-all text-sm" 
-                    id="password" 
-                    placeholder="••••••••" 
+                  <input
                     type={showPassword ? 'text' : 'password'}
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    className="w-full pl-4 pr-11 py-3 rounded-xl border border-slate-300 focus:border-[#4648d4] focus:ring-2 focus:ring-[#4648d4]/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400 font-['Inter',sans-serif]"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-outline-variant hover:text-on-surface transition-colors p-1"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 transition-colors"
                   >
-                    <span className="material-symbols-outlined text-[20px]">
-                      {showPassword ? 'visibility_off' : 'visibility'}
-                    </span>
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
               </div>
 
-              <button 
-                className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-none shadow-sm font-body-md text-body-md font-medium text-white bg-primary hover:bg-primary-container hover:shadow-md transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary mt-6 cursor-pointer" 
-                type="submit"
-                disabled={loading}
-              >
-                {loading ? <Loader2 className="animate-spin w-5 h-5 mr-2" /> : 'Sign In'}
-              </button>
-
-              <div className="relative py-4">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-surface-variant"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-on-surface-variant font-label-md text-label-md">OR</span>
-                </div>
+              {/* Remember Me Checkbox */}
+              <div className="flex items-center">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded text-[#4648d4] focus:ring-[#4648d4] border-slate-300 cursor-pointer"
+                  />
+                  <span className="text-xs font-medium text-slate-600 font-['Inter',sans-serif]">Remember me</span>
+                </label>
               </div>
 
-              <button 
-                className="w-full flex items-center justify-center py-3 px-4 border border-outline-variant rounded-none shadow-sm font-body-md text-body-md font-medium text-on-surface bg-white hover:bg-surface-container-low transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary cursor-pointer" 
+              {/* Sign In Submit Button */}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#4648d4] to-[#6052a8] text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-[#4648d4]/25 hover:shadow-lg hover:shadow-[#4648d4]/35 hover:brightness-105 active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-['Inter',sans-serif]"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    <span>Signing in...</span>
+                  </>
+                ) : (
+                  <span>Sign In</span>
+                )}
+              </button>
+
+              {/* Divider */}
+              <div className="relative flex items-center justify-center my-4">
+                <div className="border-t border-slate-200 w-full" />
+                <span className="bg-[#fbf8ff] px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-widest font-['Inter',sans-serif]">
+                  OR
+                </span>
+              </div>
+
+              {/* Google Login Button */}
+              <button
                 type="button"
                 onClick={handleGoogleLogin}
+                disabled={loading}
+                className="w-full py-3 px-4 rounded-xl bg-white border border-slate-300 text-slate-700 font-medium text-sm hover:bg-slate-50 hover:border-slate-400 active:scale-[0.99] transition-all flex items-center justify-center gap-3 shadow-sm cursor-pointer disabled:opacity-60 font-['Inter',sans-serif]"
               >
-                <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"></path>
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"></path>
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"></path>
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"></path>
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                    fill="#4285F4"
+                  />
+                  <path
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                    fill="#34A853"
+                  />
+                  <path
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                    fill="#FBBC05"
+                  />
+                  <path
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                    fill="#EA4335"
+                  />
                 </svg>
-                Login with Google
+                <span>Continue with Google</span>
               </button>
             </form>
 
-            <p className="mt-8 text-center font-body-sm text-body-sm text-on-surface-variant">
-              Don't have an account?{' '}
-              <button 
-                onClick={() => setMode('signup')}
-                className="font-medium text-primary hover:text-primary-container transition-colors bg-transparent border-none cursor-pointer outline-none font-bold ml-1"
-              >
-                Create one
-              </button>
-            </p>
-
+            {/* Bottom Signup Link */}
+            <div className="mt-6 text-center">
+              <p className="text-sm text-slate-600 font-['Inter',sans-serif]">
+                New to TrackBook?{' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('signup');
+                    navigate('/signup');
+                  }}
+                  className="font-semibold text-[#4648d4] hover:underline cursor-pointer bg-transparent border-none p-0 inline font-['Inter',sans-serif]"
+                >
+                  Create an account
+                </button>
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

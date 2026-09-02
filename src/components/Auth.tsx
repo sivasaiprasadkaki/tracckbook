@@ -645,64 +645,62 @@ export default function Auth({
     }
   };
 
-  if (isDesktop) {
-    if (mode === 'signin') {
-      return (
-        <DesktopSignIn
-          email={email}
-          setEmail={setEmail}
-          password={password}
-          setPassword={setPassword}
-          showPassword={showPassword}
-          setShowPassword={setShowPassword}
-          loading={loading}
-          error={error}
-          success={success}
-          handleAuth={handleAuth}
-          handleGoogleLogin={handleGoogleLogin}
-          setMode={setMode}
-          navigate={navigate}
-        />
-      );
-    } else if (mode === 'signup') {
-      return (
-        <DesktopSignUp
-          fullName={fullName}
-          setFullName={setFullName}
-          email={email}
-          setEmail={setEmail}
-          password={password}
-          setPassword={setPassword}
-          showPassword={showPassword}
-          setShowPassword={setShowPassword}
-          confirmPassword={confirmPassword}
-          setConfirmPassword={setConfirmPassword}
-          showConfirmPassword={showConfirmPassword}
-          setShowConfirmPassword={setShowConfirmPassword}
-          loading={loading}
-          error={error}
-          success={success}
-          handleAuth={handleAuth}
-          handleGoogleLogin={handleGoogleLogin}
-          setMode={setMode}
-          navigate={navigate}
-        />
-      );
-    } else {
-      return (
-        <DesktopForgot
-          email={email}
-          setEmail={setEmail}
-          loading={loading}
-          error={error}
-          success={success}
-          setSuccess={setSuccess}
-          handleAuth={handleAuth}
-          setMode={setMode}
-          navigate={navigate}
-        />
-      );
-    }
+  if (mode === 'signin') {
+    return (
+      <DesktopSignIn
+        email={email}
+        setEmail={setEmail}
+        password={password}
+        setPassword={setPassword}
+        showPassword={showPassword}
+        setShowPassword={setShowPassword}
+        loading={loading}
+        error={error}
+        success={success}
+        handleAuth={handleAuth}
+        handleGoogleLogin={handleGoogleLogin}
+        setMode={setMode}
+        navigate={navigate}
+      />
+    );
+  } else if (mode === 'signup') {
+    return (
+      <DesktopSignUp
+        fullName={fullName}
+        setFullName={setFullName}
+        email={email}
+        setEmail={setEmail}
+        password={password}
+        setPassword={setPassword}
+        showPassword={showPassword}
+        setShowPassword={setShowPassword}
+        confirmPassword={confirmPassword}
+        setConfirmPassword={setConfirmPassword}
+        showConfirmPassword={showConfirmPassword}
+        setShowConfirmPassword={setShowConfirmPassword}
+        loading={loading}
+        error={error}
+        success={success}
+        handleAuth={handleAuth}
+        handleGoogleLogin={handleGoogleLogin}
+        setMode={setMode}
+        navigate={navigate}
+      />
+    );
+  } else {
+    return (
+      <DesktopForgot
+        email={email}
+        setEmail={setEmail}
+        loading={loading}
+        error={error}
+        success={success}
+        setSuccess={setSuccess}
+        handleAuth={handleAuth}
+        setMode={setMode}
+        navigate={navigate}
+      />
+    );
   }
 
   return (

@@ -93,20 +93,15 @@
     @apply cursor-not-allowed;
   }
 
-  /* Sharp Enterprise Square Corners on Desktop View Only (>= 1024px) */
-  @media (min-width: 1024px) {
-    *, ::before, ::after {
-      border-radius: 0px !important;
-    }
-
-    button, input, select, textarea, [role="button"], [role="dialog"], [role="tab"], [role="menu"], [role="listbox"], [role="option"], .card, .modal, [class*="rounded"] {
-      border-radius: 0px !important;
-    }
-
-    /* Explicit exception for circular indicator pings/dots or user profile avatars if tagged */
-    .force-circle, [data-circle="true"] {
-      border-radius: 9999px !important;
-    }
+  /* Base layer typography and button styles */
+  body {
+    @apply font-sans;
+  }
+  button {
+    @apply cursor-pointer;
+  }
+  button:disabled {
+    @apply cursor-not-allowed;
   }
 }
 
