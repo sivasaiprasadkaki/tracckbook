@@ -65,9 +65,10 @@ function NavigationHandler({
       const search = window.location.search || '';
       const path = locationRef.current.pathname;
       const isResetPath = path === '/reset-password' || path === '/resetpassword';
-      const hasRecoveryHash = hash.includes('type=recovery') || (hash.includes('access_token=') && !hash.includes('type=signup'));
-      const hasRecoverySearch = search.includes('type=recovery') || search.includes('code=');
-      const hasRecoveryError = (hash.includes('error_code=otp_expired') || hash.includes('error=access_denied') || search.includes('error_code=otp_expired') || search.includes('error=access_denied'));
+      const hasRecoveryHash = hash.includes('type=recovery');
+      const hasRecoverySearch = search.includes('type=recovery');
+      const hasRecoveryError = (isResetPath || hasRecoveryHash || hasRecoverySearch) && 
+        (hash.includes('error_code=otp_expired') || hash.includes('error=access_denied') || search.includes('error_code=otp_expired') || search.includes('error=access_denied'));
       return { isResetPath, hasRecoveryHash, hasRecoverySearch, hasRecoveryError, isRecovery: isResetPath || hasRecoveryHash || hasRecoverySearch || hasRecoveryError };
     };
 
@@ -135,7 +136,7 @@ function NavigationHandler({
           console.log('[DEBUG] SIGNED_IN during recovery flow - maintaining reset password route');
           return;
         }
-        if (currentPath === '/login' || currentPath === '/register' || currentPath === '/signup') {
+        if (currentPath === '/login' || currentPath === '/register' || currentPath === '/signup' || currentPath === '/forgot' || currentPath === '/') {
           navigate('/cashbooks', { replace: true });
         }
       } else if (event === 'SIGNED_OUT') {
@@ -343,9 +344,7 @@ export default function App() {
                   ) : (
                     (typeof window !== 'undefined' && (
                       window.location.hash.includes('type=recovery') || 
-                      window.location.search.includes('type=recovery') || 
-                      window.location.hash.includes('error_code=otp_expired') ||
-                      window.location.search.includes('error_code=otp_expired')
+                      window.location.search.includes('type=recovery')
                     )) ? (
                       <Navigate to="/reset-password" replace />
                     ) : (
