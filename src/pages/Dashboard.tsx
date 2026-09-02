@@ -6032,16 +6032,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
                 const pageWidth = doc.internal.pageSize.getWidth();
                 const pageHeight = doc.internal.pageSize.getHeight();
-                const margin = 10;
-                const gap = 5;
+                const margin = 8;
+                const gap = 3;
                 const availableWidth = pageWidth - (margin * 2) - gap;
                 const imgWidth = availableWidth / 2;
                 
-                const safeTop = 16;
-                const safeBottom = pageHeight - 25;
+                const safeTop = 15;
+                const safeBottom = pageHeight - 18;
                 const availableHeight = safeBottom - safeTop;
-                const imgHeight = Math.min(pageHeight * 0.55, availableHeight);
-                const y = safeTop + (availableHeight - imgHeight) / 2;
+                const imgHeight = availableHeight;
 
                 // Add transaction header
                 doc.setFontSize(10);
@@ -6070,9 +6069,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   if (fit === 'width') {
                     w = imgWidth;
                     h = imgWidth / ar;
+                    if (h > imgHeight) {
+                      h = imgHeight;
+                      w = imgHeight * ar;
+                    }
                   } else if (fit === 'height') {
                     h = imgHeight;
                     w = imgHeight * ar;
+                    if (w > imgWidth) {
+                      w = imgWidth;
+                      h = imgWidth / ar;
+                    }
                   } else { // original contain
                     w = imgWidth;
                     h = imgWidth / ar;
@@ -6092,7 +6099,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   }
                   
                   const drawX = margin + (imgWidth - w) / 2;
-                  const drawY = y + (imgHeight - h) / 2;
+                  const drawY = safeTop + (availableHeight - h) / 2;
                   
                   addOptimizedImageToDoc(doc, rotatedData.src, rawImg1, drawX, drawY, w, h);
                 } catch (e) { console.error(e); }
@@ -6123,9 +6130,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     if (fit === 'width') {
                       w = imgWidth;
                       h = imgWidth / ar;
+                      if (h > imgHeight) {
+                        h = imgHeight;
+                        w = imgHeight * ar;
+                      }
                     } else if (fit === 'height') {
                       h = imgHeight;
                       w = imgHeight * ar;
+                      if (w > imgWidth) {
+                        w = imgWidth;
+                        h = imgWidth / ar;
+                      }
                     } else { // original contain
                       w = imgWidth;
                       h = imgWidth / ar;
@@ -6145,7 +6160,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     }
                     
                     const drawX = margin + imgWidth + gap + (imgWidth - w) / 2;
-                    const drawY = y + (imgHeight - h) / 2;
+                    const drawY = safeTop + (availableHeight - h) / 2;
                     
                     addOptimizedImageToDoc(doc, rotatedData.src, rawImg2, drawX, drawY, w, h);
                   } catch (e) { console.error(e); }
