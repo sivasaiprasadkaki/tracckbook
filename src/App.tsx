@@ -103,7 +103,7 @@ function NavigationHandler({
         navigate('/reset-password' + currentSearch + currentHash, { replace: true });
       }
     }).catch(err => {
-      console.error('Auth session lookup failed:', err);
+      console.warn('Auth session lookup note:', err?.message || err);
       clearTimeout(sessionTimeout);
       setLoading(false);
     });

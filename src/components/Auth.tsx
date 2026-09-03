@@ -143,7 +143,7 @@ export default function Auth({
     try {
       await supabase.from('cashbooks').select('id').limit(1);
     } catch (err: any) {
-      console.error('Connection check failed:', err);
+      console.warn('Connection check note:', err?.message || err);
     } finally {
       setTestingConnection(false);
     }
@@ -282,8 +282,15 @@ export default function Auth({
         }
       }
     } catch (err: any) {
-      console.error('Phone OTP verification error:', err);
-      setError(err.message || 'Incorrect or expired verification code.');
+      console.warn('Phone OTP verification notice:', err?.message || err);
+      const lower = (err?.message || '').toLowerCase();
+      if (lower.includes('banned') || lower.includes('user is banned') || err?.code === 'user_banned' || lower.includes('blocked')) {
+        setError("You're Blocked please contact administrator");
+      } else if (lower.includes('failed to fetch') || lower.includes('network')) {
+        setError('Unable to connect to the server. Please check your internet connection and try again.');
+      } else {
+        setError(err.message || 'Incorrect or expired verification code.');
+      }
     } finally {
       setLoading(false);
     }
@@ -312,7 +319,12 @@ export default function Auth({
       },
       onError: (errorMessage) => {
         setLoading(false);
-        setError(errorMessage || 'Google Sign-In failed.');
+        const lower = (errorMessage || '').toLowerCase();
+        if (lower.includes('banned') || lower.includes('user is banned') || lower.includes('blocked')) {
+          setError("You're Blocked please contact administrator");
+        } else {
+          setError(errorMessage || 'Google Sign-In failed.');
+        }
       },
       onCancelled: () => {
         setLoading(false);
@@ -372,8 +384,13 @@ export default function Auth({
         markSessionUnlocked(demoUserRes.data.user.id);
       }
     } catch (err: any) {
-      console.error('Demo login rescue failed:', err);
-      setError(err.message || 'Demo login failed. Please try standard Sign Up instead.');
+      console.warn('Demo login notice:', err?.message || err);
+      const lower = (err?.message || '').toLowerCase();
+      if (lower.includes('failed to fetch') || lower.includes('network')) {
+        setError('Unable to connect to the server. Please check your internet connection and try again.');
+      } else {
+        setError(err.message || 'Demo login failed. Please try standard Sign Up instead.');
+      }
     } finally {
       setLoading(false);
     }
@@ -460,8 +477,15 @@ export default function Auth({
         setSuccess('Account registered and logged in successfully!');
       }
     } catch (err: any) {
-      console.error('Auto signup failed:', err);
-      setError(err.message || 'Failed to auto-register account. Please use the Sign Up tab.');
+      console.warn('Auto signup notice:', err?.message || err);
+      const lower = (err?.message || '').toLowerCase();
+      if (lower.includes('banned') || lower.includes('user is banned') || err?.code === 'user_banned' || lower.includes('blocked')) {
+        setError("You're Blocked please contact administrator");
+      } else if (lower.includes('failed to fetch') || lower.includes('network')) {
+        setError('Unable to connect to the server. Please check your internet connection and try again.');
+      } else {
+        setError(err.message || 'Failed to auto-register account. Please use the Sign Up tab.');
+      }
     } finally {
       setLoading(false);
     }
@@ -530,15 +554,43 @@ export default function Auth({
         console.log(' - error:', error);
 
         if (error) {
+          const lowerMsg = (error.message || '').toLowerCase();
+          const code = (error.code || '').toLowerCase();
+
           if (
-            error.message?.toLowerCase().includes('already registered') || 
-            error.message?.toLowerCase().includes('already exists') || 
+            lowerMsg.includes('already registered') || 
+            lowerMsg.includes('already exists') || 
             error.status === 422
           ) {
             setSuccess('✅ Check your inbox.\n\nWe\'ve sent an email to your registered email address.\n\nPlease follow the instructions in your email to continue.');
             return;
           }
-          throw error;
+
+          if (
+            lowerMsg.includes('banned') ||
+            lowerMsg.includes('user is banned') ||
+            code === 'user_banned' ||
+            lowerMsg.includes('blocked')
+          ) {
+            console.warn('[Auth] Sign up blocked: banned account');
+            setError("You're Blocked please contact administrator");
+            return;
+          }
+
+          if (
+            lowerMsg.includes('failed to fetch') ||
+            lowerMsg.includes('networkerror') ||
+            lowerMsg.includes('network') ||
+            lowerMsg.includes('load failed')
+          ) {
+            console.warn('[Auth] Sign up network error:', error.message);
+            setError('Unable to connect to the server. Please check your internet connection and try again.');
+            return;
+          }
+
+          console.warn('[Auth] Sign up error:', error.message);
+          setError(error.message || 'Failed to create account. Please try again.');
+          return;
         }
 
         // --- Supabase Response Validation & Segregation ---
@@ -583,17 +635,55 @@ export default function Auth({
           email,
           password,
         });
+
         if (error) {
-          const isCredsError = error.message?.toLowerCase().includes('invalid login credentials') || 
-                               error.message?.toLowerCase().includes('invalid_credential') || 
-                               error.message?.toLowerCase().includes('invalid_creds');
-          if (!isCredsError) {
-            console.error('SignIn Error Details:', error);
-          } else {
-            console.log('SignIn expected credential failure:', error.message);
+          const lowerMsg = (error.message || '').toLowerCase();
+          const code = (error.code || '').toLowerCase();
+
+          if (
+            lowerMsg.includes('banned') ||
+            lowerMsg.includes('user is banned') ||
+            code === 'user_banned' ||
+            lowerMsg.includes('blocked')
+          ) {
+            console.warn('[Auth] Sign in blocked: banned account');
+            setError("You're Blocked please contact administrator");
+            return;
           }
-          throw error;
+
+          if (
+            lowerMsg.includes('failed to fetch') ||
+            lowerMsg.includes('networkerror') ||
+            lowerMsg.includes('network') ||
+            lowerMsg.includes('load failed')
+          ) {
+            console.warn('[Auth] Sign in network error:', error.message);
+            setError('Unable to connect to the server. Please check your internet connection and try again.');
+            return;
+          }
+
+          if (
+            lowerMsg.includes('invalid login credentials') || 
+            lowerMsg.includes('invalid credential') || 
+            lowerMsg.includes('invalid_creds') ||
+            lowerMsg.includes('invalid_grant')
+          ) {
+            console.info('[Auth] Sign in expected credential failure');
+            setError('Incorrect email or password. Please try again.');
+            return;
+          }
+
+          if (lowerMsg.includes('email not confirmed')) {
+            console.info('[Auth] Sign in unconfirmed email');
+            setError('Email not confirmed. Please check your inbox or spam folder for the verification link.');
+            return;
+          }
+
+          console.warn('[Auth] Sign in error:', error.message);
+          setError(error.message || 'An error occurred during authentication.');
+          return;
         }
+
         if (data?.user?.id) {
           markSessionUnlocked(data.user.id);
         }
@@ -611,33 +701,72 @@ export default function Auth({
         });
 
         if (error) {
-          console.error('SUPABASE RESET PASSWORD ERROR:', error);
-          setError(error.message);
+          const lower = (error.message || '').toLowerCase();
+          const code = (error.code || '').toLowerCase();
+
+          if (
+            lower.includes('banned') ||
+            lower.includes('user is banned') ||
+            code === 'user_banned' ||
+            lower.includes('blocked')
+          ) {
+            console.warn('[Auth] Password reset blocked: banned account');
+            setError("You're Blocked please contact administrator");
+            return;
+          }
+
+          if (
+            lower.includes('failed to fetch') ||
+            lower.includes('networkerror') ||
+            lower.includes('network') ||
+            lower.includes('load failed')
+          ) {
+            console.warn('[Auth] Password reset network error:', error.message);
+            setError('Unable to connect to the server. Please check your internet connection and try again.');
+            return;
+          }
+
+          console.warn('[Auth] Password reset failure:', error.message);
+          setError(error.message || 'An error occurred while sending the recovery email.');
           return;
         }
 
         setSuccess('Password reset link sent successfully. Check your email.');
       }
     } catch (err: any) {
-      const isCredsError = err.message?.toLowerCase().includes('invalid login credentials') || 
-                           err.message?.toLowerCase().includes('invalid_credential') || 
-                           err.message?.toLowerCase().includes('invalid_creds');
-      if (!isCredsError) {
-        console.error('Auth error:', err);
-      } else {
-        console.log('Auth expected credential error:', err.message);
-      }
-      if (mode === 'forgot') {
+      const lower = (err?.message || err?.error_description || (typeof err === 'string' ? err : '')).toLowerCase();
+      const code = (err?.code || err?.error_code || '').toString().toLowerCase();
+
+      if (
+        lower.includes('banned') ||
+        lower.includes('user is banned') ||
+        code === 'user_banned' ||
+        lower.includes('blocked')
+      ) {
+        console.warn('[Auth] Account blocked or banned');
+        setError("You're Blocked please contact administrator");
+      } else if (
+        lower.includes('failed to fetch') ||
+        lower.includes('networkerror') ||
+        lower.includes('network') ||
+        lower.includes('load failed')
+      ) {
+        console.warn('[Auth] Network error:', err?.message || err);
+        setError('Unable to connect to the server. Please check your internet connection and try again.');
+      } else if (mode === 'forgot') {
+        console.warn('[Auth] Password reset exception:', err?.message || err);
         setError(err.message || 'An error occurred while sending the recovery email.');
-      } else if (err.message?.includes('Email not confirmed')) {
+      } else if (lower.includes('email not confirmed')) {
         setError('Email not confirmed. Please check your inbox or spam folder for the verification link.');
       } else if (
-        err.message?.toLowerCase().includes('invalid login credentials') || 
-        err.message?.toLowerCase().includes('invalid credential') ||
-        err.message?.toLowerCase().includes('invalid_creds')
+        lower.includes('invalid login credentials') || 
+        lower.includes('invalid credential') || 
+        lower.includes('invalid_creds') ||
+        lower.includes('invalid_grant')
       ) {
         setError('Incorrect email or password. Please try again.');
       } else {
+        console.warn('[Auth] Unexpected error:', err?.message || err);
         setError(err.message || 'An error occurred during authentication.');
       }
     } finally {
@@ -645,63 +774,92 @@ export default function Auth({
     }
   };
 
-  if (mode === 'signin') {
-    return (
-      <DesktopSignIn
-        email={email}
-        setEmail={setEmail}
-        password={password}
-        setPassword={setPassword}
-        showPassword={showPassword}
-        setShowPassword={setShowPassword}
-        loading={loading}
-        error={error}
-        success={success}
-        handleAuth={handleAuth}
-        handleGoogleLogin={handleGoogleLogin}
-        setMode={setMode}
-        navigate={navigate}
-      />
-    );
-  } else if (mode === 'signup') {
-    return (
-      <DesktopSignUp
-        fullName={fullName}
-        setFullName={setFullName}
-        email={email}
-        setEmail={setEmail}
-        password={password}
-        setPassword={setPassword}
-        showPassword={showPassword}
-        setShowPassword={setShowPassword}
-        confirmPassword={confirmPassword}
-        setConfirmPassword={setConfirmPassword}
-        showConfirmPassword={showConfirmPassword}
-        setShowConfirmPassword={setShowConfirmPassword}
-        loading={loading}
-        error={error}
-        success={success}
-        handleAuth={handleAuth}
-        handleGoogleLogin={handleGoogleLogin}
-        setMode={setMode}
-        navigate={navigate}
-      />
-    );
-  } else {
-    return (
-      <DesktopForgot
-        email={email}
-        setEmail={setEmail}
-        loading={loading}
-        error={error}
-        success={success}
-        setSuccess={setSuccess}
-        handleAuth={handleAuth}
-        setMode={setMode}
-        navigate={navigate}
-      />
-    );
-  }
+  return (
+    <AnimatePresence mode="wait">
+      {mode === 'signin' && (
+        <motion.div
+          key="signin-page"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="w-full min-h-screen"
+        >
+          <DesktopSignIn
+            email={email}
+            setEmail={setEmail}
+            password={password}
+            setPassword={setPassword}
+            showPassword={showPassword}
+            setShowPassword={setShowPassword}
+            loading={loading}
+            error={error}
+            success={success}
+            handleAuth={handleAuth}
+            handleGoogleLogin={handleGoogleLogin}
+            setMode={setMode}
+            navigate={navigate}
+          />
+        </motion.div>
+      )}
+
+      {mode === 'signup' && (
+        <motion.div
+          key="signup-page"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="w-full min-h-screen"
+        >
+          <DesktopSignUp
+            fullName={fullName}
+            setFullName={setFullName}
+            email={email}
+            setEmail={setEmail}
+            password={password}
+            setPassword={setPassword}
+            showPassword={showPassword}
+            setShowPassword={setShowPassword}
+            confirmPassword={confirmPassword}
+            setConfirmPassword={setConfirmPassword}
+            showConfirmPassword={showConfirmPassword}
+            setShowConfirmPassword={setShowConfirmPassword}
+            loading={loading}
+            error={error}
+            success={success}
+            handleAuth={handleAuth}
+            handleGoogleLogin={handleGoogleLogin}
+            setMode={setMode}
+            navigate={navigate}
+          />
+        </motion.div>
+      )}
+
+      {mode === 'forgot' && (
+        <motion.div
+          key="forgot-page"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="w-full min-h-screen"
+        >
+          <DesktopForgot
+            email={email}
+            setEmail={setEmail}
+            loading={loading}
+            error={error}
+            success={success}
+            setSuccess={setSuccess}
+            handleAuth={handleAuth}
+            setMode={setMode}
+            navigate={navigate}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
 
   return (
     <div className={cn(
@@ -750,7 +908,13 @@ export default function Auth({
                 >
                   <div className="flex items-start gap-2">
                     <AlertCircle size={15} className="shrink-0 mt-0.5 text-rose-500" />
-                    <span className="flex-1 leading-relaxed">{error}</span>
+                    <span className="flex-1 leading-relaxed">
+                      {error.toLowerCase().includes('banned') || error.toLowerCase().includes('blocked')
+                        ? "You're Blocked please contact administrator"
+                        : error.toLowerCase().includes('failed to fetch') || error.toLowerCase().includes('network')
+                        ? "Unable to connect to the server. Please check your internet connection and try again."
+                        : error}
+                    </span>
                   </div>
                   
                   {mode === 'signin' && (error.includes('Incorrect email or password') || error.includes('INVALID_CREDS')) && email && password && (

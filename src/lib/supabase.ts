@@ -85,7 +85,7 @@ const createWrappedSupabaseClient = () => {
       }
       return res;
     } catch (err: any) {
-      console.error('[Supabase Auth Safety] getSession threw exception:', err);
+      console.warn('[Supabase Auth Safety] getSession exception:', err?.message || err);
       const errMsg = err?.message || '';
       if (
         errMsg.includes('Invalid Refresh Token') || 

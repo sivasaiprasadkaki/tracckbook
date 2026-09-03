@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Loader2, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface DesktopSignUpProps {
@@ -139,15 +140,25 @@ export default function DesktopSignUp({
       `}</style>
 
       {/* Left Visual Showcase (Desktop) */}
-      <div className="hidden lg:flex w-1/2 bg-[#e8eafc] relative flex-col justify-center items-center p-12 overflow-hidden select-none font-['Inter',sans-serif]">
+      <motion.div 
+        initial={{ opacity: 0, x: -30 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        className="hidden lg:flex w-1/2 bg-[#e8eafc] relative flex-col justify-center items-center p-12 overflow-hidden select-none font-['Inter',sans-serif]"
+      >
         {/* Ambient Glows */}
-        <div className="absolute -top-32 -left-32 w-96 h-96 bg-[#4648d4]/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-[#8455ef]/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -top-32 -left-32 w-96 h-96 bg-[#4648d4]/15 rounded-full blur-3xl pointer-events-none animate-pulse" />
+        <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-[#8455ef]/15 rounded-full blur-3xl pointer-events-none animate-pulse" style={{ animationDelay: '1.5s' }} />
 
         {/* Central Dashboard Mockup Card */}
         <div className="relative z-10 w-full max-w-md flex flex-col gap-6">
           {/* Main Balance Card */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-lg flex flex-col gap-4 float-slow font-['Inter',sans-serif]">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.5, delay: 0.15 }}
+            className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-lg flex flex-col gap-4 float-slow font-['Inter',sans-serif]"
+          >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-[#4648d4]/10 text-[#4648d4] flex items-center justify-center">
@@ -170,37 +181,39 @@ export default function DesktopSignUp({
                 ₹42,500<span className="text-2xl text-[#4648d4]/70">.00</span>
               </h3>
             </div>
-          </div>
+          </motion.div>
 
           {/* Staggered Expense Pills */}
           <div className="flex flex-col gap-3 relative font-['Inter',sans-serif]">
-            <div className="bg-white/90 backdrop-blur-md px-4 py-3 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between transform -rotate-1 hover:rotate-0 transition-transform duration-300">
-              <div className="flex items-center gap-3">
-                <span className="text-lg">✈️</span>
-                <span className="text-sm font-medium text-[#1b1a23] font-['Inter',sans-serif]">Travel & Flights</span>
-              </div>
-              <span className="text-sm font-semibold font-['JetBrains_Mono',monospace] text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md">-₹12,400.00</span>
-            </div>
-
-            <div className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between transform translate-x-3 rotate-1 hover:translate-x-0 hover:rotate-0 transition-all duration-300">
-              <div className="flex items-center gap-3">
-                <span className="text-lg">💻</span>
-                <span className="text-sm font-medium text-[#1b1a23] font-['Inter',sans-serif]">Software & Subscriptions</span>
-              </div>
-              <span className="text-sm font-semibold font-['JetBrains_Mono',monospace] text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md">-₹8,250.00</span>
-            </div>
-
-            <div className="bg-white/90 backdrop-blur-md px-4 py-3 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between transform -translate-x-2 -rotate-1 hover:translate-x-0 hover:rotate-0 transition-all duration-300">
-              <div className="flex items-center gap-3">
-                <span className="text-lg">🍴</span>
-                <span className="text-sm font-medium text-[#1b1a23] font-['Inter',sans-serif]">Dining & Meals</span>
-              </div>
-              <span className="text-sm font-semibold font-['JetBrains_Mono',monospace] text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md">-₹4,120.00</span>
-            </div>
+            {[
+              { icon: '✈️', title: 'Travel & Flights', amount: '-₹12,400.00', rotateClass: 'transform -rotate-1 hover:rotate-0' },
+              { icon: '💻', title: 'Software & Subscriptions', amount: '-₹8,250.00', rotateClass: 'transform translate-x-3 rotate-1 hover:translate-x-0 hover:rotate-0' },
+              { icon: '🍴', title: 'Dining & Meals', amount: '-₹4,120.00', rotateClass: 'transform -translate-x-2 -rotate-1 hover:translate-x-0 hover:rotate-0' }
+            ].map((pill, idx) => (
+              <motion.div
+                key={pill.title}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.25 + idx * 0.1 }}
+                whileHover={{ scale: 1.02 }}
+                className={`bg-white/95 backdrop-blur-md px-4 py-3 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between transition-all duration-300 ${pill.rotateClass}`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-lg">{pill.icon}</span>
+                  <span className="text-sm font-medium text-[#1b1a23] font-['Inter',sans-serif]">{pill.title}</span>
+                </div>
+                <span className="text-sm font-semibold font-['JetBrains_Mono',monospace] text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md">{pill.amount}</span>
+              </motion.div>
+            ))}
           </div>
 
           {/* Progress / Status Block */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md flex flex-col gap-3 float-fast font-['Inter',sans-serif]">
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.45 }}
+            className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md flex flex-col gap-3 float-fast font-['Inter',sans-serif]"
+          >
             <div className="flex justify-between items-center text-xs font-semibold">
               <span className="text-[#464554] flex items-center gap-1.5 font-['Inter',sans-serif]">
                 <span className="material-symbols-outlined text-sm text-[#4648d4]">auto_awesome</span>
@@ -209,63 +222,114 @@ export default function DesktopSignUp({
               <span className="text-[#4648d4] font-['JetBrains_Mono',monospace]">100%</span>
             </div>
             <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-              <div className="bg-gradient-to-r from-[#4648d4] to-[#8455ef] h-full rounded-full progress-pulse" />
+              <motion.div 
+                initial={{ width: 0 }}
+                animate={{ width: '100%' }}
+                transition={{ duration: 1.2, ease: "easeOut", delay: 0.5 }}
+                className="bg-gradient-to-r from-[#4648d4] to-[#8455ef] h-full rounded-full" 
+              />
             </div>
-          </div>
+          </motion.div>
 
           {/* Status Badge */}
-          <div className="bg-[#4648d4] text-white p-4 rounded-xl flex items-center gap-3 justify-center shadow-lg shadow-[#4648d4]/20 badge-pop">
+          <motion.div 
+            initial={{ scale: 0.85, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", stiffness: 260, damping: 18, delay: 0.6 }}
+            className="bg-[#4648d4] text-white p-4 rounded-xl flex items-center gap-3 justify-center shadow-lg shadow-[#4648d4]/20"
+          >
             <span className="material-symbols-outlined text-xl">check_circle</span>
             <span className="text-sm font-semibold tracking-wide font-['Inter',sans-serif]">Dashboard Ready for Real-Time Tracking</span>
-          </div>
+          </motion.div>
         </div>
-      </div>
+      </motion.div>
 
       {/* Right Form Section */}
-      <div className="w-full lg:w-1/2 flex flex-col justify-between p-6 sm:p-12 lg:p-16 min-h-screen bg-[#fbf8ff] font-['Inter',sans-serif]">
+      <motion.div 
+        initial={{ opacity: 0, x: 30 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        className="w-full lg:w-1/2 flex flex-col justify-between p-6 sm:p-12 lg:p-16 min-h-screen bg-[#fbf8ff] font-['Inter',sans-serif]"
+      >
         {/* Brand Header */}
-        <div className="flex items-center gap-3 mb-8">
-          <div 
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="flex items-center gap-3 mb-8"
+        >
+          <motion.div 
             onClick={() => navigate('/')} 
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.97 }}
             className="w-10 h-10 rounded-xl bg-[#4648d4] flex items-center justify-center text-white shadow-md shadow-[#4648d4]/20 cursor-pointer hover:opacity-90 transition-opacity"
           >
             <span className="material-symbols-outlined text-2xl">menu_book</span>
-          </div>
+          </motion.div>
           <span 
             onClick={() => navigate('/')} 
             className="text-xl font-bold tracking-tight text-[#4648d4] cursor-pointer font-['Hanken_Grotesk',sans-serif]"
           >
             TrackBook
           </span>
-        </div>
+        </motion.div>
 
         {/* Main Content Area */}
         <div className="max-w-md w-full mx-auto my-auto py-4">
-          <div className="mb-6">
+          <motion.div 
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+            className="mb-6"
+          >
             <h1 className="text-3xl lg:text-4xl font-bold text-[#1b1a23] tracking-tight leading-tight font-['Hanken_Grotesk',sans-serif]">
               Build your financial command center
             </h1>
             <p className="mt-2 text-[15px] text-[#464554] leading-relaxed font-normal font-['Inter',sans-serif]">
               Create your TrackBook account and start turning everyday expenses into clear financial insights.
             </p>
-          </div>
+          </motion.div>
 
           {/* Feedback Alerts */}
-          {error && (
-            <div className="mb-5 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm flex items-start gap-3 animate-fade-in font-['Inter',sans-serif]">
-              <AlertCircle className="w-5 h-5 shrink-0 text-rose-600 mt-0.5" />
-              <div className="flex-1 whitespace-pre-line">{error}</div>
-            </div>
-          )}
+          <AnimatePresence mode="wait">
+            {error && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0, y: -6 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -6 }}
+                className="mb-5 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm flex items-start gap-3 font-['Inter',sans-serif] overflow-hidden"
+              >
+                <AlertCircle className="w-5 h-5 shrink-0 text-rose-600 mt-0.5" />
+                <div className="flex-1 whitespace-pre-line">
+                  {error.toLowerCase().includes('banned') || error.toLowerCase().includes('blocked')
+                    ? "You're Blocked please contact administrator"
+                    : error.toLowerCase().includes('failed to fetch') || error.toLowerCase().includes('network')
+                    ? "Unable to connect to the server. Please check your internet connection and try again."
+                    : error}
+                </div>
+              </motion.div>
+            )}
 
-          {success && (
-            <div className="mb-5 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm flex items-start gap-3 animate-fade-in font-['Inter',sans-serif]">
-              <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600 mt-0.5" />
-              <div className="flex-1 whitespace-pre-line">{success}</div>
-            </div>
-          )}
+            {success && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0, y: -6 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -6 }}
+                className="mb-5 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm flex items-start gap-3 font-['Inter',sans-serif] overflow-hidden"
+              >
+                <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600 mt-0.5" />
+                <div className="flex-1 whitespace-pre-line">{success}</div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          <form onSubmit={handleAuth} className="space-y-4">
+          <motion.form 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.2 }}
+            onSubmit={handleAuth} 
+            className="space-y-4"
+          >
             {/* Full Name */}
             <div>
               <label className="block text-[11px] font-semibold text-slate-700 uppercase tracking-wider mb-1.5 font-['Inter',sans-serif]">
@@ -329,10 +393,26 @@ export default function DesktopSignUp({
                     <span className="font-semibold">{getStrengthLabel()}</span>
                   </div>
                   <div className="grid grid-cols-4 gap-1.5 h-1.5">
-                    <div className={`rounded-full h-full transition-all ${strength >= 1 ? getStrengthColor() : 'bg-slate-200'}`} />
-                    <div className={`rounded-full h-full transition-all ${strength >= 2 ? getStrengthColor() : 'bg-slate-200'}`} />
-                    <div className={`rounded-full h-full transition-all ${strength >= 3 ? getStrengthColor() : 'bg-slate-200'}`} />
-                    <div className={`rounded-full h-full transition-all ${strength >= 4 ? getStrengthColor() : 'bg-slate-200'}`} />
+                    <motion.div 
+                      initial={{ scaleX: 0 }}
+                      animate={{ scaleX: 1 }}
+                      className={`rounded-full h-full transition-colors origin-left ${strength >= 1 ? getStrengthColor() : 'bg-slate-200'}`} 
+                    />
+                    <motion.div 
+                      initial={{ scaleX: 0 }}
+                      animate={{ scaleX: 1 }}
+                      className={`rounded-full h-full transition-colors origin-left ${strength >= 2 ? getStrengthColor() : 'bg-slate-200'}`} 
+                    />
+                    <motion.div 
+                      initial={{ scaleX: 0 }}
+                      animate={{ scaleX: 1 }}
+                      className={`rounded-full h-full transition-colors origin-left ${strength >= 3 ? getStrengthColor() : 'bg-slate-200'}`} 
+                    />
+                    <motion.div 
+                      initial={{ scaleX: 0 }}
+                      animate={{ scaleX: 1 }}
+                      className={`rounded-full h-full transition-colors origin-left ${strength >= 4 ? getStrengthColor() : 'bg-slate-200'}`} 
+                    />
                   </div>
                 </div>
               )}
@@ -363,10 +443,12 @@ export default function DesktopSignUp({
             </div>
 
             {/* Submit Button */}
-            <button
+            <motion.button
               type="submit"
               disabled={loading}
-              className="w-full mt-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#4648d4] to-[#6052a8] text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-[#4648d4]/25 hover:shadow-lg hover:shadow-[#4648d4]/35 hover:brightness-105 active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-['Inter',sans-serif]"
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.985 }}
+              className="w-full mt-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#4648d4] to-[#6052a8] text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-[#4648d4]/25 hover:shadow-lg hover:shadow-[#4648d4]/35 hover:brightness-105 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-['Inter',sans-serif]"
             >
               {loading ? (
                 <>
@@ -376,7 +458,7 @@ export default function DesktopSignUp({
               ) : (
                 <span>Create Account</span>
               )}
-            </button>
+            </motion.button>
 
             {/* Divider */}
             <div className="relative flex items-center justify-center my-4">
@@ -387,11 +469,13 @@ export default function DesktopSignUp({
             </div>
 
             {/* Google Login Button */}
-            <button
+            <motion.button
               type="button"
               onClick={handleGoogleLogin}
               disabled={loading}
-              className="w-full py-3 px-4 rounded-xl bg-white border border-slate-300 text-slate-700 font-medium text-sm hover:bg-slate-50 hover:border-slate-400 active:scale-[0.99] transition-all flex items-center justify-center gap-3 shadow-sm cursor-pointer disabled:opacity-60 font-['Inter',sans-serif]"
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.985 }}
+              className="w-full py-3 px-4 rounded-xl bg-white border border-slate-300 text-slate-700 font-medium text-sm hover:bg-slate-50 hover:border-slate-400 transition-all flex items-center justify-center gap-3 shadow-sm cursor-pointer disabled:opacity-60 font-['Inter',sans-serif]"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
                 <path
@@ -412,11 +496,16 @@ export default function DesktopSignUp({
                 />
               </svg>
               <span>Continue with Google</span>
-            </button>
-          </form>
+            </motion.button>
+          </motion.form>
 
           {/* Footer Navigation Link */}
-          <div className="mt-6 text-center">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.5, delay: 0.35 }}
+            className="mt-6 text-center"
+          >
             <p className="text-sm text-[#464554] font-['Inter',sans-serif]">
               Already have an account?{' '}
               <button
@@ -430,9 +519,9 @@ export default function DesktopSignUp({
                 Sign in
               </button>
             </p>
-          </div>
+          </motion.div>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
