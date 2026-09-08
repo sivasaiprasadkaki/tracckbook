@@ -224,11 +224,11 @@ export default function MediaPickerSheet({
                           <ImageIcon className="w-6 h-6" />
                         </div>
                         <div>
-                          <p className="font-extrabold text-[15px] tracking-tight">Photos</p>
+                          <p className="font-extrabold text-[15px] tracking-tight">Photos / Documents</p>
                           <p className={cn(
                             "text-xs leading-none mt-1",
                             theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                          )}>Browse existing receipts from photo gallery</p>
+                          )}>Browse existing receipts from photo gallery or PDF files</p>
                         </div>
                       </div>
                       <ChevronUp className="w-5 h-5 text-slate-400 rotate-90" />

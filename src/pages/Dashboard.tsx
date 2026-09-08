@@ -101,6 +101,7 @@ import RolesPermissionsModal from '../components/RolesPermissionsModal';
 import { canAddEntries, canEditEntries, canDeleteEntries, canDeleteBook, canManageMembers, canAccessBookSettings, ALL_ROLES, Role } from '../lib/rbac';
 import MediaPickerSheet from '../components/MediaPickerSheet';
 import ImageEditorModal from '../components/ImageEditorModal';
+import PdfPageSelectorModal from '../components/PdfPageSelectorModal';
 import { CountryCodePicker, COUNTRIES, Country } from '../components/CountryCodePicker';
 import { PhoneComingSoonModal } from '../components/PhoneComingSoonModal';
 import { useMpinSecurity } from '../components/MpinManager';
@@ -2092,6 +2093,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [createBookError, setCreateBookError] = useState<string | null>(null);
   const [editBookError, setEditBookError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState<'in' | 'out' | null>(null);
+  const showFormRef = useRef(showForm);
+  showFormRef.current = showForm;
+  const currentUserRoleRef = useRef<Role>('Primary Admin');
   const [detailsError, setDetailsError] = useState(false);
   const [amountError, setAmountError] = useState(false);
   const [partyName, setPartyName] = useState('');
@@ -2683,13 +2687,33 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     let lastKeyTime = 0;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger shortcuts if user is typing in an input or textarea
-      const activeElement = document.activeElement;
-      const isInput = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA' || (activeElement as HTMLElement)?.isContentEditable;
-      if (isInput && e.key !== 'Escape') return;
-
       const key = e.key.toUpperCase();
       const now = Date.now();
+
+      // Quick shortcut: Alt+I or Alt+O works from anywhere (even inside text inputs)
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        if (key === 'I' && canAddEntries(currentUserRoleRef.current)) {
+          e.preventDefault();
+          setShowForm('in');
+          if (!showFormRef.current) {
+            setTransactionDate(safeToDateTimeLocal(new Date()));
+          }
+          setTimeout(() => amountInputRef.current?.focus(), 60);
+          return;
+        }
+        if (key === 'O' && canAddEntries(currentUserRoleRef.current)) {
+          e.preventDefault();
+          setShowForm('out');
+          if (!showFormRef.current) {
+            setTransactionDate(safeToDateTimeLocal(new Date()));
+          }
+          setTimeout(() => amountInputRef.current?.focus(), 60);
+          return;
+        }
+      }
+
+      // Ignore if Ctrl or Meta (Cmd) keys are held, so standard browser shortcuts like Ctrl+C, Ctrl+V, Ctrl+A work
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       // Handle Escape key to close forms/modals
       if (e.key === 'Escape') {
@@ -2709,8 +2733,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         return;
       }
 
-      // Clear last key if too much time passed (e.g. 1 second)
-      if (now - lastKeyTime > 1000) {
+      // Identify active element to determine if user is typing narrative text
+      const activeElement = document.activeElement;
+      const tagName = activeElement?.tagName;
+      const inputType = (activeElement as HTMLInputElement)?.type?.toLowerCase() || '';
+
+      // Only text/narrative fields where user enters words shouldn't trigger letter shortcuts
+      const isTextInput =
+        tagName === 'TEXTAREA' ||
+        (activeElement as HTMLElement)?.isContentEditable ||
+        (tagName === 'INPUT' && !['number', 'datetime-local', 'date', 'time', 'checkbox', 'radio', 'button', 'submit', 'range'].includes(inputType));
+
+      if (isTextInput) return;
+
+      // Clear last key if more than 1.5 seconds have passed
+      if (now - lastKeyTime > 1500) {
         lastKey = '';
       }
 
@@ -2719,25 +2756,31 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           e.preventDefault();
           setIsCreatingBook(true);
           lastKey = '';
-        } else if (key === 'I' && activeBookId && canAddEntries(currentUserRole)) {
+        } else if (key === 'I' && (activeBookId || showFormRef.current) && canAddEntries(currentUserRoleRef.current)) {
           e.preventDefault();
           setShowForm('in');
-          setTransactionDate(safeToDateTimeLocal(new Date()));
+          if (!showFormRef.current) {
+            setTransactionDate(safeToDateTimeLocal(new Date()));
+          }
           lastKey = '';
-        } else if (key === 'O' && activeBookId && canAddEntries(currentUserRole)) {
+          setTimeout(() => amountInputRef.current?.focus(), 60);
+        } else if (key === 'O' && (activeBookId || showFormRef.current) && canAddEntries(currentUserRoleRef.current)) {
           e.preventDefault();
           setShowForm('out');
-          setTransactionDate(safeToDateTimeLocal(new Date()));
+          if (!showFormRef.current) {
+            setTransactionDate(safeToDateTimeLocal(new Date()));
+          }
           lastKey = '';
+          setTimeout(() => amountInputRef.current?.focus(), 60);
         }
       } else if (lastKey === 'A') {
-        if (key === 'U' && activeBookId && canAddEntries(currentUserRole)) {
+        if (key === 'U' && activeBookId && canAddEntries(currentUserRoleRef.current)) {
           e.preventDefault();
           setShowAiWarning(true);
           lastKey = '';
         }
       } else if (lastKey === 'I') {
-        if (key === 'M' && canAddEntries(currentUserRole)) {
+        if (key === 'M' && canAddEntries(currentUserRoleRef.current)) {
           e.preventDefault();
           setShowImportModal(true);
           setImportCode('');
@@ -2747,8 +2790,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         }
       }
 
-      lastKey = key;
-      lastKeyTime = now;
+      // If user presses 'C', 'A', or 'I' while in a numeric or date field, prevent default so it doesn't affect the input
+      if (key === 'C' || key === 'A' || key === 'I') {
+        if (activeElement === amountInputRef.current || ['number', 'datetime-local', 'date', 'time'].includes(inputType)) {
+          e.preventDefault();
+        }
+        lastKey = key;
+        lastKeyTime = now;
+      } else {
+        lastKey = key;
+        lastKeyTime = now;
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -2781,10 +2833,30 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [previewIndex, setPreviewIndex] = useState(0);
   const [previewRotation, setPreviewRotation] = useState(0);
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewSlideDirection, setPreviewSlideDirection] = useState<number>(1);
+  const previewTouchStartX = useRef<number | null>(null);
+  const previewTouchStartY = useRef<number | null>(null);
+  const previewTouchEndX = useRef<number | null>(null);
   const [previewOriginalUrls, setPreviewOriginalUrls] = useState<string[]>([]);
   const [previewValidationStatus, setPreviewValidationStatus] = useState<boolean[]>([]);
   const [isPreviewValidating, setIsPreviewValidating] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const handlePreviewNext = () => {
+    if (!previewImages || previewImages.length <= 1) return;
+    setPreviewSlideDirection(1);
+    setPreviewIndex(prev => (prev + 1) % previewImages.length);
+    setPreviewRotation(0);
+    setPreviewZoom(1);
+  };
+
+  const handlePreviewPrev = () => {
+    if (!previewImages || previewImages.length <= 1) return;
+    setPreviewSlideDirection(-1);
+    setPreviewIndex(prev => (prev - 1 + previewImages.length) % previewImages.length);
+    setPreviewRotation(0);
+    setPreviewZoom(1);
+  };
 
   const getTransactionSeqNumber = (txId: string) => {
     if (!activeBook || !activeBook.transactions) return 1;
@@ -2968,10 +3040,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const multiFileInputRef = useRef<HTMLInputElement>(null);
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
   const [activeUploadTarget, setActiveUploadTarget] = useState<'ai' | 'transaction' | null>(null);
+  const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
+  const [isPdfSelectorOpen, setIsPdfSelectorOpen] = useState<boolean>(false);
 
   const handleAiOcrFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const files = Array.from(e.target.files).slice(0, 5);
+      const files = Array.from(e.target.files).slice(0, 7);
       setSelectedFiles(files);
       startAiUploadReceiptParsing(files);
     }
@@ -3808,6 +3882,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
     return 'Viewer';
   }, [activeBook, session]);
+
+  currentUserRoleRef.current = currentUserRole;
 
   const filteredBooks = useMemo(() => {
     const uniques = new Map<string, typeof books[0]>();
@@ -5781,15 +5857,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     };
   }, []);
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
+  const handlePdfPagesAdded = async (convertedFiles: File[]) => {
+    if (!convertedFiles || convertedFiles.length === 0) return;
+    const remainingSlots = Math.max(0, 7 - selectedImages.length);
+    if (remainingSlots <= 0) {
+      showInAppAlert('Attachment Limit', 'Maximum 7 bills / attachments allowed. Please remove an existing attachment to add more.', 'warning');
+      return;
+    }
 
-    const filesArray = Array.from(files).slice(0, 5 - selectedImages.length) as File[];
-    if (filesArray.length === 0) return;
+    const filesToUse = convertedFiles.slice(0, remainingSlots);
+    if (convertedFiles.length > remainingSlots) {
+      showInAppAlert('Attachment Limit', `Only ${remainingSlots} of the ${convertedFiles.length} selected pages were added to stay within the 7-bill limit.`, 'warning');
+    }
 
-    const finalFiles = await editImagesIfNeeded(filesArray);
-
+    const finalFiles = await editImagesIfNeeded(filesToUse);
     const newImages: string[] = [...selectedImages];
     finalFiles.forEach(file => {
       const blobUrl = URL.createObjectURL(file);
@@ -5798,6 +5879,58 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     });
 
     setSelectedImages(newImages);
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const rawFiles = Array.from(files) as File[];
+
+    if (selectedImages.length >= 7) {
+      showInAppAlert('Attachment Limit', 'Maximum 7 bills / attachments allowed. Please remove an existing attachment to add more.', 'warning');
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    const isPdf = (file: File) =>
+      file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+
+    const pdfFiles = rawFiles.filter(isPdf);
+    const imageFiles = rawFiles.filter(f => !isPdf(f));
+
+    let updatedImages = [...selectedImages];
+
+    // Handle normal images if any
+    if (imageFiles.length > 0) {
+      const remainingSlots = Math.max(0, 7 - updatedImages.length);
+      if (remainingSlots <= 0) {
+        showInAppAlert('Attachment Limit', 'Maximum 7 bills / attachments allowed.', 'warning');
+      } else {
+        if (imageFiles.length > remainingSlots) {
+          showInAppAlert('Attachment Limit', `Only ${remainingSlots} of ${imageFiles.length} images were added to stay within the 7-bill limit.`, 'warning');
+        }
+        const filesToProcess = imageFiles.slice(0, remainingSlots);
+        const finalFiles = await editImagesIfNeeded(filesToProcess);
+        finalFiles.forEach(file => {
+          const blobUrl = URL.createObjectURL(file);
+          imageFilesRef.current[blobUrl] = file;
+          updatedImages.push(blobUrl);
+        });
+        setSelectedImages(updatedImages);
+      }
+    }
+
+    // If PDF is selected, open the PDF page selection UI
+    if (pdfFiles.length > 0) {
+      if (updatedImages.length >= 7) {
+        showInAppAlert('Attachment Limit', 'Maximum 7 bills / attachments reached. You cannot add pages from the PDF.', 'warning');
+      } else {
+        setPendingPdfFile(pdfFiles[0]);
+        setIsPdfSelectorOpen(true);
+      }
+    }
+
     if (e.target) e.target.value = '';
   };
 
@@ -6335,8 +6468,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const processFiles = async (files: FileList | File[]) => {
     if (!files || files.length === 0 || !activeBookId) return;
 
-    // Limit to 5 images as per user request
-    const filesToProcess = Array.from(files).slice(0, 5) as File[];
+    // Limit to 7 images as per user request
+    const filesToProcess = Array.from(files).slice(0, 7) as File[];
 
     // Bypass cropping workflow; images should be processed immediately upon upload/drop
     const finalFiles = filesToProcess;
@@ -6635,8 +6768,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return;
     }
 
-    // Limit to 5 receipts as per BUG 2
-    const filesToScan = imageOnlyFiles.slice(0, 5);
+    // Limit to 7 receipts as per limit update
+    const filesToScan = imageOnlyFiles.slice(0, 7);
 
     // Bypass cropping workflow; images should be processed immediately upon upload/drop
     const finalFilesToScan = filesToScan;
@@ -8757,7 +8890,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         theme === 'dark' ? "text-white" : "text-black"
                       )}>Upload Bill Image</h3>
                       <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm">
-                        JPG, JPEG, PNG, or WEBP receipts are supported (Max 5 images).
+                        JPG, JPEG, PNG, or WEBP receipts are supported (Max 7 images).
                       </p>
                     </div>
 
@@ -10242,7 +10375,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         theme === 'dark' ? "text-white" : "text-black"
                       )}>Upload Bill Image</h3>
                       <p className="text-slate-500 dark:text-slate-400 text-xs text-center">
-                        JPG, JPEG, PNG, or WEBP receipts are supported (Max 5 images).
+                        JPG, JPEG, PNG, or WEBP receipts are supported (Max 7 images).
                       </p>
                     </div>
 
@@ -10864,7 +10997,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               <div className="flex items-center gap-2 p-4 bg-amber-50 dark:bg-amber-900/10 rounded-xl text-amber-700 dark:text-amber-400 text-xs">
                 <div className="shrink-0"><Loader2 size={14} className="animate-spin" /></div>
-                <p>AI will process images one by one. Max 5 images allowed.</p>
+                <p>AI will process images one by one. Max 7 images allowed.</p>
               </div>
             </motion.div>
           </div>
@@ -11877,27 +12010,45 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     )}>
                       <button
                         type="button"
-                        onClick={() => setShowForm('in')}
+                        onClick={() => {
+                          setShowForm('in');
+                          setTimeout(() => amountInputRef.current?.focus(), 60);
+                        }}
                         className={cn(
-                          "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm",
+                          "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm flex items-center justify-center gap-1.5",
                           showForm === 'in' 
                             ? (theme === 'dark' ? "bg-slate-700 text-emerald-400 shadow-sm" : "bg-white text-emerald-600 shadow-sm")
                             : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
                         )}
                       >
-                        CASH IN
+                        <span>CASH IN</span>
+                        <span className={cn(
+                          "text-[10px] px-1.5 py-0.5 rounded font-mono font-medium",
+                          showForm === 'in'
+                            ? (theme === 'dark' ? "bg-emerald-500/20 text-emerald-300" : "bg-emerald-100 text-emerald-700")
+                            : (theme === 'dark' ? "bg-slate-800 text-slate-400" : "bg-slate-200 text-slate-500")
+                        )}>C I</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => setShowForm('out')}
+                        onClick={() => {
+                          setShowForm('out');
+                          setTimeout(() => amountInputRef.current?.focus(), 60);
+                        }}
                         className={cn(
-                          "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm",
+                          "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm flex items-center justify-center gap-1.5",
                           showForm === 'out' 
                             ? (theme === 'dark' ? "bg-slate-700 text-rose-400 shadow-sm" : "bg-white text-rose-600 shadow-sm")
                             : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
                         )}
                       >
-                        CASH OUT
+                        <span>CASH OUT</span>
+                        <span className={cn(
+                          "text-[10px] px-1.5 py-0.5 rounded font-mono font-medium",
+                          showForm === 'out'
+                            ? (theme === 'dark' ? "bg-rose-500/20 text-rose-300" : "bg-rose-100 text-rose-700")
+                            : (theme === 'dark' ? "bg-slate-800 text-slate-400" : "bg-slate-200 text-slate-500")
+                        )}>C O</span>
                       </button>
                     </div>
                   </div>
@@ -12090,7 +12241,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bills / Attachments (Max 5)</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bills / Attachments (Max 7)</label>
                     <div className="space-y-3">
                       {selectedImages.length > 0 && (
                         <div className="space-y-4">
@@ -12182,7 +12333,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                 </div>
                               </div>
                             ))}
-                            {selectedImages.length < 5 && (
+                            {selectedImages.length < 7 && (
                               <button 
                                 type="button"
                                 onClick={() => triggerUploadSelector('transaction')}
@@ -12264,14 +12415,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             <Upload size={24} />
                           </div>
                           <p className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-500 transition-colors">
-                            Click to upload bills (Max 5)
+                            Click to upload bills or PDF (Max 7)
                           </p>
                         </div>
                       )}
                       <input 
                         type="file"
                         multiple
-                        accept="image/*"
+                        accept="image/*,application/pdf,.pdf"
                         ref={multiFileInputRef}
                         onChange={handleImageUpload}
                         className="hidden"
@@ -12653,8 +12804,54 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
             </div>
 
-            {/* Main Preview Area */}
-            <div className="flex-1 relative flex items-center justify-center overflow-hidden">
+            {/* Main Preview Area with Touch Swipe and Tap Navigation */}
+            <div 
+              className="flex-1 relative flex items-center justify-center overflow-hidden touch-pan-y select-none"
+              onTouchStart={(e) => {
+                if (previewZoom > 1) return;
+                previewTouchStartX.current = e.touches[0].clientX;
+                previewTouchStartY.current = e.touches[0].clientY;
+                previewTouchEndX.current = null;
+              }}
+              onTouchMove={(e) => {
+                if (previewZoom > 1) return;
+                previewTouchEndX.current = e.touches[0].clientX;
+              }}
+              onTouchEnd={(e) => {
+                if (previewZoom > 1) return;
+                if (previewTouchStartX.current === null || previewTouchEndX.current === null) return;
+                const deltaX = previewTouchStartX.current - previewTouchEndX.current;
+                const deltaY = previewTouchStartY.current ? Math.abs(previewTouchStartY.current - e.changedTouches[0].clientY) : 0;
+                
+                // Horizontal swipe detection (> 35px and horizontal > vertical)
+                if (Math.abs(deltaX) > 35 && Math.abs(deltaX) > deltaY) {
+                  if (deltaX > 0) {
+                    // Swiped left (dragged left) -> Show next image
+                    handlePreviewNext();
+                  } else {
+                    // Swiped right (dragged right) -> Show previous image
+                    handlePreviewPrev();
+                  }
+                }
+                previewTouchStartX.current = null;
+                previewTouchStartY.current = null;
+                previewTouchEndX.current = null;
+              }}
+              onClick={(e) => {
+                // In mobile view, clicking on left/right edges of screen triggers navigation
+                if (previewImages && previewImages.length > 1 && window.innerWidth < 640 && previewZoom <= 1) {
+                  const target = e.target as HTMLElement;
+                  if (target.closest('button')) return;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const clickX = e.clientX - rect.left;
+                  if (clickX > rect.width * 0.65) {
+                    handlePreviewNext();
+                  } else if (clickX < rect.width * 0.35) {
+                    handlePreviewPrev();
+                  }
+                }
+              }}
+            >
               {isPreviewValidating && (
                 <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/60 backdrop-blur-sm text-white">
                   <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" />
@@ -12692,46 +12889,46 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={previewIndex}
-                    initial={{ opacity: 0, scale: 0.9 }}
+                    initial={{ opacity: 0, x: previewSlideDirection * 50, scale: 0.95 }}
                     animate={{ 
                       opacity: 1, 
+                      x: 0,
                       scale: previewZoom,
                       rotate: previewRotation
                     }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                    exit={{ opacity: 0, x: -previewSlideDirection * 50, scale: 0.95 }}
+                    transition={{ type: "spring", damping: 26, stiffness: 220 }}
                     className="relative max-w-full max-h-full p-4"
                   >
                     <OptimizedImage 
                       src={previewImages[previewIndex]} 
                       alt="preview" 
                       type="fullscreen"
-                      className="max-w-full max-h-[80vh] object-contain shadow-2xl rounded-lg"
+                      className="max-w-full max-h-[80vh] object-contain shadow-2xl rounded-lg pointer-events-none"
                       referrerPolicy="no-referrer"
                     />
                   </motion.div>
                 </AnimatePresence>
               )}
 
+              {/* Mobile Swipe Hint Pill */}
+              {previewImages.length > 1 && (
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm text-white/80 px-3 py-1 rounded-full text-[10px] font-medium sm:hidden pointer-events-none flex items-center gap-1.5 shadow-md">
+                  <span>Swipe left/right to view next</span>
+                </div>
+              )}
+
               {/* Navigation Arrows */}
               {previewImages.length > 1 && (
                 <>
                   <button 
-                    onClick={() => {
-                      setPreviewIndex(prev => (prev - 1 + previewImages.length) % previewImages.length);
-                      setPreviewRotation(0);
-                      setPreviewZoom(1);
-                    }}
+                    onClick={handlePreviewPrev}
                     className="absolute left-4 p-4 bg-white/5 hover:bg-white/10 rounded-full text-white backdrop-blur-md transition-all cursor-pointer"
                   >
                     <ChevronLeft size={32} />
                   </button>
                   <button 
-                    onClick={() => {
-                      setPreviewIndex(prev => (prev + 1) % previewImages.length);
-                      setPreviewRotation(0);
-                      setPreviewZoom(1);
-                    }}
+                    onClick={handlePreviewNext}
                     className="absolute right-4 p-4 bg-white/5 hover:bg-white/10 rounded-full text-white backdrop-blur-md transition-all cursor-pointer"
                   >
                     <ChevronRight size={32} />
@@ -13958,6 +14155,19 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           theme={theme as 'light' | 'dark'}
         />
       )}
+
+      <PdfPageSelectorModal
+        isOpen={isPdfSelectorOpen}
+        file={pendingPdfFile}
+        currentCount={selectedImages.length}
+        maxLimit={7}
+        theme={theme as 'light' | 'dark'}
+        onClose={() => {
+          setIsPdfSelectorOpen(false);
+          setPendingPdfFile(null);
+        }}
+        onAddPages={handlePdfPagesAdded}
+      />
 
       {/* Premium Undo Toast Overlay */}
       <AnimatePresence>
