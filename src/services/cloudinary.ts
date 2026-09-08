@@ -111,7 +111,7 @@ export async function uploadToCloudinary(fileDataUriOrFile: string | File, folde
  */
 export function resolveAttachmentUrl(
   url: string,
-  type: 'preview' | 'fullscreen' | 'export_strong' | 'export_low' | 'export_high' = 'preview'
+  type: 'preview' | 'fullscreen' | 'export_strong' | 'export_low' | 'export_high' | 'original' = 'preview'
 ): string {
   if (!url || typeof url !== 'string') return '';
   
@@ -139,10 +139,15 @@ export function resolveAttachmentUrl(
     transformation = 'f_jpg,q_40,w_900';
   } else if (type === 'export_high') {
     transformation = 'f_jpg,q_82';
+  } else if (type === 'original') {
+    transformation = '';
   }
 
   // 2. If it's a non-Cloudinary external URL, proxy it through Cloudinary Fetch for egress protection
   if (!cleanUrl.includes('cloudinary.com')) {
+    if (!transformation) {
+      return cleanUrl + hash;
+    }
     return `https://res.cloudinary.com/${cloudName}/image/fetch/${transformation}/${encodeURIComponent(cleanUrl)}${hash}`;
   }
 
@@ -202,6 +207,9 @@ export function resolveAttachmentUrl(
   });
 
   // Re-assemble the URL using the requested transformation
+  if (!transformation) {
+    return `${prefix}${splitter}${cleanSegments.join('/')}${hash}`;
+  }
   return `${prefix}${splitter}${transformation}/${cleanSegments.join('/')}${hash}`;
 }
 
@@ -221,5 +229,5 @@ export function getExportOptimizedCloudinaryUrl(url: string, isCompressed: boole
   if (isCompressed) {
     return resolveAttachmentUrl(url, isHuge ? 'export_strong' : 'export_low');
   }
-  return resolveAttachmentUrl(url, 'export_high');
+  return resolveAttachmentUrl(url, 'original');
 }

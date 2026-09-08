@@ -53,6 +53,11 @@ if (geminiApiKey !== "") {
 const app = express();
 const PORT = 3000;
 
+// Health check endpoint (for container health checks and platform monitoring)
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
 // Body parser supporting larger images
 app.use(express.json({ limit: "15mb" }));
 
@@ -121,7 +126,7 @@ app.post("/api/gemini/ask", async (req, res) => {
 
     let response: any = null;
     let geminiError: any = null;
-    const modelsToTry = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-3.5-flash"];
+    const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-flash-latest"];
     const maxAttempts = 3;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -237,26 +242,52 @@ app.get("/api/gemini/health", async (req, res) => {
 });
 
 // Vite & Static file handler
-async function setupViteOrStatic() {
-  if (process.env.NODE_ENV !== "production") {
-    console.log("[Server] Configuring Vite Dev Middleware...");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    console.log("[Server] Configuring production static asset server...");
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
+let viteMiddleware: any = null;
+let viteInitPromise: Promise<void> | null = null;
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Express] Running on http://localhost:${PORT}`);
+if (process.env.NODE_ENV !== "production") {
+  console.log("[Server] Initializing Vite Dev Middleware...");
+  viteInitPromise = createViteServer({
+    server: { middlewareMode: true },
+    appType: "spa",
+  }).then((vite) => {
+    viteMiddleware = vite.middlewares;
+    console.log("[Server] Vite Dev Middleware ready.");
+  }).catch((err) => {
+    console.error("[Server] Vite Dev Middleware failed to initialize:", err);
+  });
+
+  app.use(async (req, res, next) => {
+    try {
+      if (!viteMiddleware && viteInitPromise) {
+        await viteInitPromise;
+      }
+      if (viteMiddleware) {
+        return viteMiddleware(req, res, next);
+      }
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
+} else {
+  console.log("[Server] Configuring production static asset server...");
+  const distPath = path.join(process.cwd(), "dist");
+  app.use(express.static(distPath));
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
   });
 }
 
-setupViteOrStatic();
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`[Express] Running on http://localhost:${PORT}`);
+});
+
+const handleShutdown = () => {
+  server.close(() => {
+    process.exit(0);
+  });
+};
+
+process.on("SIGTERM", handleShutdown);
+process.on("SIGINT", handleShutdown);

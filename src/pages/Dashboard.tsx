@@ -106,6 +106,8 @@ import { PhoneComingSoonModal } from '../components/PhoneComingSoonModal';
 import { useMpinSecurity } from '../components/MpinManager';
 import { clearSessionUnlocked } from '../services/mpinSecurityService';
 import { ShareWhatsAppModal } from '../components/ShareWhatsAppModal';
+import { PdfExportQualityModal } from '../components/PdfExportQualityModal';
+import { DashboardLoadingText } from '../components/DashboardLoadingText';
 import { addPdfBrandingFooter } from '../utils/pdfBranding';
 import { exitNativeApp } from '../services/biometricSecurityService';
 import { InAppSelect } from '../components/InAppSelect';
@@ -322,30 +324,10 @@ function safeFormatTime(dateVal: any, options?: Intl.DateTimeFormatOptions, loca
   return 'N/A';
 }
 
-// Compress image before client-side direct upload using browser-image-compression
+// Preserve original uploaded files without compression or quality reduction
 async function compressImage(file: File): Promise<Blob | File> {
-  const sizeKB = file.size / 1024;
-  if (file.size < 150 * 1024) {
-    console.log(`[Compression] Image ${file.name} is ${sizeKB.toFixed(1)} KB (below 150 KB threshold). Skipping compression.`);
-    return file;
-  }
-
-  const options = {
-    maxSizeMB: 1.0, // Increased target size to avoid slow multi-pass iteration cycles
-    maxWidthOrHeight: 1200, // Fast single-pass resize width/height
-    useWebWorker: true,
-    maxIteration: 2 // Guarantee it finishes in maximum 2 iterations for speed
-  };
-
-  try {
-    console.log(`[Compression] Compressing ${file.name} (${sizeKB.toFixed(1)} KB) automatically...`);
-    const compressedBlob = await imageCompression(file, options);
-    console.log(`[Compression] Success: Compressed to ${(compressedBlob.size / 1024).toFixed(1)} KB`);
-    return compressedBlob;
-  } catch (err) {
-    console.error('[Compression] browser-image-compression failed, falling back to original file:', err);
-    return file;
-  }
+  // Respecting upload rule: Preserve the original file exactly as uploaded for pristine cloud archiving
+  return file;
 }
 
 // Generate lightweight thumbnail URL for Cloudinary images (w_200,q_auto,f_auto)
@@ -1844,6 +1826,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [reconnectedToast, setReconnectedToast] = useState<string | null>(null);
   const [showQuitDialog, setShowQuitDialog] = useState(false);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [pdfQualityModalState, setPdfQualityModalState] = useState<{
+    isOpen: boolean;
+    cashbookId: string;
+    cashbookName: string;
+    transactions: any[];
+  } | null>(null);
   const isClosingModalFromUiRef = useRef(false);
 
   // Mobile MPIN Security
@@ -2104,6 +2092,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [createBookError, setCreateBookError] = useState<string | null>(null);
   const [editBookError, setEditBookError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState<'in' | 'out' | null>(null);
+  const [detailsError, setDetailsError] = useState(false);
+  const [amountError, setAmountError] = useState(false);
+  const [partyName, setPartyName] = useState('');
+  const [isDrawerDesktop, setIsDrawerDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
+
+  useEffect(() => {
+    const handleResize = () => setIsDrawerDesktop(window.innerWidth >= 1024);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadingMessage, setUploadingMessage] = useState('Detecting bill...');
   const [showAiWarning, setShowAiWarning] = useState(false);
@@ -2364,6 +2362,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   // Lock body scroll when transaction form is visible (prevents underlying scroll)
   useEffect(() => {
+    setDetailsError(false);
+    setAmountError(false);
     if (showForm) {
       document.body.style.overflow = 'hidden';
     } else {
@@ -4185,7 +4185,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     if (format === 'excel') {
       await backgroundExportManager.enqueueExcelTask(book.id, book.name, txs);
     } else {
-      await backgroundExportManager.enqueueTask(book.id, book.name, txs, true);
+      setPdfQualityModalState({
+        isOpen: true,
+        cashbookId: book.id,
+        cashbookName: book.name,
+        transactions: txs
+      });
     }
   };
 
@@ -4285,7 +4290,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const saveTransaction = async () => {
-    if (!activeBookId || !showForm || !amount || !session || !supabase) return;
+    const isAmountEmpty = !amount || !amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0;
+    const isDetailsEmpty = !description || !description.trim();
+
+    if (isAmountEmpty || isDetailsEmpty) {
+      if (isAmountEmpty) setAmountError(true);
+      if (isDetailsEmpty) setDetailsError(true);
+
+      if (isAmountEmpty) {
+        amountInputRef.current?.focus();
+      } else if (isDetailsEmpty) {
+        descriptionInputRef.current?.focus();
+      }
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (!activeBookId || !showForm || !session || !supabase) return;
 
     const finalCategory = category === 'Custom' ? customCategory : category;
     const finalMode = mode === 'Custom' ? customMode : mode;
@@ -4686,7 +4707,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const handleAddTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
-    if (!activeBookId || !showForm || !amount || !session || !supabase) return;
+
+    const isAmountEmpty = !amount || !amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0;
+    const isDetailsEmpty = !description || !description.trim();
+
+    if (isAmountEmpty || isDetailsEmpty) {
+      if (isAmountEmpty) setAmountError(true);
+      if (isDetailsEmpty) setDetailsError(true);
+
+      if (isAmountEmpty) {
+        amountInputRef.current?.focus();
+      } else if (isDetailsEmpty) {
+        descriptionInputRef.current?.focus();
+      }
+      return;
+    }
+
+    if (!activeBookId || !showForm || !session || !supabase) return;
 
     setIsSubmitting(true);
     setError(null);
@@ -4946,7 +4983,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setEditingTransaction(t);
     setShowForm(t.type);
     setAmount(t.amount.toString());
-    setDescription(t.description);
+    const partyMatch = t.description ? t.description.match(/^\[Party:\s*(.+?)\]\s*(.*)$/s) : null;
+    if (partyMatch) {
+      setPartyName(partyMatch[1]);
+      setDescription(partyMatch[2]);
+    } else {
+      setPartyName('');
+      setDescription(t.description || '');
+    }
+    setDetailsError(false);
+    setAmountError(false);
     setCategory(CATEGORIES.includes(t.category) ? t.category : 'Custom');
     if (!CATEGORIES.includes(t.category)) setCustomCategory(t.category);
     setMode(MODES.includes(t.mode) ? t.mode : 'Custom');
@@ -5543,6 +5589,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const resetFormFields = (keepMode?: boolean) => {
     setAmount('');
     setDescription('');
+    setPartyName('');
+    setDetailsError(false);
+    setAmountError(false);
     setCategory('Food');
     setCustomCategory('');
     if (!keepMode) {
@@ -6306,14 +6355,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         
         for (const file of finalFiles) {
           const isImage = file.type && file.type.startsWith('image/');
-          let processedFile: File;
-
-          if (isImage) {
-            const compressedBlob = await compressImage(file);
-            processedFile = new File([compressedBlob], file.name || 'compressed.jpg', { type: file.type || 'image/jpeg' });
-          } else {
-            processedFile = file;
-          }
+          const processedFile: File = file;
           
           const base64 = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
@@ -6439,14 +6481,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           setUploadingMessage(`Detecting bill ${completed + 1}/${total}...`);
           
           const isImage = file.type && file.type.startsWith('image/');
-          let processedFile: File;
-
-          if (isImage) {
-            const compressedBlob = await compressImage(file);
-            processedFile = new File([compressedBlob], file.name || 'compressed.jpg', { type: file.type || 'image/jpeg' });
-          } else {
-            processedFile = file;
-          }
+          const processedFile: File = file;
           
           await new Promise<void>((resolve, reject) => {
             const reader = new FileReader();
@@ -6983,7 +7018,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
         <div className="flex flex-col items-center gap-4 animate-fade-in">
           <Loader2 className="animate-spin text-indigo-600 animate-duration-1000" size={40} />
-          <p className="text-sm font-medium text-slate-500 animate-pulse font-sans">Initializing dashboard...</p>
+          <DashboardLoadingText />
         </div>
       </div>
     );
@@ -9425,8 +9460,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           showInAppAlert('No Transactions', 'No transactions found to export in this cashbook.', 'info');
                           return;
                         }
-                        backgroundExportManager.enqueueTask(activeBook.id, activeBook.name, filteredTransactions, true);
-                        setShowDownloadCenter(true);
+                        setPdfQualityModalState({
+                          isOpen: true,
+                          cashbookId: activeBook.id,
+                          cashbookName: activeBook.name,
+                          transactions: filteredTransactions
+                        });
                       }
                     }}
                     className={cn(
@@ -11752,19 +11791,31 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         )}
       </AnimatePresence>
 
-      {/* Transaction Form Modal */}
+      {/* Transaction Form Modal / Desktop Drawer */}
       <AnimatePresence>
         {showForm && (
-          <div className={cn(
-            "fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
-            theme === 'dark' ? "bg-black/60" : "bg-indigo-900/10"
-          )}>
+          <div 
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                resetForm();
+              }
+            }}
+            className={cn(
+              "fixed inset-0 z-[100] flex transition-colors duration-300",
+              "items-end sm:items-center justify-center p-4 backdrop-blur-sm",
+              "lg:items-stretch lg:justify-end lg:p-0 lg:backdrop-blur-none",
+              theme === 'dark' ? "bg-black/60" : "bg-slate-900/40"
+            )}
+          >
             <motion.div
-              initial={{ opacity: 0, y: 100 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 100 }}
+              initial={isDrawerDesktop ? { opacity: 0, x: "100%" } : { opacity: 0, y: 100 }}
+              animate={isDrawerDesktop ? { opacity: 1, x: 0 } : { opacity: 1, y: 0 }}
+              exit={isDrawerDesktop ? { opacity: 0, x: "100%" } : { opacity: 0, y: 100 }}
+              transition={{ type: "spring", damping: 28, stiffness: 280 }}
               className={cn(
-                "relative w-full max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden transition-colors duration-300",
+                "relative w-full shadow-2xl overflow-hidden transition-colors duration-300 flex flex-col",
+                "max-w-lg rounded-t-3xl sm:rounded-3xl max-h-[90vh]",
+                "lg:w-[480px] lg:max-w-[480px] lg:h-screen lg:max-h-screen lg:rounded-none lg:border-l lg:border-slate-200 dark:lg:border-slate-800",
                 theme === 'dark' ? "bg-zinc-950" : "bg-white"
               )}
             >
@@ -11785,8 +11836,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               {/* Modal Header */}
               <div className={cn(
-                "flex items-center justify-between p-4 sm:p-6 border-b transition-colors duration-300",
-                theme === 'dark' ? "border-slate-800" : "border-slate-100"
+                "flex items-center justify-between p-4 sm:p-6 border-b transition-colors duration-300 shrink-0",
+                theme === 'dark' ? "border-slate-800 bg-zinc-950" : "border-slate-100 bg-white"
               )}>
                 <div className="flex flex-col gap-1">
                   <h3 className={cn(
@@ -11816,41 +11867,40 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </button>
               </div>
 
-              <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-h-[80vh] overflow-y-auto no-scrollbar">
-                {/* Type Tabs */}
-                <div className="flex flex-col gap-4">
-                  <div className={cn(
-                    "p-1 rounded-xl flex gap-1 transition-colors duration-300",
-                    theme === 'dark' ? "bg-slate-800" : "bg-slate-100"
-                  )}>
-                    <button
-                      type="button"
-                      onClick={() => setShowForm('in')}
-                      className={cn(
-                        "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm",
-                        showForm === 'in' 
-                          ? (theme === 'dark' ? "bg-slate-700 text-emerald-400 shadow-sm" : "bg-white text-emerald-600 shadow-sm")
-                          : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
-                      )}
-                    >
-                      CASH IN
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowForm('out')}
-                      className={cn(
-                        "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm",
-                        showForm === 'out' 
-                          ? (theme === 'dark' ? "bg-slate-700 text-rose-400 shadow-sm" : "bg-white text-rose-600 shadow-sm")
-                          : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
-                      )}
-                    >
-                      CASH OUT
-                    </button>
+              <form noValidate onSubmit={handleAddTransaction} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 flex-1 overflow-y-auto no-scrollbar">
+                  {/* Type Tabs */}
+                  <div className="flex flex-col gap-4">
+                    <div className={cn(
+                      "p-1 rounded-xl flex gap-1 transition-colors duration-300",
+                      theme === 'dark' ? "bg-slate-800" : "bg-slate-100"
+                    )}>
+                      <button
+                        type="button"
+                        onClick={() => setShowForm('in')}
+                        className={cn(
+                          "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm",
+                          showForm === 'in' 
+                            ? (theme === 'dark' ? "bg-slate-700 text-emerald-400 shadow-sm" : "bg-white text-emerald-600 shadow-sm")
+                            : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
+                        )}
+                      >
+                        CASH IN
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowForm('out')}
+                        className={cn(
+                          "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm",
+                          showForm === 'out' 
+                            ? (theme === 'dark' ? "bg-slate-700 text-rose-400 shadow-sm" : "bg-white text-rose-600 shadow-sm")
+                            : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
+                        )}
+                      >
+                        CASH OUT
+                      </button>
+                    </div>
                   </div>
-                </div>
-
-                <form onSubmit={handleAddTransaction} className="space-y-4 sm:space-y-6">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Date & Time</label>
@@ -11873,16 +11923,31 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         type="number"
                         step="any"
                         min="0"
-                        required
                         value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setAmount(val);
+                          if (amountError && val.trim() && !isNaN(parseFloat(val)) && parseFloat(val) > 0) {
+                            setAmountError(false);
+                          }
+                        }}
                         placeholder="0.00"
                         tabIndex={1}
                         className={cn(
-                          "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
+                          "w-full h-[52px] px-4 py-3 rounded-xl outline-none text-sm font-medium transition-all duration-200 border",
+                          amountError
+                            ? (theme === 'dark' 
+                                ? "border-rose-500 ring-1 ring-rose-500/50 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/30" 
+                                : "border-rose-500 ring-1 ring-rose-500/40 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20")
+                            : "border-transparent focus:ring-2 focus:ring-indigo-500",
                           theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
                         )}
                       />
+                      {amountError && (
+                        <p className="text-xs text-rose-500 dark:text-rose-400 font-medium mt-1 animate-fade-in">
+                          Amount is required
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -11957,15 +12022,31 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     <textarea
                       ref={descriptionInputRef}
                       value={description}
-                      onChange={(e) => setDescription(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDescription(val);
+                        if (detailsError && val.trim()) {
+                          setDetailsError(false);
+                        }
+                      }}
                       placeholder="Enter transaction details"
                       rows={2}
                       tabIndex={4}
                       className={cn(
-                        "w-full px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium resize-none transition-colors duration-300",
+                        "w-full px-4 py-3 rounded-xl outline-none text-sm font-medium resize-none transition-all duration-200 border",
+                        detailsError
+                          ? (theme === 'dark' 
+                              ? "border-rose-500 ring-1 ring-rose-500/50 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/30" 
+                              : "border-rose-500 ring-1 ring-rose-500/40 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20")
+                          : "border-transparent focus:ring-2 focus:ring-indigo-500",
                         theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
                       )}
                     />
+                    {detailsError && (
+                      <p className="text-xs text-rose-500 dark:text-rose-400 font-medium mt-1 animate-fade-in">
+                        Details are required
+                      </p>
+                    )}
                   </div>
 
                   {/* Image Layout Selection */}
@@ -12198,35 +12279,55 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   </div>
 
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      type="button"
-                      tabIndex={7}
-                      disabled={isSubmitting}
-                      onClick={resetForm}
-                      className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      tabIndex={6}
-                      disabled={isSubmitting}
-                      onClick={() => { vibrate(30); setSubmitAndAddNew(false); }}
-                      className={cn(
-                        "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed",
-                        isSubmitting ? "bg-slate-400" : (
-                          showForm === 'in' 
-                            ? (theme === 'dark' ? "bg-emerald-600 hover:bg-emerald-700 shadow-none" : "bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-100")
-                            : (theme === 'dark' ? "bg-rose-600 hover:bg-rose-700 shadow-none" : "bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-100")
-                        )
-                      )}
-                    >
-                      {isSubmitting ? "Saving..." : (editingTransaction ? 'Save Changes' : 'Save')}
-                    </button>
-                  </div>
-                </form>
-              </div>
+                </div>
+
+                {/* Sticky Bottom Actions */}
+                <div className={cn(
+                  "shrink-0 p-4 sm:p-6 border-t flex gap-3 transition-colors duration-300",
+                  theme === 'dark' ? "border-slate-800 bg-zinc-950" : "border-slate-100 bg-white"
+                )}>
+                  <button
+                    type="button"
+                    tabIndex={7}
+                    disabled={isSubmitting}
+                    onClick={resetForm}
+                    className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    tabIndex={6}
+                    disabled={isSubmitting}
+                    onClick={(e) => {
+                      vibrate(30);
+                      setSubmitAndAddNew(false);
+                      const isAmountEmpty = !amount || !amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0;
+                      const isDetailsEmpty = !description || !description.trim();
+                      if (isAmountEmpty || isDetailsEmpty) {
+                        e.preventDefault();
+                        if (isAmountEmpty) setAmountError(true);
+                        if (isDetailsEmpty) setDetailsError(true);
+                        if (isAmountEmpty) {
+                          amountInputRef.current?.focus();
+                        } else if (isDetailsEmpty) {
+                          descriptionInputRef.current?.focus();
+                        }
+                      }
+                    }}
+                    className={cn(
+                      "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed",
+                      isSubmitting ? "bg-slate-400" : (
+                        showForm === 'in' 
+                          ? (theme === 'dark' ? "bg-emerald-600 hover:bg-emerald-700 shadow-none" : "bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-100")
+                          : (theme === 'dark' ? "bg-rose-600 hover:bg-rose-700 shadow-none" : "bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-100")
+                      )
+                    )}
+                  >
+                    {isSubmitting ? "Saving..." : (editingTransaction ? 'Save Changes' : 'Save')}
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}
@@ -14150,6 +14251,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         cashbookId={activeBook?.id || ''}
         cashbookName={activeBook?.name || ''}
         filteredTransactions={filteredTransactions}
+        theme={theme}
+      />
+
+      {/* PDF Export Quality Selection Modal */}
+      <PdfExportQualityModal
+        isOpen={Boolean(pdfQualityModalState?.isOpen)}
+        onClose={() => setPdfQualityModalState(null)}
+        cashbookId={pdfQualityModalState?.cashbookId || ''}
+        cashbookName={pdfQualityModalState?.cashbookName || ''}
+        transactions={pdfQualityModalState?.transactions || []}
         theme={theme}
       />
 

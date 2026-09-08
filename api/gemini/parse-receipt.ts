@@ -769,7 +769,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const retryIntervals = [2000, 5000]; 
     const maxAttempts = 3;
-    const modelsToTry = ["gemini-3.5-flash", "gemini-3.5-flash", "gemini-3.5-flash"];
+    const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-flash-latest"];
     let response: any = null;
     let geminiError: any = null;
 

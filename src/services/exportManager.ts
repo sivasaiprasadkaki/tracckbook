@@ -10,6 +10,7 @@ export interface ExportTask {
   cashbookId: string;
   cashbookName: string;
   isCompressed: boolean;
+  pdfQuality?: 'original' | 'compressed';
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress: number;
   message: string;
@@ -212,9 +213,14 @@ const workerBlobCode = `
       transformation = 'f_jpg,q_40,w_900';
     } else if (type === 'export_high') {
       transformation = 'f_jpg,q_82';
+    } else if (type === 'original') {
+      transformation = '';
     }
 
     if (!cleanUrl.includes('cloudinary.com')) {
+      if (!transformation) {
+        return cleanUrl + hash;
+      }
       return 'https://res.cloudinary.com/' + cloudName + '/image/fetch/' + transformation + '/' + encodeURIComponent(cleanUrl) + hash;
     }
 
@@ -262,6 +268,9 @@ const workerBlobCode = `
       return !keys.some(k => s.startsWith(k) || s.includes(',' + k));
     });
 
+    if (!transformation) {
+      return prefix + splitter + cleanSegments.join('/') + hash;
+    }
     return prefix + splitter + transformation + '/' + cleanSegments.join('/') + hash;
   };
 
@@ -269,7 +278,7 @@ const workerBlobCode = `
     if (isCompressed) {
       return resolveAttachmentUrl(url, isHuge ? 'export_strong' : 'export_low', cloudName);
     }
-    return resolveAttachmentUrl(url, 'export_high', cloudName);
+    return resolveAttachmentUrl(url, 'original', cloudName);
   };
 
   self.onmessage = async (e) => {
@@ -551,8 +560,10 @@ export class BackgroundExportManager {
     cashbookId: string,
     cashbookName: string,
     transactions: any[],
-    isCompressed: boolean
+    isCompressed: boolean = true,
+    pdfQuality?: 'original' | 'compressed'
   ): Promise<string> {
+    const quality: 'original' | 'compressed' = pdfQuality || (isCompressed ? 'compressed' : 'original');
     const taskId = 'tx_pdf_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
     const attachments = transactions.filter(t => t.images && t.images.length > 0);
     const totalAttachments = attachments.reduce((acc, t) => acc + (t.images?.length || 0), 0);
@@ -562,7 +573,8 @@ export class BackgroundExportManager {
       type: 'pdf',
       cashbookId,
       cashbookName,
-      isCompressed,
+      isCompressed: quality === 'compressed',
+      pdfQuality: quality,
       status: 'pending',
       progress: 0,
       message: 'Added to download queue...',
@@ -1209,8 +1221,9 @@ export class BackgroundExportManager {
 
   // Pure jsPDF assembler
   private async generatePdfBlob(task: ExportTask, transactions: any[], imageMap: { [url: string]: string }): Promise<Blob> {
+    const isOriginalQuality = !task.isCompressed;
     const isStrongCompression = task.transactionsCount >= 80;
-    const doc = new jsPDF({ compress: true });
+    const doc = new jsPDF({ compress: !isOriginalQuality });
     
     const transactionsWithImages = transactions.filter(t => t.images && t.images.length > 0);
     const totalImages = transactionsWithImages.reduce((acc, t) => acc + (t.images?.length || 0), 0);
@@ -1233,7 +1246,8 @@ export class BackgroundExportManager {
       if (typeof src === 'string' && src.includes('base64,')) {
         payload = src.split('base64,')[1];
       }
-      pdfDoc.addImage(payload, format as any, x, y, w, h, alias, 'FAST');
+      const compression = isOriginalQuality ? 'NONE' : 'FAST';
+      pdfDoc.addImage(payload, format as any, x, y, w, h, alias, compression);
     };
 
     const parseUrlMetadata = (url: string) => {
@@ -1279,7 +1293,8 @@ export class BackgroundExportManager {
             ctx.rotate(angleRad);
             ctx.drawImage(img, -origWidth / 2, -origHeight / 2, origWidth, origHeight);
 
-            const rotatedSrc = canvas.toDataURL('image/jpeg', 0.85);
+            const quality = isOriginalQuality ? 1.0 : 0.85;
+            const rotatedSrc = canvas.toDataURL('image/jpeg', quality);
             resolve({ src: rotatedSrc, width: targetWidth, height: targetHeight });
           } catch (err) {
             console.error('[ExportManager] Canvas rotation failed:', err);
