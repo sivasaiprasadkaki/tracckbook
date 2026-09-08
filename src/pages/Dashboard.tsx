@@ -2841,6 +2841,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [previewValidationStatus, setPreviewValidationStatus] = useState<boolean[]>([]);
   const [isPreviewValidating, setIsPreviewValidating] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [isDraggingAttachments, setIsDraggingAttachments] = useState(false);
+  const dragCounterRef = useRef<number>(0);
 
   const handlePreviewNext = () => {
     if (!previewImages || previewImages.length <= 1) return;
@@ -5881,15 +5883,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setSelectedImages(newImages);
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
+  const processUploadedFiles = async (files: FileList | File[] | null | undefined) => {
+    if (!files) return;
     const rawFiles = Array.from(files) as File[];
+    if (rawFiles.length === 0) return;
 
     if (selectedImages.length >= 7) {
       showInAppAlert('Attachment Limit', 'Maximum 7 bills / attachments allowed. Please remove an existing attachment to add more.', 'warning');
-      if (e.target) e.target.value = '';
       return;
     }
 
@@ -5930,7 +5930,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         setIsPdfSelectorOpen(true);
       }
     }
+  };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    await processUploadedFiles(e.target.files);
     if (e.target) e.target.value = '';
   };
 
@@ -11945,6 +11948,32 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               animate={isDrawerDesktop ? { opacity: 1, x: 0 } : { opacity: 1, y: 0 }}
               exit={isDrawerDesktop ? { opacity: 0, x: "100%" } : { opacity: 0, y: 100 }}
               transition={{ type: "spring", damping: 28, stiffness: 280 }}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                dragCounterRef.current++;
+                setIsDraggingAttachments(true);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+                if (!isDraggingAttachments) setIsDraggingAttachments(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                dragCounterRef.current--;
+                if (dragCounterRef.current <= 0) {
+                  dragCounterRef.current = 0;
+                  setIsDraggingAttachments(false);
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                dragCounterRef.current = 0;
+                setIsDraggingAttachments(false);
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                  processUploadedFiles(e.dataTransfer.files);
+                }
+              }}
               className={cn(
                 "relative w-full shadow-2xl overflow-hidden transition-colors duration-300 flex flex-col",
                 "max-w-lg rounded-t-3xl sm:rounded-3xl max-h-[90vh]",
@@ -12240,8 +12269,73 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bills / Attachments (Max 7)</label>
+                  <div 
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      dragCounterRef.current++;
+                      setIsDraggingAttachments(true);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      e.dataTransfer.dropEffect = 'copy';
+                      if (!isDraggingAttachments) setIsDraggingAttachments(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      dragCounterRef.current--;
+                      if (dragCounterRef.current <= 0) {
+                        dragCounterRef.current = 0;
+                        setIsDraggingAttachments(false);
+                      }
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      dragCounterRef.current = 0;
+                      setIsDraggingAttachments(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        processUploadedFiles(e.dataTransfer.files);
+                      }
+                    }}
+                    className={cn(
+                      "space-y-1.5 relative rounded-2xl transition-all duration-200",
+                      isDraggingAttachments ? "ring-2 ring-indigo-500 rounded-2xl p-1 bg-indigo-50/40 dark:bg-indigo-950/30" : ""
+                    )}
+                  >
+                    {/* Visual Drag & Drop Active Overlay */}
+                    <AnimatePresence>
+                      {isDraggingAttachments && (
+                        <motion.div 
+                          initial={{ opacity: 0, scale: 0.98 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.98 }}
+                          transition={{ duration: 0.15 }}
+                          className="absolute inset-0 z-30 rounded-2xl border-2 border-dashed border-indigo-500 bg-indigo-600/10 dark:bg-indigo-500/15 backdrop-blur-xs flex flex-col items-center justify-center gap-2 p-4 pointer-events-none"
+                        >
+                          <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white shadow-lg flex items-center justify-center animate-bounce">
+                            <Upload size={24} />
+                          </div>
+                          <p className="text-xs sm:text-sm font-black text-indigo-600 dark:text-indigo-400">
+                            Drop bills or PDF here to attach
+                          </p>
+                          <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                            Supports Images (JPG, PNG) &amp; Multi-page PDF (Max 7)
+                          </p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bills / Attachments (Max 7)</label>
+                      <span className="text-[9px] font-bold text-indigo-500 dark:text-indigo-400 flex items-center gap-1">
+                        <Upload size={10} />
+                        Drag &amp; Drop supported
+                      </span>
+                    </div>
+
                     <div className="space-y-3">
                       {selectedImages.length > 0 && (
                         <div className="space-y-4">
@@ -12338,12 +12432,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                 type="button"
                                 onClick={() => triggerUploadSelector('transaction')}
                                 className={cn(
-                                  "w-20 h-20 sm:w-24 sm:h-24 flex flex-col items-center justify-center border-2 border-dashed rounded-xl text-slate-400 hover:border-emerald-500 hover:text-emerald-500 transition-all gap-1",
+                                  "w-20 h-20 sm:w-24 sm:h-24 flex flex-col items-center justify-center border-2 border-dashed rounded-xl text-slate-400 hover:border-emerald-500 hover:text-emerald-500 transition-all gap-1 cursor-pointer",
                                   theme === 'dark' ? "border-slate-800 bg-zinc-900/40" : "border-slate-200 bg-slate-50/50"
                                 )}
                               >
                                 <Plus size={20} />
-                                <span className="text-[8px] font-black uppercase tracking-wider">Add</span>
+                                <span className="text-[8px] font-black uppercase tracking-wider">Add / Drop</span>
                               </button>
                             )}
                           </div>
@@ -12404,19 +12498,26 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           onClick={() => triggerUploadSelector('transaction')}
                           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); triggerUploadSelector('transaction'); } }}
                           className={cn(
-                            "border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center gap-2 hover:border-indigo-300 transition-all cursor-pointer group focus:outline-none focus:ring-2 focus:ring-indigo-500",
-                            theme === 'dark' ? "border-slate-800 hover:border-indigo-500" : "border-slate-200"
+                            "border-2 border-dashed rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center gap-2.5 transition-all cursor-pointer group focus:outline-none focus:ring-2 focus:ring-indigo-500",
+                            isDraggingAttachments
+                              ? "border-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/40 ring-4 ring-indigo-500/20 scale-[1.01]"
+                              : theme === 'dark' ? "border-slate-800 hover:border-indigo-500 bg-slate-900/30" : "border-slate-200 hover:border-indigo-300 bg-slate-50/50"
                           )}
                         >
                           <div className={cn(
-                            "p-2 rounded-full text-slate-400 group-hover:text-indigo-500 transition-colors",
-                            theme === 'dark' ? "bg-slate-800" : "bg-slate-50"
+                            "p-3 rounded-2xl text-slate-400 group-hover:text-indigo-500 group-hover:scale-110 transition-all shadow-xs",
+                            theme === 'dark' ? "bg-slate-800" : "bg-white"
                           )}>
-                            <Upload size={24} />
+                            <Upload size={26} />
                           </div>
-                          <p className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-500 transition-colors">
-                            Click to upload bills or PDF (Max 7)
-                          </p>
+                          <div className="text-center space-y-0.5">
+                            <p className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 group-hover:text-indigo-500 transition-colors">
+                              Drag &amp; Drop or Click to attach bills or PDF
+                            </p>
+                            <p className="text-[10px] font-medium text-slate-400">
+                              Supports Images (JPG, PNG) &amp; Multi-page PDF • Max 7 items
+                            </p>
+                          </div>
                         </div>
                       )}
                       <input 

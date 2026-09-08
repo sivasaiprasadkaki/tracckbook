@@ -3,6 +3,7 @@ package xyz.trackbook.app
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.DownloadManager
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -55,12 +56,14 @@ class MainActivity : AppCompatActivity() {
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (fileUploadCallback == null) return@registerForActivityResult
+        val callback = fileUploadCallback
+        fileUploadCallback = null
+        if (callback == null) return@registerForActivityResult
 
         val results: Array<Uri>? = when {
             result.resultCode == RESULT_OK && result.data != null -> {
                 val data = result.data
-                if (data?.clipData != null) {
+                if (data?.clipData != null && data.clipData!!.itemCount > 0) {
                     val count = data.clipData!!.itemCount
                     Array(count) { i -> data.clipData!!.getItemAt(i).uri }
                 } else if (data?.data != null) {
@@ -72,8 +75,7 @@ class MainActivity : AppCompatActivity() {
             else -> null
         }
 
-        fileUploadCallback?.onReceiveValue(results)
-        fileUploadCallback = null
+        callback.onReceiveValue(results)
     }
 
     private val permissionLauncher = registerForActivityResult(
@@ -238,28 +240,38 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // File Chooser for Image/Receipt/Document uploads
+            // File Chooser for Image/Receipt/Document uploads (Supports image/* and application/pdf)
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
                 fileChooserParams: FileChooserParams?
             ): Boolean {
+                // Cancel any previous pending callback to prevent WebView from getting stuck
                 fileUploadCallback?.onReceiveValue(null)
                 fileUploadCallback = filePathCallback
 
-                val intent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
-                    type = "*/*"
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                }
-
                 try {
+                    val intent = createStorageAccessIntent(fileChooserParams)
                     filePickerLauncher.launch(intent)
+                    return true
+                } catch (e: ActivityNotFoundException) {
+                    Log.w("MainActivity", "ACTION_OPEN_DOCUMENT not supported, falling back to ACTION_GET_CONTENT", e)
+                    try {
+                        val fallbackIntent = createGetContentFallbackIntent(fileChooserParams)
+                        filePickerLauncher.launch(fallbackIntent)
+                        return true
+                    } catch (e2: Exception) {
+                        Log.e("MainActivity", "Cannot open fallback file chooser", e2)
+                        fileUploadCallback?.onReceiveValue(null)
+                        fileUploadCallback = null
+                        return false
+                    }
                 } catch (e: Exception) {
                     Log.e("MainActivity", "Cannot open file chooser", e)
+                    fileUploadCallback?.onReceiveValue(null)
                     fileUploadCallback = null
                     return false
                 }
-                return true
             }
         }
 
@@ -338,6 +350,96 @@ class MainActivity : AppCompatActivity() {
         }
         if (permissions.isNotEmpty()) {
             permissionLauncher.launch(permissions.toTypedArray())
+        }
+    }
+
+    /**
+     * Resolves the MIME types and multi-select mode requested by HTML file inputs.
+     * Supports both image/* and application/pdf for receipt and bill attachments.
+     */
+    private fun resolveFileChooserMimeTypes(fileChooserParams: WebChromeClient.FileChooserParams?): Pair<Array<String>, Boolean> {
+        val acceptTypes = fileChooserParams?.acceptTypes ?: emptyArray()
+        val parsedTypes = linkedSetOf<String>()
+
+        for (type in acceptTypes) {
+            if (type.isNullOrBlank()) continue
+            // Some WebViews pass comma-separated strings inside a single array entry (e.g. "image/*,application/pdf,.pdf")
+            val parts = type.split(",")
+            for (part in parts) {
+                val trimmed = part.trim()
+                when {
+                    trimmed.equals(".pdf", ignoreCase = true) || trimmed.equals("application/pdf", ignoreCase = true) -> {
+                        parsedTypes.add("application/pdf")
+                    }
+                    trimmed.equals(".jpg", ignoreCase = true) || trimmed.equals(".jpeg", ignoreCase = true) -> {
+                        parsedTypes.add("image/jpeg")
+                    }
+                    trimmed.equals(".png", ignoreCase = true) -> {
+                        parsedTypes.add("image/png")
+                    }
+                    trimmed.equals(".webp", ignoreCase = true) -> {
+                        parsedTypes.add("image/webp")
+                    }
+                    trimmed.startsWith("image/", ignoreCase = true) -> {
+                        parsedTypes.add(trimmed.lowercase())
+                    }
+                    trimmed.contains("/") -> {
+                        parsedTypes.add(trimmed.lowercase())
+                    }
+                }
+            }
+        }
+
+        val allowMultiple = fileChooserParams?.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+
+        val resolvedList = when {
+            parsedTypes.isEmpty() -> arrayOf("image/*", "application/pdf")
+            parsedTypes.contains("application/pdf") && parsedTypes.any { it.startsWith("image/") } -> {
+                // Attach Bills input requesting both images and PDF
+                arrayOf("image/*", "application/pdf")
+            }
+            parsedTypes.contains("application/pdf") -> arrayOf("application/pdf")
+            parsedTypes.any { it.startsWith("image/") } -> parsedTypes.toTypedArray()
+            else -> parsedTypes.toTypedArray()
+        }
+
+        return Pair(resolvedList, allowMultiple)
+    }
+
+    /**
+     * Creates an Intent using Android Storage Access Framework (ACTION_OPEN_DOCUMENT)
+     * which properly allows selecting both images and PDF documents without being forced
+     * into the photo-only gallery or photo picker.
+     */
+    private fun createStorageAccessIntent(fileChooserParams: WebChromeClient.FileChooserParams?): Intent {
+        val (mimeTypes, allowMultiple) = resolveFileChooserMimeTypes(fileChooserParams)
+        return Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            // Use wildcard type with EXTRA_MIME_TYPES so document providers can filter both images and PDFs
+            type = if (mimeTypes.size == 1) mimeTypes[0] else "*/*"
+            if (mimeTypes.isNotEmpty()) {
+                putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+            }
+            if (allowMultiple) {
+                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            }
+        }
+    }
+
+    /**
+     * Fallback Intent using ACTION_GET_CONTENT in case a legacy device does not support ACTION_OPEN_DOCUMENT.
+     */
+    private fun createGetContentFallbackIntent(fileChooserParams: WebChromeClient.FileChooserParams?): Intent {
+        val (mimeTypes, allowMultiple) = resolveFileChooserMimeTypes(fileChooserParams)
+        return Intent(Intent.ACTION_GET_CONTENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = if (mimeTypes.size == 1) mimeTypes[0] else "*/*"
+            if (mimeTypes.isNotEmpty()) {
+                putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+            }
+            if (allowMultiple) {
+                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            }
         }
     }
 
