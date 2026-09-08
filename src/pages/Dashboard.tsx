@@ -11815,7 +11815,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               className={cn(
                 "relative w-full shadow-2xl overflow-hidden transition-colors duration-300 flex flex-col",
                 "max-w-lg rounded-t-3xl sm:rounded-3xl max-h-[90vh]",
-                "lg:w-[480px] lg:max-w-[480px] lg:h-screen lg:max-h-screen lg:rounded-none lg:border-l lg:border-slate-200 dark:lg:border-slate-800",
+                "lg:w-[580px] xl:w-[640px] 2xl:w-[680px] lg:max-w-[680px] lg:h-screen lg:max-h-screen lg:rounded-none lg:border-l lg:border-slate-200 dark:lg:border-slate-800",
                 theme === 'dark' ? "bg-zinc-950" : "bg-white"
               )}
             >
