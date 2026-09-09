@@ -201,3 +201,13 @@ export async function handleBatchSyncOfflineEntries(req: Request, res: Response)
     return res.status(500).json({ success: false, error: err.message || 'Server error' });
   }
 }
+
+export default async function syncHandler(req: any, res: any) {
+  if (req.method === 'POST') {
+    if (req.body?.entries) {
+      return handleBatchSyncOfflineEntries(req, res);
+    }
+    return handleSyncOfflineEntry(req, res);
+  }
+  return res.status(200).json({ ok: true, message: 'Sync module ready' });
+}

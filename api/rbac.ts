@@ -1639,3 +1639,18 @@ export async function handleSaveCashbookEntry(req: Request, res: Response) {
   }
 }
 
+export default async function rbacHandler(req: any, res: any) {
+  const action = req.query?.action || req.body?.action;
+  switch (action) {
+    case 'invite': return handleCreateInvitation(req, res);
+    case 'verify-invitation': return handleVerifyInvitation(req, res);
+    case 'accept-invitation': return handleAcceptInvitation(req, res);
+    case 'decline-invitation': return handleDeclineInvitation(req, res);
+    case 'members': return handleGetMembers(req, res);
+    case 'user-cashbooks': return handleGetUserCashbooks(req, res);
+    case 'cashbook-entries': return handleGetCashbookEntries(req, res);
+    case 'save-entry': return handleSaveCashbookEntry(req, res);
+    default:
+      return res.status(200).json({ ok: true, message: 'RBAC module ready' });
+  }
+}
