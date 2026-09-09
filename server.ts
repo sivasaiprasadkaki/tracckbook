@@ -1,6 +1,7 @@
+import fs from "fs";
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
+// Vite is dynamically loaded in development mode only
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -52,7 +53,18 @@ if (geminiApiKey !== "") {
 }
 
 const app = express();
-const PORT = 3000;
+// Determine port based on environment
+// In AI Studio development, Nginx reverse proxy forwards traffic to port 3000.
+// In deployed Cloud Run production, Cloud Run injects PORT (typically 8080) and expects listening on that port.
+const getPort = (): number => {
+  if (process.env.NODE_ENV === "production" && process.env.PORT) {
+    const parsed = parseInt(process.env.PORT, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return 3000;
+};
+
+const PORT = getPort();
 
 // Health check endpoint (for container health checks and platform monitoring)
 app.get("/api/health", (req, res) => {
@@ -250,9 +262,11 @@ let viteInitPromise: Promise<void> | null = null;
 
 if (process.env.NODE_ENV !== "production") {
   console.log("[Server] Initializing Vite Dev Middleware...");
-  viteInitPromise = createViteServer({
-    server: { middlewareMode: true },
-    appType: "spa",
+  viteInitPromise = import("vite").then(({ createServer: createViteServer }) => {
+    return createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
   }).then((vite) => {
     viteMiddleware = vite.middlewares;
     console.log("[Server] Vite Dev Middleware ready.");
@@ -283,8 +297,22 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 const server = app.listen(PORT, "0.0.0.0", () => {
-  console.log(`[Express] Running on http://localhost:${PORT}`);
+  console.log(`[Express] Running on http://0.0.0.0:${PORT} (NODE_ENV: ${process.env.NODE_ENV || "development"})`);
 });
+
+// In production, if PORT is not 3000, also bind to port 3000 as a fallback if available
+if (process.env.NODE_ENV === "production" && PORT !== 3000) {
+  try {
+    const fallbackServer = app.listen(3000, "0.0.0.0", () => {
+      console.log(`[Express] Also listening on fallback port 3000`);
+    });
+    fallbackServer.on("error", (err: any) => {
+      console.log(`[Express] Port 3000 fallback not bound: ${err.message}`);
+    });
+  } catch (err: any) {
+    console.log(`[Express] Fallback port binding skipped: ${err.message}`);
+  }
+}
 
 const handleShutdown = () => {
   server.close(() => {
@@ -294,3 +322,11 @@ const handleShutdown = () => {
 
 process.on("SIGTERM", handleShutdown);
 process.on("SIGINT", handleShutdown);
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[Server] Unhandled Rejection at:", promise, "reason:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[Server] Uncaught Exception thrown:", err);
+});
