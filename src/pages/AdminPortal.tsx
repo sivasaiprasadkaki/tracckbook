@@ -757,6 +757,11 @@ export default function AdminPortal() {
                             )}>
                               {row.category || 'General'}
                             </span>
+                            {row.source === 'Offline Sync' && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold border bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30 ml-1.5">
+                                Offline Sync
+                              </span>
+                            )}
                           </td>
                           <td className="py-3.5 px-4 text-zinc-900 dark:text-zinc-100 font-medium max-w-xs truncate" title={row.description}>
                             {row.description || 'No description provided'}

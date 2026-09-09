@@ -93,7 +93,8 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
 import { backgroundExportManager } from '../services/exportManager';
-import { syncManager, offlineDb } from '../services/syncManager';
+import { syncManager, offlineDb, OfflineEntry } from '../services/syncManager';
+import { SyncStatusBadge } from '../components/SyncStatusBadge';
 import DownloadCenter, { DownloadCenterTrigger } from '../components/DownloadCenter';
 import NotificationBell from '../components/NotificationBell';
 import MembersAccessManagement from '../components/MembersAccessManagement';
@@ -238,6 +239,7 @@ function ProcessingTimeline({
 
 interface Transaction {
   id: string;
+  clientEntryId?: string;
   amount: number;
   type: 'in' | 'out';
   description: string;
@@ -254,6 +256,8 @@ interface Transaction {
   user_name?: string;
   created_at?: string;
   attachment_details?: any[];
+  syncStatus?: 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED';
+  is_offline?: boolean;
 }
 
 function getTransactionSource(t: any): 'AI' | 'Imported' | 'Manual' {
@@ -948,6 +952,15 @@ const MobileTransactionRow = React.memo(({
               Imported
             </span>
           )}
+          {(t.syncStatus === 'PENDING' || t.is_offline) && (
+            <span className={cn(
+              "px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase rounded-lg border transition-colors shrink-0 flex items-center gap-1",
+              theme === 'dark' ? "bg-amber-950/60 text-amber-300 border-amber-800/60" : "bg-amber-50 text-amber-800 border-amber-300"
+            )}>
+              <Clock size={10} className="animate-pulse text-amber-500" />
+              Offline • Pending Sync
+            </span>
+          )}
         </div>
         <div className="text-right flex flex-col items-end">
           <p className={cn(
@@ -1228,6 +1241,15 @@ const DesktopTransactionRow = React.memo(({
             )}>
               <Sparkles size={10} />
               AI
+            </span>
+          )}
+          {(t.syncStatus === 'PENDING' || t.is_offline) && (
+            <span className={cn(
+              "px-2 py-0.5 text-[9px] font-bold rounded-full border uppercase shrink-0 transition-all flex items-center gap-1",
+              theme === 'dark' ? "bg-amber-950/50 text-amber-300 border-amber-800/60" : "bg-amber-50 text-amber-800 border-amber-300"
+            )}>
+              <Clock size={10} className="animate-pulse text-amber-500" />
+              Offline • Pending Sync
             </span>
           )}
           {t.imageLayout && (
@@ -1864,6 +1886,48 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     return () => unsubscribe();
   }, []);
 
+  // Offline entry sync listener and real-time status updates
+  useEffect(() => {
+    const unsubEntry = syncManager.onEntrySynced((clientEntryId, syncedEntry) => {
+      setBooks(prevBooks => {
+        let changed = false;
+        const nextBooks = prevBooks.map(b => {
+          const hasTx = b.transactions.some(t => t.id === clientEntryId || t.clientEntryId === clientEntryId);
+          if (!hasTx) return b;
+          changed = true;
+          const updatedTxs = b.transactions.map(t => {
+            if (t.id === clientEntryId || t.clientEntryId === clientEntryId) {
+              return {
+                ...t,
+                ...(syncedEntry || {}),
+                id: syncedEntry?.id || t.id,
+                syncStatus: 'SYNCED' as const,
+                is_offline: false
+              };
+            }
+            return t;
+          });
+          entriesCache.set(b.id, updatedTxs);
+          return {
+            ...b,
+            transactions: updatedTxs
+          };
+        });
+        return changed ? nextBooks : prevBooks;
+      });
+    });
+
+    const unsubToasts = syncManager.subscribeToToasts((msg) => {
+      setReconnectedToast(msg);
+      setTimeout(() => setReconnectedToast(null), 3500);
+    });
+
+    return () => {
+      unsubEntry();
+      unsubToasts();
+    };
+  }, []);
+
   const handleRetryConnection = async () => {
     vibrate();
     setIsRetryingNetwork(true);
@@ -2095,6 +2159,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [showForm, setShowForm] = useState<'in' | 'out' | null>(null);
   const showFormRef = useRef(showForm);
   showFormRef.current = showForm;
+  const saveTransactionRef = useRef<(() => void) | null>(null);
   const currentUserRoleRef = useRef<Role>('Primary Admin');
   const [detailsError, setDetailsError] = useState(false);
   const [amountError, setAmountError] = useState(false);
@@ -2690,6 +2755,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const key = e.key.toUpperCase();
       const now = Date.now();
 
+      // Quick Save shortcut: Ctrl+Enter, Cmd+Enter, or Alt+S while form is open
+      if ((((e.ctrlKey || e.metaKey) && e.key === 'Enter') || (e.altKey && key === 'S')) && showFormRef.current) {
+        e.preventDefault();
+        saveTransactionRef.current?.();
+        return;
+      }
+
       // Quick shortcut: Alt+I or Alt+O works from anywhere (even inside text inputs)
       if (e.altKey && !e.ctrlKey && !e.metaKey) {
         if (key === 'I' && canAddEntries(currentUserRoleRef.current)) {
@@ -3055,6 +3127,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const triggerUploadSelector = (target: 'ai' | 'transaction') => {
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      showInAppAlert(
+        "Offline Mode",
+        "Attachments are unavailable while offline. You can still add your entry without an image or PDF, and it will sync automatically once you are back online.",
+        "warning"
+      );
+      return;
+    }
     if (window.innerWidth < 768) {
       setActiveUploadTarget(target);
       setIsMediaPickerOpen(true);
@@ -3619,6 +3699,45 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             user_name: cb.user_name
           };
         });
+
+        // Load and merge pending offline entries from IndexedDB
+        try {
+          const pendingOfflineEntries = await offlineDb.getPendingEntries();
+          if (pendingOfflineEntries && pendingOfflineEntries.length > 0) {
+            mappedBooks.forEach(cb => {
+              const cbPending = pendingOfflineEntries.filter(e => e.cashbook_id === cb.id);
+              if (cbPending.length > 0) {
+                const existingIds = new Set(cb.transactions.map(t => t.id));
+                const pendingTxs: Transaction[] = cbPending
+                  .filter(e => !existingIds.has(e.id) && !existingIds.has(e.clientEntryId))
+                  .map(e => ({
+                    id: e.id,
+                    clientEntryId: e.clientEntryId || e.id,
+                    amount: e.amount,
+                    type: e.type,
+                    description: e.description,
+                    category: e.category,
+                    mode: e.mode,
+                    date: new Date(e.date),
+                    images: [],
+                    imageLayout: 'split',
+                    source: 'Manual',
+                    user_name: e.user_name,
+                    syncStatus: 'PENDING',
+                    is_offline: true,
+                    created_at: e.created_at
+                  }));
+
+                if (pendingTxs.length > 0) {
+                  cb.transactions = [...pendingTxs, ...cb.transactions];
+                  entriesCache.set(cb.id, cb.transactions);
+                }
+              }
+            });
+          }
+        } catch (offlineMergeErr) {
+          console.warn('[Offline] Error merging pending offline entries:', offlineMergeErr);
+        }
 
         setBooks(mappedBooks);
         try {
@@ -4368,6 +4487,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const saveTransaction = async () => {
+    saveTransactionRef.current = saveTransaction;
     const isAmountEmpty = !amount || !amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0;
     const isDetailsEmpty = !description || !description.trim();
 
@@ -4384,7 +4504,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return;
     }
 
-    if (!activeBookId || !showForm || !session || !supabase) return;
+    if (!activeBookId || !showForm) return;
 
     const finalCategory = category === 'Custom' ? customCategory : category;
     const finalMode = mode === 'Custom' ? customMode : mode;
@@ -4607,6 +4727,87 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const currentDescription = description;
       const currentShowForm = showForm;
 
+      // Check if user is offline
+      if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+        const offlineTx: Transaction = {
+          id: tempId,
+          clientEntryId: tempId,
+          amount: amountNum,
+          type: currentShowForm as 'in' | 'out',
+          description: currentDescription,
+          category: currentCategory,
+          mode: currentMode,
+          date: dateObj,
+          images: [],
+          imageLayout: currentImageLayout,
+          source: 'Manual',
+          user_name: resolvedName,
+          syncStatus: 'PENDING',
+          is_offline: true,
+          created_at: new Date().toISOString()
+        };
+
+        setBooks(prev => prev.map(b => b.id === activeBookId ? {
+          ...b,
+          transactions: [offlineTx, ...b.transactions]
+        } : b));
+
+        const prevCached = entriesCache.get(activeBookId) || [];
+        entriesCache.set(activeBookId, [{
+          id: tempId,
+          clientEntryId: tempId,
+          amount: amountNum,
+          type: currentShowForm,
+          description: currentDescription,
+          category: currentCategory,
+          mode: currentMode,
+          date: dateObj,
+          image_layout: currentImageLayout,
+          user_id: session?.user?.id || 'offline-user',
+          cashbook_id: activeBookId,
+          syncStatus: 'PENDING',
+          is_offline: true
+        }, ...prevCached]);
+
+        syncManager.saveOfflineEntry({
+          id: tempId,
+          clientEntryId: tempId,
+          cashbook_id: activeBookId,
+          user_id: session?.user?.id || 'offline-user',
+          user_name: resolvedName,
+          amount: amountNum,
+          type: currentShowForm as 'in' | 'out',
+          description: currentDescription,
+          category: currentCategory,
+          mode: currentMode,
+          date: dateObj.toISOString(),
+          created_at: new Date().toISOString(),
+          syncStatus: 'PENDING',
+          retryCount: 0,
+          source: 'Manual',
+          images: [],
+          is_offline: true
+        });
+
+        setShowForm(null);
+        resetForm();
+        setIsSubmitting(false);
+        setProgressModal(null);
+
+        setTimeout(() => {
+          setJustEditedTransactionId(tempId);
+          const element = document.getElementById("entry-" + tempId);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          setTimeout(() => {
+            setJustEditedTransactionId(null);
+          }, 2000);
+        }, 50);
+
+        return;
+      }
+
       // 1. OPTIMISTIC UPDATE: Add transaction to UI state instantly
       const optimisticTx: Transaction = {
         id: tempId,
@@ -4771,6 +4972,40 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           await fetchData();
         } catch (bgErr: any) {
           console.error('[Instant Save] Background sync error:', bgErr);
+          const isNetworkFailure = (typeof navigator !== 'undefined' && !navigator.onLine) || 
+            syncManager.network.state === 'offline' ||
+            bgErr?.message?.toLowerCase().includes('fetch') || 
+            bgErr?.message?.toLowerCase().includes('network') ||
+            bgErr?.message?.toLowerCase().includes('failed to fetch');
+
+          if (isNetworkFailure) {
+            console.log('[Offline Queue] Storing pending offline entry due to connection drop:', tempId);
+            syncManager.saveOfflineEntry({
+              id: tempId,
+              clientEntryId: tempId,
+              cashbook_id: activeBookId,
+              user_id: session?.user?.id || 'offline-user',
+              user_name: resolvedName,
+              amount: amountNum,
+              type: currentShowForm as 'in' | 'out',
+              description: currentDescription,
+              category: currentCategory,
+              mode: currentMode,
+              date: dateObj.toISOString(),
+              created_at: new Date().toISOString(),
+              syncStatus: 'PENDING',
+              retryCount: 0,
+              source: 'Manual',
+              images: [],
+              is_offline: true
+            });
+            setBooks(prev => prev.map(b => b.id === activeBookId ? {
+              ...b,
+              transactions: b.transactions.map(t => t.id === tempId ? { ...t, syncStatus: 'PENDING', is_offline: true } : t)
+            } : b));
+            return;
+          }
+
           setBooks(prev => prev.map(b => b.id === activeBookId ? {
             ...b,
             transactions: b.transactions.filter(t => t.id !== tempId)
@@ -7178,7 +7413,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <WifiOff size={14} className="animate-pulse" />
               </div>
               <span className="truncate">
-                No Internet Connection (Offline) • Entries will sync automatically
+                You're offline. You can still add entries, but images and PDF attachments cannot be added until you're back online.
               </span>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -7273,7 +7508,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </h3>
               
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium leading-relaxed max-w-sm mx-auto mb-6">
-                You are currently offline. Please check your Wi-Fi or mobile data. You can continue viewing and adding cash entries normally — everything will automatically sync once your internet connection is back.
+                You're offline. You can still add entries, but images and PDF attachments cannot be added until you're back online. All added entries will automatically sync once your internet connection is restored.
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3">
@@ -7401,6 +7636,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               >
                 <Search size={20} />
               </button>
+
+              {/* Sync Status Badge */}
+              <SyncStatusBadge theme={theme} />
 
               {/* Notification Bell */}
               <NotificationBell session={session} theme={theme} onInviteAccepted={fetchData} />
@@ -7889,6 +8127,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         {currentUserRole === 'Primary Admin' ? 'Admin' : currentUserRole}
                       </span>
                     )}
+                    <SyncStatusBadge theme={theme} className="hidden sm:inline-flex" />
                   </div>
                 </div>
                 </div>
@@ -11977,7 +12216,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               className={cn(
                 "relative w-full shadow-2xl overflow-hidden transition-colors duration-300 flex flex-col",
                 "max-w-lg rounded-t-3xl sm:rounded-3xl max-h-[90vh]",
-                "lg:w-[580px] xl:w-[640px] 2xl:w-[680px] lg:max-w-[680px] lg:h-screen lg:max-h-screen lg:rounded-none lg:border-l lg:border-slate-200 dark:lg:border-slate-800",
+                "lg:w-[700px] xl:w-[780px] 2xl:w-[840px] lg:max-w-[860px] lg:h-screen lg:max-h-screen lg:rounded-none lg:border-l lg:border-slate-200 dark:lg:border-slate-800",
                 theme === 'dark' ? "bg-zinc-950" : "bg-white"
               )}
             >
@@ -12492,6 +12731,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         </div>
                       )}
                       
+                      {isOffline && (
+                        <div className="mb-3 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs font-semibold flex items-center gap-2.5">
+                          <CloudOff size={18} className="shrink-0 text-amber-500" />
+                          <span>Attachments are unavailable while offline. You can still add your entry without an image or PDF, and it will sync automatically once you are back online.</span>
+                        </div>
+                      )}
+
                       {selectedImages.length === 0 && (
                         <div 
                           tabIndex={5}
