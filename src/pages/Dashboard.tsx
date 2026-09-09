@@ -7178,7 +7178,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <WifiOff size={14} className="animate-pulse" />
               </div>
               <span className="truncate">
-                Internet connection ledu (Offline) • Entries will sync automatically
+                No Internet Connection (Offline) • Entries will sync automatically
               </span>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -7265,11 +7265,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[11px] font-black uppercase tracking-wider mb-2">
                 <WifiOff size={13} />
-                <span>Offline Mode • ఇంటర్నెట్ లేదు</span>
+                <span>Offline Mode • No Internet</span>
               </div>
 
               <h3 className="text-xl sm:text-2xl font-black tracking-tight mt-1 mb-2">
-                Internet Connection Ledu
+                No Internet Connection
               </h3>
               
               <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium leading-relaxed max-w-sm mx-auto mb-6">

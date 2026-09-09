@@ -519,7 +519,7 @@ export default function PdfPageSelectorModal({
               <>
                 {/* ========================================================= */}
                 {/* 1. MOBILE VIEW: 1 Page visible, Page-by-Page snap scroll   */}
-                {/* (User: 1 page ravali, scroll chesthe 2 page ravali...)    */}
+                {/* (Single page visible; scrolling snaps to the next page)    */}
                 {/* Pressing on image opens preview                           */}
                 {/* ========================================================= */}
                 <div

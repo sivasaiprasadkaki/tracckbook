@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, isMobileDeviceOrView } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 
 export default function AutoLogoutManager({ session }: { session: any }) {
@@ -10,27 +10,28 @@ export default function AutoLogoutManager({ session }: { session: any }) {
     // Only monitor on stable sessions
     if (!session || !supabase) return;
 
-    // "Desktop users only" - Mobile view/devices will never be logged out automatically
-    const checkIsDesktop = () => {
-      if (typeof window === 'undefined') return false;
-      const ua = navigator.userAgent || '';
-      const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile|CriOS/i.test(ua);
-      const isSmallScreen = window.innerWidth < 1024;
-      const hasTouch = 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
-      
-      if (isMobileUA || isSmallScreen || hasTouch) {
-        return false;
-      }
-      return true;
-    };
-
-    if (!checkIsDesktop()) {
-      console.log('[AutoLogout] Mobile device/view detected. Automatic inactivity logout is disabled.');
+    // Mobile view / devices will NEVER be logged out automatically.
+    // Once logged in on mobile view, user stays logged in until they explicitly log out.
+    if (isMobileDeviceOrView()) {
+      console.log('[AutoLogout] Mobile view/device detected. Auto-logout is permanently disabled.');
       return;
     }
 
+    const checkIsStrictDesktop = () => {
+      if (typeof window === 'undefined') return false;
+      if (isMobileDeviceOrView()) return false;
+      const isSmallScreen = window.innerWidth < 1024;
+      return !isSmallScreen;
+    };
+
     const handleInactivityLogout = async () => {
-      console.warn('[AutoLogout] User inactive for 10 minutes. Triggering secure automatic logout...');
+      // Re-verify strictly: NEVER logout if user is in mobile view or on a mobile device
+      if (!checkIsStrictDesktop()) {
+        console.log('[AutoLogout] Mobile view detected at timeout check. Aborting auto-logout.');
+        return;
+      }
+
+      console.warn('[AutoLogout] Desktop user inactive for 10 minutes. Triggering automatic logout...');
       try {
         if (supabase) {
           await supabase.auth.signOut();
@@ -38,30 +39,42 @@ export default function AutoLogoutManager({ session }: { session: any }) {
       } catch (err) {
         console.error('[AutoLogout] Supabase signOut error:', err);
       } finally {
-        // Clear session references
-        localStorage.removeItem('supabase_remember_me');
         sessionStorage.setItem('logout_reason', 'inactivity');
         navigate('/login', { replace: true });
-        // Force window location replace to be doubly safe and clear state structures completely
         window.location.reload();
       }
     };
 
     const resetTimer = () => {
+      if (!checkIsStrictDesktop()) {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        return;
+      }
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
-      // "If no activity for 10 minutes"
-      // 10 minutes = 10 * 60 * 1000 = 600,000 ms
+      // 10 minutes for inactive desktop sessions only
       const timeoutMs = 10 * 60 * 1000;
       timerRef.current = setTimeout(handleInactivityLogout, timeoutMs);
     };
 
-    // Register initial reset
+    // Register initial reset if on desktop
     resetTimer();
 
-    // Listeners for "mouse movement, keyboard activity, clicks, scrolling"
-    const interactionEvents = ['mousemove', 'keydown', 'click', 'scroll'];
+    // Listeners for mouse movement, keyboard activity, clicks, scrolling, touch, pointer
+    const interactionEvents = [
+      'mousemove',
+      'keydown',
+      'click',
+      'scroll',
+      'touchstart',
+      'touchmove',
+      'touchend',
+      'pointerdown'
+    ];
 
     const handleEvent = () => {
       resetTimer();
@@ -71,7 +84,18 @@ export default function AutoLogoutManager({ session }: { session: any }) {
       window.addEventListener(type, handleEvent, { passive: true });
     });
 
-    console.log('[AutoLogout] Inactivity timer established for Desktop user (10-minute timeout).');
+    // Resize listener: if resized to mobile view, immediately abort and cancel any active timer
+    const handleResize = () => {
+      if (!checkIsStrictDesktop()) {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+      } else {
+        resetTimer();
+      }
+    };
+    window.addEventListener('resize', handleResize);
 
     return () => {
       if (timerRef.current) {
@@ -80,6 +104,7 @@ export default function AutoLogoutManager({ session }: { session: any }) {
       interactionEvents.forEach(type => {
         window.removeEventListener(type, handleEvent);
       });
+      window.removeEventListener('resize', handleResize);
     };
   }, [session, navigate]);
 

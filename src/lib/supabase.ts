@@ -30,15 +30,34 @@ export const clearSupabaseAuthStorage = () => {
   }
 };
 
+export const isMobileDeviceOrView = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const isSmallScreen = window.innerWidth < 1024;
+  const ua = navigator.userAgent || '';
+  const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile|CriOS/i.test(ua);
+  const hasTouch = 'ontouchstart' in window || ((navigator.maxTouchPoints || 0) > 0);
+  return isSmallScreen || isMobileUA || hasTouch;
+};
+
 const dynamicStorage = {
   getItem: (key: string): string | null => {
     if (typeof window === 'undefined') return null;
+    // On mobile view / mobile devices, always persist to localStorage so user is never logged out
+    if (isMobileDeviceOrView()) {
+      return localStorage.getItem(key);
+    }
     const rememberMe = localStorage.getItem('supabase_remember_me') !== 'false';
     const val = rememberMe ? localStorage.getItem(key) : sessionStorage.getItem(key);
     return val;
   },
   setItem: (key: string, value: string): void => {
     if (typeof window === 'undefined') return;
+    // On mobile view / mobile devices, always persist to localStorage so user stays logged in indefinitely
+    if (isMobileDeviceOrView()) {
+      localStorage.setItem(key, value);
+      localStorage.setItem('supabase_remember_me', 'true');
+      return;
+    }
     const rememberMe = localStorage.getItem('supabase_remember_me') !== 'false';
     if (rememberMe) {
       localStorage.setItem(key, value);
