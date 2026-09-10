@@ -1735,7 +1735,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         const saved = localStorage.getItem(`trackbook_cached_books_${currentUserId}`);
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const restored = parsed.map((b: any) => ({
+              ...b,
+              createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
+              transactions: Array.isArray(b.transactions) ? b.transactions.map((t: any) => ({
+                ...t,
+                date: t.date ? new Date(t.date) : new Date(),
+                images: t.images || []
+              })) : []
+            }));
+            restored.forEach((b: any) => {
+              if (b.id && Array.isArray(b.transactions)) {
+                entriesCache.set(b.id, b.transactions);
+              }
+            });
+            return restored;
+          }
         }
       }
     } catch (e) {}
@@ -1753,16 +1769,57 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     if (currentUserId !== prevUserIdRef.current) {
       prevUserIdRef.current = currentUserId || null;
       if (currentUserId) {
+        // First try localStorage for instant zero-latency load
         let cached: Cashbook[] = [];
         try {
           const saved = localStorage.getItem(`trackbook_cached_books_${currentUserId}`);
           if (saved) {
             const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed)) cached = parsed;
+            if (Array.isArray(parsed)) {
+              cached = parsed.map((b: any) => ({
+                ...b,
+                createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
+                transactions: Array.isArray(b.transactions) ? b.transactions.map((t: any) => ({
+                  ...t,
+                  date: t.date ? new Date(t.date) : new Date(),
+                  images: t.images || []
+                })) : []
+              }));
+            }
           }
         } catch (e) {}
-        setBooks(cached);
-        setIsLoading(cached.length === 0);
+
+        if (cached.length > 0) {
+          setBooks(cached);
+          cached.forEach(b => {
+            if (b.id && Array.isArray(b.transactions)) {
+              entriesCache.set(b.id, b.transactions);
+            }
+          });
+          setIsLoading(false);
+        }
+
+        // Also query IndexedDB for full offline cache
+        offlineDb.getCachedCashbooks(currentUserId).then((idbBooks) => {
+          if (idbBooks && idbBooks.length > 0) {
+            const mapped = idbBooks.map((b: any) => ({
+              ...b,
+              createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
+              transactions: Array.isArray(b.transactions) ? b.transactions.map((t: any) => ({
+                ...t,
+                date: t.date ? new Date(t.date) : new Date(),
+                images: t.images || []
+              })) : []
+            }));
+            setBooks(mapped);
+            mapped.forEach(b => {
+              if (b.id && Array.isArray(b.transactions)) {
+                entriesCache.set(b.id, b.transactions);
+              }
+            });
+            setIsLoading(false);
+          }
+        }).catch(() => {});
       } else {
         setBooks([]);
         setIsLoading(false);
@@ -3466,8 +3523,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   // Stable component-level data fetch and sync function
   const fetchData = useCallback(async (force: boolean = false) => {
     if (!session || !supabase) {
-      setBooks([]);
+      if (!session) setBooks([]);
       setIsLoading(false);
+      return;
+    }
+
+    // If device is offline, retain existing cached cashbooks and entries immediately
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      console.log('[fetchData] Device is offline. Retaining existing cached cashbooks and entries.');
+      setIsLoading(false);
+      setIsEntriesLoading(false);
       return;
     }
 
@@ -3743,9 +3808,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         try {
           if (session?.user?.id) {
             localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(mappedBooks));
+            offlineDb.saveCachedCashbooks(session.user.id, mappedBooks);
           }
           localStorage.removeItem('trackbook_cached_books');
         } catch (e) {}
+
+        // Keep entriesCache fully hydrated for all cashbooks
+        mappedBooks.forEach(cb => {
+          if (cb && cb.id && Array.isArray(cb.transactions)) {
+            entriesCache.set(cb.id, cb.transactions);
+          }
+        });
 
         // Solve loading delay by resolving activeBookId immediately if not set
         if (bookSlugRef.current) {
@@ -3755,10 +3828,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           }
         }
       } else {
-        setBooks([]);
+        // Do not clear books if backend request failed or returned empty while offline
+        console.log('[Dashboard] No remote cashbooks returned or offline. Preserving existing cached books.');
       }
     } catch (error: any) {
-      console.error('Error fetching data from Supabase:', error);
+      console.warn('[Dashboard] Notice during data fetch (device offline or connection drop):', error);
+      // Retain last known good data — do NOT wipe books or entries
     } finally {
       initialLoadedRef.current = true;
       setIsLoading(false);
@@ -3774,18 +3849,34 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       fetchData(true);
     };
 
+    const handleNativeOnline = () => {
+      console.log('[Dashboard] Native online event detected. Immediately updating state and syncing.');
+      setIsOffline(false);
+      syncManager.network.updateState('good');
+      syncManager.triggerSync();
+      fetchData(true);
+    };
+
+    const handleNativeOffline = () => {
+      console.log('[Dashboard] Native offline event detected.');
+      setIsOffline(true);
+      syncManager.network.updateState('offline');
+    };
+
     window.addEventListener('trackbook_refresh_cashbooks', handleCashbookRefresh);
     window.addEventListener('cashbook_updated', handleCashbookRefresh);
+    window.addEventListener('online', handleNativeOnline);
+    window.addEventListener('offline', handleNativeOffline);
 
     // Periodic sync check every 12 seconds so entries added by other members sync live
     const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
         fetchData(true);
       }
     }, 12000);
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
         fetchData(true);
       }
     };
@@ -3795,6 +3886,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       clearInterval(interval);
       window.removeEventListener('trackbook_refresh_cashbooks', handleCashbookRefresh);
       window.removeEventListener('cashbook_updated', handleCashbookRefresh);
+      window.removeEventListener('online', handleNativeOnline);
+      window.removeEventListener('offline', handleNativeOffline);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [session, fetchData]);
@@ -7421,54 +7514,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       "min-h-screen transition-colors duration-300 overflow-x-clip",
       theme === 'dark' ? "bg-black text-slate-100" : "bg-slate-50 text-black"
     )}>
-      {/* Sticky Offline Banner */}
-      <AnimatePresence>
-        {isOffline && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="fixed top-0 left-0 right-0 z-[105] bg-amber-500 text-black px-4 py-2 text-xs font-bold flex items-center justify-between shadow-lg"
-          >
-            <div className="flex items-center gap-2.5 truncate">
-              <div className="p-1 rounded-full bg-black/10 text-black">
-                <WifiOff size={14} className="animate-pulse" />
-              </div>
-              <span className="truncate">
-                You're offline. You can still add entries, but images and PDF attachments cannot be added until you're back online.
-              </span>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={handleRetryConnection}
-                disabled={isRetryingNetwork}
-                className="px-3 py-1 rounded-lg bg-black text-white hover:bg-black/80 font-black text-[11px] transition-all flex items-center gap-1.5 active:scale-95 disabled:opacity-50 cursor-pointer"
-              >
-                {isRetryingNetwork ? (
-                  <>
-                    <Loader2 size={12} className="animate-spin" />
-                    <span>Checking...</span>
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw size={12} />
-                    <span>Retry</span>
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowOfflineDialog(true)}
-                className="p-1 rounded-lg hover:bg-black/10 text-black text-[11px] font-bold underline cursor-pointer"
-              >
-                Details
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Reconnected Toast Notification */}
       <AnimatePresence>
         {reconnectedToast && (
@@ -7887,6 +7932,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.16, ease: "easeOut" }}
             className="space-y-6"
           >
+              {isOffline && (
+                <div className={cn(
+                  "flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-xs font-medium border transition-all animate-fade-in shadow-xs",
+                  theme === 'dark' 
+                    ? "bg-amber-950/20 border-amber-800/40 text-amber-300" 
+                    : "bg-amber-50 border-amber-200 text-amber-800"
+                )}>
+                  <CloudOff size={15} className="text-amber-500 shrink-0 animate-pulse" />
+                  <span className="leading-tight">
+                    <strong className="font-semibold">Offline Mode:</strong> Viewing cached cashbooks. You can open any cashbook and record entries normally — everything will automatically sync when connected.
+                  </span>
+                </div>
+              )}
+
               {/* User Welcome Section */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-0.5 sm:space-y-1">
@@ -8656,6 +8715,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               {currentTabName === 'entries' && (
                 <>
                   <div className="space-y-4">
+                    {isOffline && (
+                      <div className={cn(
+                        "flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-xs font-medium border transition-all animate-fade-in shadow-xs",
+                        theme === 'dark' 
+                          ? "bg-amber-950/20 border-amber-800/40 text-amber-300" 
+                          : "bg-amber-50 border-amber-200 text-amber-800"
+                      )}>
+                        <CloudOff size={15} className="text-amber-500 shrink-0 animate-pulse" />
+                        <span className="leading-tight">
+                          <strong className="font-semibold">Offline Mode:</strong> Viewing cached entries. You can record new entries normally — they will automatically sync when your connection returns.
+                        </span>
+                      </div>
+                    )}
+
                 {/* Mobile Transaction List (Card Based) */}
                  <div ref={mobileContainerRef} className="lg:hidden space-y-3">
                   {(isEntriesLoading || (activeBookId !== null && !entriesCache.has(activeBookId))) && filteredTransactions.length === 0 ? (
@@ -8678,10 +8751,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     )}>
                       {isOffline ? (
                         <>
-                          <CloudOff size={40} className="mx-auto text-amber-500 animate-pulse" />
-                          <h4 className="text-sm font-bold">Device is Offline</h4>
+                          <CloudOff size={36} className="mx-auto text-amber-500 animate-pulse" />
+                          <h4 className="text-sm font-bold">No Entries Found</h4>
                           <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed max-w-xs mx-auto">
-                            We couldn't sync your latest data because your device is offline. You can continue creating entries normally. Everything will automatically sync once your internet connection is restored.
+                            No entries recorded yet for this cashbook. You can create entries offline anytime — they will sync automatically once connected.
                           </p>
                         </>
                       ) : (
@@ -8849,9 +8922,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                       <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-950/40 text-amber-500 flex items-center justify-center">
                                         <CloudOff size={24} className="animate-pulse" />
                                       </div>
-                                      <h4 className="text-sm font-bold">Device is Offline</h4>
+                                      <h4 className="text-sm font-bold">No Entries Found</h4>
                                       <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
-                                        We couldn't sync your latest data because your device is offline. You can continue creating entries normally. Everything will automatically sync once your internet connection is restored.
+                                        No entries recorded yet for this cashbook. You can create entries offline anytime — they will sync automatically once connected.
                                       </p>
                                     </>
                                   ) : (

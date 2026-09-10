@@ -35,9 +35,11 @@ export interface SyncQueueItem {
 }
 
 const DB_NAME = 'trackbook_offline_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_ENTRIES = 'offline_entries';
+const STORE_CACHED_BOOKS = 'cached_cashbooks';
 const LOCAL_STORAGE_KEY = 'trackbook_offline_pending_entries_v1';
+const LOCAL_STORAGE_BOOKS_PREFIX = 'trackbook_cached_books_';
 
 /**
  * Robust IndexedDB storage engine with automatic localStorage fallback
@@ -66,6 +68,11 @@ export class TrackBookOfflineDB {
             store.createIndex('cashbook_id', 'cashbook_id', { unique: false });
             store.createIndex('syncStatus', 'syncStatus', { unique: false });
             store.createIndex('created_at', 'created_at', { unique: false });
+          }
+          if (!db.objectStoreNames.contains(STORE_CACHED_BOOKS)) {
+            const bookStore = db.createObjectStore(STORE_CACHED_BOOKS, { keyPath: 'id' });
+            bookStore.createIndex('user_id', 'user_id', { unique: false });
+            bookStore.createIndex('updated_at', 'updated_at', { unique: false });
           }
         };
 
@@ -105,6 +112,97 @@ export class TrackBookOfflineDB {
     } catch (e) {
       console.warn('[OfflineDB] Failed to write localStorage backup:', e);
     }
+  }
+
+  /**
+   * Save cached cashbooks and entries to IndexedDB and localStorage
+   */
+  async saveCachedCashbooks(userId: string, cashbooks: any[]): Promise<boolean> {
+    if (!cashbooks || !Array.isArray(cashbooks)) return false;
+
+    // Fast synchronous localStorage write
+    try {
+      if (userId) {
+        localStorage.setItem(`${LOCAL_STORAGE_BOOKS_PREFIX}${userId}`, JSON.stringify(cashbooks));
+      }
+    } catch (e) {
+      console.warn('[OfflineDB] localStorage quota note for cashbooks:', e);
+    }
+
+    // Structured IndexedDB write
+    try {
+      const db = await this.init();
+      if (!db || !db.objectStoreNames.contains(STORE_CACHED_BOOKS)) return true;
+
+      return new Promise<boolean>((resolve) => {
+        try {
+          const tx = db.transaction(STORE_CACHED_BOOKS, 'readwrite');
+          const store = tx.objectStore(STORE_CACHED_BOOKS);
+          for (const book of cashbooks) {
+            if (book && book.id) {
+              store.put({
+                ...book,
+                user_id: userId,
+                updated_at: new Date().toISOString()
+              });
+            }
+          }
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch {
+          resolve(false);
+        }
+      });
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * Read cached cashbooks and entries from IndexedDB (with localStorage fallback)
+   */
+  async getCachedCashbooks(userId: string): Promise<any[]> {
+    // 1. IndexedDB structured read
+    try {
+      const db = await this.init();
+      if (db && db.objectStoreNames.contains(STORE_CACHED_BOOKS)) {
+        const books = await new Promise<any[]>((resolve) => {
+          try {
+            const tx = db.transaction(STORE_CACHED_BOOKS, 'readonly');
+            const store = tx.objectStore(STORE_CACHED_BOOKS);
+            let req: IDBRequest;
+            if (userId && store.indexNames.contains('user_id')) {
+              req = store.index('user_id').getAll(userId);
+            } else {
+              req = store.getAll();
+            }
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => resolve([]);
+          } catch {
+            resolve([]);
+          }
+        });
+
+        if (Array.isArray(books) && books.length > 0) {
+          return books;
+        }
+      }
+    } catch (e) {
+      console.warn('[OfflineDB] Error reading cached cashbooks from IndexedDB:', e);
+    }
+
+    // 2. localStorage fallback
+    try {
+      if (userId) {
+        const raw = localStorage.getItem(`${LOCAL_STORAGE_BOOKS_PREFIX}${userId}`);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      }
+    } catch {}
+
+    return [];
   }
 
   /**
@@ -432,21 +530,30 @@ export class BackgroundSyncManager {
 
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
+        console.log('[SyncManager] Native online event detected. Immediately updating state and syncing.');
+        this.network.updateState('good');
+        this.setSyncState(this.pendingCount > 0 ? 'SYNCING' : 'ONLINE');
         this.triggerSync();
       });
 
+      window.addEventListener('offline', () => {
+        console.log('[SyncManager] Native offline event detected.');
+        this.network.updateState('offline');
+        this.setSyncState('OFFLINE');
+      });
+
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible' && navigator.onLine && this.pendingCount > 0) {
+        if (document.visibilityState === 'visible' && navigator.onLine && this.pendingCount > 0 && !this.isSyncing) {
           this.triggerSync();
         }
       });
 
-      // Periodic check every 25 seconds if online and items exist
+      // Periodic fallback check (only if pending items remain)
       setInterval(() => {
         if (navigator.onLine && this.pendingCount > 0 && !this.isSyncing) {
           this.triggerSync();
         }
-      }, 25000);
+      }, 15000);
     }
 
     return true;
@@ -544,7 +651,52 @@ export class BackgroundSyncManager {
     let hasErrors = false;
     let syncedInThisRun = 0;
 
-    for (const entry of pending) {
+    // Fast synchronization: If multiple entries exist, attempt batch sync first
+    if (pending.length > 1) {
+      try {
+        const batchPayload = pending.map(e => ({
+          clientEntryId: e.clientEntryId || e.id,
+          id: e.clientEntryId || e.id,
+          cashbook_id: e.cashbook_id,
+          user_id: e.user_id,
+          user_name: e.user_name || 'User',
+          amount: e.amount,
+          type: e.type,
+          description: e.description,
+          category: e.category,
+          mode: e.mode,
+          date: e.date,
+          created_at: e.created_at,
+          source: 'Offline Sync'
+        }));
+
+        const res = await fetch('/api/sync/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entries: batchPayload })
+        });
+
+        if (res.ok) {
+          const batchRes = await res.json();
+          if (batchRes.success && Array.isArray(batchRes.results)) {
+            for (const r of batchRes.results) {
+              if (r.success) {
+                await this.db.markEntrySynced(r.id);
+                syncedInThisRun++;
+                this.entrySyncedCallbacks.forEach(cb => {
+                  try { cb(r.id, { id: r.id, is_offline: false, syncStatus: 'SYNCED' }); } catch {}
+                });
+              }
+            }
+          }
+        }
+      } catch (batchErr) {
+        console.warn('[SyncManager] Batch sync error, falling back to individual sync:', batchErr);
+      }
+    }
+
+    const remainingPending = await this.db.getPendingEntries();
+    for (const entry of remainingPending) {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         hasErrors = true;
         break;
@@ -664,25 +816,29 @@ export class BackgroundSyncManager {
       this.setSyncState('SYNC_COMPLETE');
       if (syncedInThisRun > 0) {
         this.emitToast('All entries synced successfully', 'success');
+        // Instantly notify Dashboard to pull latest synced records from backend
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('trackbook_refresh_cashbooks'));
+        }
       }
-      // Revert to ONLINE badge after 4 seconds
+      // Revert to ONLINE badge after 2.5 seconds
       setTimeout(() => {
         if (this.pendingCount === 0 && this.network.state === 'good') {
           this.setSyncState('ONLINE');
         }
-      }, 4000);
+      }, 2500);
     } else {
-      if (this.network.state === 'offline') {
+      if (this.network.state === 'offline' || !navigator.onLine) {
         this.setSyncState('OFFLINE');
       } else {
         this.setSyncState('ONLINE');
-        // Schedule retry with backoff
+        // Fast retry fallback
         clearTimeout(this.retryTimeout);
         this.retryTimeout = setTimeout(() => {
           if (navigator.onLine && this.pendingCount > 0) {
             this.triggerSync();
           }
-        }, 12000);
+        }, 3000);
       }
     }
   }
