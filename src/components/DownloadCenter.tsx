@@ -22,7 +22,8 @@ import {
   CloudOff,
   Cloud,
   Check,
-  RotateCcw
+  RotateCcw,
+  RotateCw
 } from 'lucide-react';
 import { backgroundExportManager, ExportTask, JobNotification } from '../services/exportManager';
 import { syncManager, SyncQueueItem } from '../services/syncManager';
@@ -155,6 +156,32 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
   const [activeFilter, setActiveFilter] = useState<'all' | 'export' | 'ai' | 'sync'>('all');
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<JobNotification[]>([]);
+  const [tryAgainState, setTryAgainState] = useState<'idle' | 'syncing' | 'complete'>('idle');
+
+  const handleTryAgain = async () => {
+    if (syncManager.isSyncing || tryAgainState === 'syncing') return;
+
+    if (typeof navigator !== 'undefined' && (!navigator.onLine || syncManager.network.state === 'offline')) {
+      triggerToast("You're offline. We'll retry when your connection returns.", 'info');
+      return;
+    }
+
+    setTryAgainState('syncing');
+    try {
+      const success = await syncManager.retryAllPendingJobs();
+      if (success || syncManager.getPendingCount() === 0) {
+        setTryAgainState('complete');
+        triggerToast('All entries synced successfully', 'success');
+        setTimeout(() => {
+          setTryAgainState('idle');
+        }, 2500);
+      } else {
+        setTryAgainState('idle');
+      }
+    } catch {
+      setTryAgainState('idle');
+    }
+  };
 
   // Sync state with back-end export manager and sync manager
   useEffect(() => {
@@ -200,7 +227,18 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
     };
 
     const handleSyncUpdate = () => {
-      setSyncQueue([...syncManager.getQueueList()]);
+      const q = syncManager.getQueueList();
+      setSyncQueue([...q]);
+      if (syncManager.isSyncing) {
+        setTryAgainState('syncing');
+      } else if (tryAgainState === 'syncing' && !syncManager.isSyncing) {
+        if (syncManager.getPendingCount() === 0) {
+          setTryAgainState('complete');
+          setTimeout(() => setTryAgainState('idle'), 2500);
+        } else {
+          setTryAgainState('idle');
+        }
+      }
     };
 
     setTasks(backgroundExportManager.getTaskList());
@@ -221,7 +259,7 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
       unsubSync();
       unsubSyncToasts();
     };
-  }, []);
+  }, [tryAgainState]);
 
   const triggerToast = (msg: string, type: 'success' | 'error' | 'info') => {
     setShowToast({ message: msg, type });
@@ -431,6 +469,40 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                 
                 <div className="flex items-center gap-2">
                   <button
+                    id="btn-processing-center-try-again"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleTryAgain();
+                    }}
+                    disabled={syncManager.isSyncing || tryAgainState === 'syncing'}
+                    className={cn(
+                      "px-2.5 py-1 rounded-lg font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer border flex items-center gap-1.5 shadow-xs",
+                      tryAgainState === 'complete'
+                        ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-extrabold"
+                        : (syncManager.isSyncing || tryAgainState === 'syncing')
+                        ? "bg-indigo-500/15 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 cursor-not-allowed opacity-80"
+                        : "bg-indigo-600 hover:bg-indigo-700 border-indigo-700 text-white dark:bg-indigo-500 dark:hover:bg-indigo-600"
+                    )}
+                    title="Retry background offline sync queue"
+                  >
+                    {tryAgainState === 'complete' ? (
+                      <>
+                        <Check size={11} className="stroke-[3]" />
+                        <span>SYNC COMPLETE</span>
+                      </>
+                    ) : (syncManager.isSyncing || tryAgainState === 'syncing') ? (
+                      <>
+                        <Loader2 size={11} className="animate-spin stroke-[2.5]" />
+                        <span>SYNCING...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RotateCw size={11} className="stroke-[2.5]" />
+                        <span>TRY AGAIN</span>
+                      </>
+                    )}
+                  </button>
+                  <button
                     onClick={(e) => {
                       e.stopPropagation();
                       setInAppDialog({
@@ -518,7 +590,50 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                 
                 {/* 1. ASYNC BACKGROUND SYNC QUEUE ITEMS */}
                 {(activeFilter === 'all' || activeFilter === 'sync') && (
-                  syncQueue
+                  <>
+                    {activeTab === 'active' && syncQueue.some(q => q.status !== 'completed') && (
+                      <div className="flex items-center justify-between p-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <CloudOff size={14} className="shrink-0 text-amber-500" />
+                          <span className="text-[10px] font-bold font-sans truncate">
+                            {syncQueue.filter(q => q.status !== 'completed').length} offline jobs pending sync
+                          </span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleTryAgain();
+                          }}
+                          disabled={syncManager.isSyncing || tryAgainState === 'syncing'}
+                          className={cn(
+                            "px-2 py-0.5 rounded-md font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer border flex items-center gap-1 shrink-0",
+                            tryAgainState === 'complete'
+                              ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                              : (syncManager.isSyncing || tryAgainState === 'syncing')
+                              ? "bg-amber-500/20 border-amber-500/30 text-amber-600 dark:text-amber-400 cursor-not-allowed"
+                              : "bg-amber-500 hover:bg-amber-600 border-amber-600 text-white"
+                          )}
+                        >
+                          {tryAgainState === 'complete' ? (
+                            <>
+                              <Check size={10} className="stroke-[3]" />
+                              <span>SYNC COMPLETE</span>
+                            </>
+                          ) : (syncManager.isSyncing || tryAgainState === 'syncing') ? (
+                            <>
+                              <Loader2 size={10} className="animate-spin stroke-[2.5]" />
+                              <span>SYNCING...</span>
+                            </>
+                          ) : (
+                            <>
+                              <RotateCw size={10} className="stroke-[2.5]" />
+                              <span>TRY AGAIN</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                    {syncQueue
                     .filter(item => {
                       if (activeTab === 'archive') return item.status === 'completed';
                       return item.status !== 'completed';
@@ -577,17 +692,17 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                               <span className={cn("text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded border font-sans", badge.color)}>
                                 {badge.label}
                               </span>
-                              {isFailed && (
+                              {(isFailed || item.status === 'pending' || item.status === 'waiting_for_internet') && (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    syncManager.triggerSync();
-                                    triggerToast('Retrying background sync queue...', 'info');
+                                    handleTryAgain();
                                   }}
-                                  className="p-1 rounded-md text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors"
-                                  title="Force Sync Now"
+                                  disabled={syncManager.isSyncing || tryAgainState === 'syncing'}
+                                  className="p-1 rounded-md text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors disabled:opacity-50"
+                                  title="Retry sync now"
                                 >
-                                  <RotateCcw size={12} />
+                                  <RotateCw size={12} className={cn((syncManager.isSyncing || tryAgainState === 'syncing') && "animate-spin text-indigo-500")} />
                                 </button>
                               )}
                             </div>
@@ -647,7 +762,8 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                           </AnimatePresence>
                         </div>
                       );
-                    })
+                    })}
+                  </>
                 )}
 
                 {/* 2. EXPORT AND AI TASKS FROM BACKEND EXPORT MANAGER */}

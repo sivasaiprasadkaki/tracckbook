@@ -47,6 +47,12 @@ const LOCAL_STORAGE_BOOKS_PREFIX = 'trackbook_cached_books_';
 export class TrackBookOfflineDB {
   private db: IDBDatabase | null = null;
   private initPromise: Promise<IDBDatabase | null> | null = null;
+  private memEntries: Map<string, OfflineEntry> = new Map();
+  private onDataChange?: () => void;
+
+  setOnDataChange(cb: () => void) {
+    this.onDataChange = cb;
+  }
 
   async init(): Promise<IDBDatabase | null> {
     if (this.db) return this.db;
@@ -54,6 +60,7 @@ export class TrackBookOfflineDB {
 
     if (typeof window === 'undefined' || !window.indexedDB) {
       console.warn('[OfflineDB] IndexedDB not available, using localStorage fallback');
+      this.loadLocalStorageIntoMem();
       return null;
     }
 
@@ -78,20 +85,46 @@ export class TrackBookOfflineDB {
 
         req.onsuccess = (e: any) => {
           this.db = e.target.result;
+          this.loadInitialEntries();
           resolve(this.db);
         };
 
         req.onerror = (e) => {
           console.warn('[OfflineDB] Failed to open IndexedDB:', e);
+          this.loadLocalStorageIntoMem();
           resolve(null);
         };
       } catch (err) {
         console.warn('[OfflineDB] Error initializing IndexedDB:', err);
+        this.loadLocalStorageIntoMem();
         resolve(null);
       }
     });
 
     return this.initPromise;
+  }
+
+  private loadLocalStorageIntoMem() {
+    const local = this.getLocalBackup();
+    local.forEach(e => this.memEntries.set(e.id, e));
+    this.onDataChange?.();
+  }
+
+  private async loadInitialEntries() {
+    try {
+      const local = this.getLocalBackup();
+      local.forEach(e => this.memEntries.set(e.id, e));
+
+      if (!this.db) return;
+      const tx = this.db.transaction(STORE_ENTRIES, 'readonly');
+      const store = tx.objectStore(STORE_ENTRIES);
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const items: OfflineEntry[] = req.result || [];
+        items.forEach(e => this.memEntries.set(e.id, e));
+        this.onDataChange?.();
+      };
+    } catch {}
   }
 
   // LocalStorage fallback helpers
@@ -209,6 +242,8 @@ export class TrackBookOfflineDB {
    * Save or update an offline entry
    */
   async saveEntry(entry: OfflineEntry): Promise<boolean> {
+    this.memEntries.set(entry.id, entry);
+
     // 1. Update localStorage fallback
     try {
       const local = this.getLocalBackup();
@@ -222,6 +257,8 @@ export class TrackBookOfflineDB {
     } catch (err) {
       console.warn('[OfflineDB] localStorage backup error:', err);
     }
+
+    this.onDataChange?.();
 
     // 2. Update IndexedDB
     try {
@@ -248,7 +285,7 @@ export class TrackBookOfflineDB {
     try {
       const db = await this.init();
       if (!db) {
-        const local = this.getLocalBackup().filter(e => e.syncStatus === 'PENDING' || e.syncStatus === 'SYNCING' || e.syncStatus === 'FAILED');
+        const local = this.getLocalEntries().filter(e => e.syncStatus === 'PENDING' || e.syncStatus === 'SYNCING' || e.syncStatus === 'FAILED');
         return cashbookId ? local.filter(e => e.cashbook_id === cashbookId) : local;
       }
 
@@ -259,29 +296,30 @@ export class TrackBookOfflineDB {
 
         req.onsuccess = () => {
           const items: OfflineEntry[] = req.result || [];
-          const pending = items.filter(e => e.syncStatus === 'PENDING' || e.syncStatus === 'SYNCING' || e.syncStatus === 'FAILED');
-          
-          // Merge with localStorage just in case
-          const local = this.getLocalBackup().filter(e => e.syncStatus === 'PENDING' || e.syncStatus === 'SYNCING' || e.syncStatus === 'FAILED');
+          const local = this.getLocalBackup();
           const map = new Map<string, OfflineEntry>();
           local.forEach(e => map.set(e.id, e));
-          pending.forEach(e => map.set(e.id, e));
-          const merged = Array.from(map.values());
+          items.forEach(e => map.set(e.id, e));
+          this.memEntries.forEach((v, k) => map.set(k, v));
+          
+          map.forEach((v, k) => this.memEntries.set(k, v));
+
+          const pending = Array.from(map.values()).filter(e => e.syncStatus === 'PENDING' || e.syncStatus === 'SYNCING' || e.syncStatus === 'FAILED');
 
           if (cashbookId) {
-            resolve(merged.filter(e => e.cashbook_id === cashbookId));
+            resolve(pending.filter(e => e.cashbook_id === cashbookId));
           } else {
-            resolve(merged);
+            resolve(pending);
           }
         };
 
         req.onerror = () => {
-          const local = this.getLocalBackup().filter(e => e.syncStatus === 'PENDING' || e.syncStatus === 'SYNCING' || e.syncStatus === 'FAILED');
+          const local = this.getLocalEntries().filter(e => e.syncStatus === 'PENDING' || e.syncStatus === 'SYNCING' || e.syncStatus === 'FAILED');
           resolve(cashbookId ? local.filter(e => e.cashbook_id === cashbookId) : local);
         };
       });
     } catch {
-      const local = this.getLocalBackup().filter(e => e.syncStatus === 'PENDING' || e.syncStatus === 'SYNCING' || e.syncStatus === 'FAILED');
+      const local = this.getLocalEntries().filter(e => e.syncStatus === 'PENDING' || e.syncStatus === 'SYNCING' || e.syncStatus === 'FAILED');
       return cashbookId ? local.filter(e => e.cashbook_id === cashbookId) : local;
     }
   }
@@ -294,6 +332,8 @@ export class TrackBookOfflineDB {
   }
 
   async getEntry(id: string): Promise<OfflineEntry | null> {
+    if (this.memEntries.has(id)) return this.memEntries.get(id)!;
+
     const local = this.getLocalBackup().find(e => e.id === id);
     if (local) return local;
 
@@ -318,14 +358,23 @@ export class TrackBookOfflineDB {
    * Update entry sync status
    */
   async updateEntryStatus(id: string, status: 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED', error?: string): Promise<boolean> {
+    const mem = this.memEntries.get(id);
+    if (mem) {
+      mem.syncStatus = status;
+      if (error !== undefined) mem.lastError = error;
+      if (status === 'FAILED') mem.retryCount = (mem.retryCount || 0) + 1;
+    }
+
     const local = this.getLocalBackup();
     const item = local.find(e => e.id === id);
     if (item) {
       item.syncStatus = status;
-      if (error) item.lastError = error;
+      if (error !== undefined) item.lastError = error;
       if (status === 'FAILED') item.retryCount = (item.retryCount || 0) + 1;
       this.setLocalBackup(local);
     }
+
+    this.onDataChange?.();
 
     try {
       const db = await this.init();
@@ -340,7 +389,7 @@ export class TrackBookOfflineDB {
           const entry = req.result as OfflineEntry;
           if (entry) {
             entry.syncStatus = status;
-            if (error) entry.lastError = error;
+            if (error !== undefined) entry.lastError = error;
             if (status === 'FAILED') entry.retryCount = (entry.retryCount || 0) + 1;
             store.put(entry);
           }
@@ -358,9 +407,12 @@ export class TrackBookOfflineDB {
    * Mark an entry as synced
    */
   async markEntrySynced(id: string): Promise<boolean> {
-    // We update status to 'SYNCED' and keep it briefly, or purge from pending backup
+    this.memEntries.delete(id);
+
     const local = this.getLocalBackup().filter(e => e.id !== id);
     this.setLocalBackup(local);
+
+    this.onDataChange?.();
 
     try {
       const db = await this.init();
@@ -386,7 +438,11 @@ export class TrackBookOfflineDB {
   }
 
   getLocalEntries(): OfflineEntry[] {
-    return this.getLocalBackup();
+    if (this.memEntries.size === 0) {
+      const local = this.getLocalBackup();
+      local.forEach(e => this.memEntries.set(e.id, e));
+    }
+    return Array.from(this.memEntries.values());
   }
 
   async getLocalImage(id: string): Promise<{ id: string; data: string } | null> {
@@ -407,7 +463,10 @@ export class TrackBookOfflineDB {
 
   async clearAllData(): Promise<boolean> {
     try {
+      this.memEntries.clear();
       localStorage.removeItem(LOCAL_STORAGE_KEY);
+      this.onDataChange?.();
+
       const db = await this.init();
       if (!db) return true;
 
@@ -512,15 +571,20 @@ export class BackgroundSyncManager {
   }
 
   async init() {
+    this.db.setOnDataChange(() => {
+      this.refreshPendingCount();
+      this.notify();
+    });
+
     await this.db.init();
     await this.refreshPendingCount();
 
     // Subscribe to network changes
     this.network.subscribe((state) => {
       if (state === 'good') {
-        if (this.pendingCount > 0) {
+        if (this.pendingCount > 0 && !this.isSyncing) {
           this.triggerSync();
-        } else {
+        } else if (this.pendingCount === 0) {
           this.setSyncState('ONLINE');
         }
       } else {
@@ -530,9 +594,10 @@ export class BackgroundSyncManager {
 
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
-        console.log('[SyncManager] Native online event detected. Immediately updating state and syncing.');
+        console.log('[SyncManager] Native online event detected. Immediately triggering sync.');
         this.network.updateState('good');
-        this.setSyncState(this.pendingCount > 0 ? 'SYNCING' : 'ONLINE');
+        this.setSyncState('ONLINE');
+        this.notify();
         this.triggerSync();
       });
 
@@ -603,7 +668,7 @@ export class BackgroundSyncManager {
     };
   }
 
-  private notify() {
+  public notify() {
     this.listeners.forEach(l => {
       try { l(); } catch (e) { console.error('[SyncManager] notify error:', e); }
     });
@@ -621,114 +686,124 @@ export class BackgroundSyncManager {
   async saveOfflineEntry(entry: OfflineEntry): Promise<boolean> {
     const success = await this.db.saveEntry(entry);
     await this.refreshPendingCount();
+    this.notify();
     this.emitToast('Entry saved offline • Will sync automatically when connected', 'info');
     return success;
   }
 
   /**
+   * Manual retry of all queued / failed / stuck pending jobs
+   */
+  async retryAllPendingJobs(): Promise<boolean> {
+    if (typeof navigator !== 'undefined' && (!navigator.onLine || this.network.state === 'offline')) {
+      this.emitToast("You're offline. We'll retry when your connection returns.", 'info');
+      return false;
+    }
+
+    const pending = await this.db.getPendingEntries();
+    for (const e of pending) {
+      if (e.syncStatus === 'FAILED' || e.syncStatus === 'SYNCING') {
+        await this.db.updateEntryStatus(e.id, 'PENDING');
+      }
+    }
+    this.notify();
+
+    return this.triggerSync(true);
+  }
+
+  /**
    * Trigger background sync of all pending offline entries
    */
-  async triggerSync() {
-    if (this.isSyncing) return;
+  async triggerSync(isManualRetry = false): Promise<boolean> {
+    if (this.isSyncing) {
+      console.log('[SyncManager] Sync already in progress, skipping duplicate call.');
+      return false;
+    }
+
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       this.setSyncState('OFFLINE');
-      return;
+      this.notify();
+      return false;
     }
 
     const pending = await this.db.getPendingEntries();
     if (pending.length === 0) {
       this.pendingCount = 0;
       this.setSyncState('ONLINE');
-      return;
+      this.notify();
+      return true;
     }
 
     this.isSyncing = true;
     this.setSyncState('SYNCING');
+    this.notify();
 
     // Sort by created_at ascending to preserve creation order
     pending.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-    let hasErrors = false;
-    let syncedInThisRun = 0;
-
-    // Fast synchronization: If multiple entries exist, attempt batch sync first
-    if (pending.length > 1) {
-      try {
-        const batchPayload = pending.map(e => ({
-          clientEntryId: e.clientEntryId || e.id,
-          id: e.clientEntryId || e.id,
-          cashbook_id: e.cashbook_id,
-          user_id: e.user_id,
-          user_name: e.user_name || 'User',
-          amount: e.amount,
-          type: e.type,
-          description: e.description,
-          category: e.category,
-          mode: e.mode,
-          date: e.date,
-          created_at: e.created_at,
-          source: 'Offline Sync'
-        }));
-
-        const res = await fetch('/api/sync/batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entries: batchPayload })
-        });
-
-        if (res.ok) {
-          const batchRes = await res.json();
-          if (batchRes.success && Array.isArray(batchRes.results)) {
-            for (const r of batchRes.results) {
-              if (r.success) {
-                await this.db.markEntrySynced(r.id);
-                syncedInThisRun++;
-                this.entrySyncedCallbacks.forEach(cb => {
-                  try { cb(r.id, { id: r.id, is_offline: false, syncStatus: 'SYNCED' }); } catch {}
-                });
-              }
-            }
-          }
+    if (isManualRetry) {
+      for (const entry of pending) {
+        if (entry.syncStatus === 'FAILED') {
+          await this.db.updateEntryStatus(entry.id, 'PENDING');
         }
-      } catch (batchErr) {
-        console.warn('[SyncManager] Batch sync error, falling back to individual sync:', batchErr);
       }
+      this.notify();
     }
 
-    const remainingPending = await this.db.getPendingEntries();
-    for (const entry of remainingPending) {
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        hasErrors = true;
-        break;
-      }
+    let syncedInThisRun = 0;
+    let anyFailed = false;
 
-      try {
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    try {
+      for (const entry of pending) {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          await this.db.updateEntryStatus(entry.id, 'PENDING', 'Waiting for connection');
+          this.setSyncState('OFFLINE');
+          this.notify();
+          break;
+        }
+
+        // 1. Move to SYNCING state and notify UI immediately
         await this.db.updateEntryStatus(entry.id, 'SYNCING');
+        this.notify();
 
-        // 1. Send to server idempotent sync endpoint
         let syncSuccess = false;
         let syncedData: any = null;
+        let syncErrorMsg = '';
 
+        // Resolve user_id if non-UUID
+        let resolvedUserId = entry.user_id;
+        if (!UUID_REGEX.test(resolvedUserId)) {
+          const cachedUserId = localStorage.getItem('trackbook_last_user_id');
+          if (cachedUserId && UUID_REGEX.test(cachedUserId)) {
+            resolvedUserId = cachedUserId;
+          }
+        }
+
+        const payload = {
+          id: entry.clientEntryId || entry.id,
+          cashbook_id: entry.cashbook_id,
+          user_id: resolvedUserId,
+          user_name: entry.user_name || 'User',
+          amount: entry.amount,
+          type: entry.type,
+          description: entry.description,
+          category: entry.category,
+          mode: entry.mode,
+          date: entry.date,
+          created_at: entry.created_at,
+          source: 'Offline Sync'
+        };
+
+        // 2. Call backend idempotent endpoint
         try {
           const res = await fetch('/api/sync/offline-entry', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              clientEntryId: entry.clientEntryId || entry.id,
-              entry: {
-                id: entry.clientEntryId || entry.id,
-                cashbook_id: entry.cashbook_id,
-                user_id: entry.user_id,
-                user_name: entry.user_name || 'User',
-                amount: entry.amount,
-                type: entry.type,
-                description: entry.description,
-                category: entry.category,
-                mode: entry.mode,
-                date: entry.date,
-                created_at: entry.created_at,
-                source: 'Offline Sync'
-              }
+              clientEntryId: payload.id,
+              entry: payload
             })
           });
 
@@ -737,120 +812,112 @@ export class BackgroundSyncManager {
             if (result.success) {
               syncSuccess = true;
               syncedData = result.entry;
-            }
-          }
-        } catch (apiErr) {
-          console.warn('[SyncManager] API endpoint failed, attempting direct Supabase upsert:', apiErr);
-        }
-
-        // 2. Direct Supabase fallback if server API was unavailable
-        if (!syncSuccess && supabase) {
-          const payload = {
-            id: entry.clientEntryId || entry.id,
-            cashbook_id: entry.cashbook_id,
-            user_id: entry.user_id,
-            user_name: entry.user_name || 'User',
-            amount: entry.amount,
-            type: entry.type,
-            description: entry.description,
-            category: entry.category,
-            mode: entry.mode,
-            date: entry.date,
-            created_at: entry.created_at,
-            source: 'Offline Sync'
-          };
-
-          const { data: sbData, error: sbErr } = await supabase
-            .from('entries')
-            .upsert([payload], { onConflict: 'id' })
-            .select()
-            .maybeSingle();
-
-          if (!sbErr) {
-            syncSuccess = true;
-            syncedData = sbData || payload;
-          } else {
-            const errDetail = typeof sbErr === 'object' ? JSON.stringify(sbErr) : String(sbErr || '');
-            const isFetchErr = errDetail.toLowerCase().includes('failed to fetch') || 
-              errDetail.toLowerCase().includes('network') || 
-              (typeof navigator !== 'undefined' && !navigator.onLine);
-            if (isFetchErr) {
-              console.log('[SyncManager] Network currently unreachable for direct sync, remaining in queue:', entry.id);
             } else {
-              console.warn('[SyncManager] Supabase direct sync error:', sbErr);
+              syncErrorMsg = result.error || 'Server rejected sync';
             }
+          } else {
+            syncErrorMsg = `HTTP error ${res.status}`;
+          }
+        } catch (apiErr: any) {
+          syncErrorMsg = apiErr?.message || 'Network error connecting to sync server';
+        }
+
+        // 3. Fallback to direct Supabase upsert if server route is unavailable
+        if (!syncSuccess && supabase && navigator.onLine) {
+          try {
+            const { data: existing } = await supabase
+              .from('entries')
+              .select('*')
+              .eq('id', payload.id)
+              .maybeSingle();
+
+            if (existing) {
+              syncSuccess = true;
+              syncedData = existing;
+            } else {
+              const { data: sbData, error: sbErr } = await supabase
+                .from('entries')
+                .upsert([payload], { onConflict: 'id' })
+                .select()
+                .maybeSingle();
+
+              if (!sbErr) {
+                syncSuccess = true;
+                syncedData = sbData || payload;
+              } else {
+                syncErrorMsg = sbErr.message || syncErrorMsg;
+              }
+            }
+          } catch (sbEx: any) {
+            syncErrorMsg = sbEx?.message || syncErrorMsg;
           }
         }
 
+        // 4. Update entry state based on sync outcome
         if (syncSuccess) {
+          // Remove from active queue on confirmed success
           await this.db.markEntrySynced(entry.id);
           syncedInThisRun++;
-          // Notify app UI so the entry in the list turns from "Offline • Pending Sync" to normal synced state
           this.entrySyncedCallbacks.forEach(cb => {
             try { cb(entry.id, syncedData); } catch (e) { console.error(e); }
           });
+          this.notify();
         } else {
-          hasErrors = true;
-          await this.db.updateEntryStatus(entry.id, 'PENDING', 'Failed to sync with backend');
-        }
-      } catch (e: any) {
-        hasErrors = true;
-        const errMsg = e?.message || String(e || '');
-        const isNet = errMsg.toLowerCase().includes('failed to fetch') || 
-          errMsg.toLowerCase().includes('network') ||
-          (typeof navigator !== 'undefined' && !navigator.onLine);
-        if (isNet) {
-          console.log('[SyncManager] Network unreachable while syncing entry, will retry automatically:', entry.id);
-        } else {
-          console.warn('[SyncManager] Error syncing entry:', entry.id, e);
-        }
-        await this.db.updateEntryStatus(entry.id, 'PENDING', e.message || 'Network error');
-      }
+          const isNet = !navigator.onLine || 
+            syncErrorMsg.toLowerCase().includes('failed to fetch') || 
+            syncErrorMsg.toLowerCase().includes('network');
 
-    }
-
-    this.isSyncing = false;
-    await this.refreshPendingCount();
-
-    if (this.pendingCount === 0) {
-      this.setSyncState('SYNC_COMPLETE');
-      if (syncedInThisRun > 0) {
-        this.emitToast('All entries synced successfully', 'success');
-        // Instantly notify Dashboard to pull latest synced records from backend
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('trackbook_refresh_cashbooks'));
-        }
-      }
-      // Revert to ONLINE badge after 2.5 seconds
-      setTimeout(() => {
-        if (this.pendingCount === 0 && this.network.state === 'good') {
-          this.setSyncState('ONLINE');
-        }
-      }, 2500);
-    } else {
-      if (this.network.state === 'offline' || !navigator.onLine) {
-        this.setSyncState('OFFLINE');
-      } else {
-        this.setSyncState('ONLINE');
-        // Fast retry fallback
-        clearTimeout(this.retryTimeout);
-        this.retryTimeout = setTimeout(() => {
-          if (navigator.onLine && this.pendingCount > 0) {
-            this.triggerSync();
+          if (isNet) {
+            await this.db.updateEntryStatus(entry.id, 'PENDING', 'Waiting for connection');
+            this.setSyncState('OFFLINE');
+            this.notify();
+            break;
+          } else {
+            anyFailed = true;
+            await this.db.updateEntryStatus(entry.id, 'FAILED', syncErrorMsg || 'Sync failed');
+            this.notify();
           }
-        }, 3000);
+        }
+      }
+    } finally {
+      this.isSyncing = false;
+      await this.refreshPendingCount();
+      this.notify();
+    }
+
+    if (syncedInThisRun > 0) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('trackbook_refresh_cashbooks'));
+      }
+
+      if (this.pendingCount === 0) {
+        this.setSyncState('SYNC_COMPLETE');
+        this.emitToast('All entries synced successfully', 'success');
+        setTimeout(() => {
+          if (this.pendingCount === 0 && this.network.state === 'good') {
+            this.setSyncState('ONLINE');
+          }
+        }, 2500);
+      } else {
+        this.emitToast(`${syncedInThisRun} entries synced successfully`, 'success');
       }
     }
+
+    return !anyFailed;
   }
 
   getQueueList(): SyncQueueItem[] {
-    const local = this.db.getLocalEntries();
-    return local.map(e => ({
+    const entries = this.db.getLocalEntries();
+    return entries.map(e => ({
       id: e.id,
       type: 'CREATE_ENTRY' as const,
-      status: e.syncStatus === 'SYNCED' ? ('completed' as const) : e.syncStatus === 'SYNCING' ? ('syncing' as const) : ('pending' as const),
+      status: e.syncStatus === 'SYNCED' ? ('completed' as const)
+            : e.syncStatus === 'SYNCING' ? ('syncing' as const)
+            : e.syncStatus === 'FAILED' ? ('failed' as const)
+            : this.network.state === 'offline' ? ('waiting_for_internet' as const)
+            : ('pending' as const),
       priority: 'high' as const,
-      retryCount: e.retryCount,
+      retryCount: e.retryCount || 0,
       createdAt: e.created_at,
       payload: e,
       error: e.lastError

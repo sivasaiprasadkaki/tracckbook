@@ -277,6 +277,8 @@ interface Cashbook {
   transactions: Transaction[];
   createdAt: Date;
   user_name?: string;
+  user_id?: string;
+  userId?: string;
 }
 
 function formatDateTime12h(dateVal: any): string {
@@ -1726,6 +1728,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           session?.user?.user_metadata?.name || 
                           session?.user?.email?.split('@')[0] || 
                           '';
+
+  useEffect(() => {
+    if (session?.user?.id) {
+      try {
+        localStorage.setItem('trackbook_last_user_id', session.user.id);
+      } catch {}
+    }
+  }, [session?.user?.id]);
 
   const [userName, setUserName] = useState(initialUserName);
   const [books, setBooks] = useState<Cashbook[]>(() => {
@@ -4856,6 +4866,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           transactions: [offlineTx, ...b.transactions]
         } : b));
 
+        const activeBook = books.find(b => b.id === activeBookId);
+        const resolvedUserId = session?.user?.id || 
+          activeBook?.userId || 
+          localStorage.getItem('trackbook_last_user_id') || 
+          '00000000-0000-0000-0000-000000000000';
+
         const prevCached = entriesCache.get(activeBookId) || [];
         entriesCache.set(activeBookId, [{
           id: tempId,
@@ -4867,7 +4883,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           mode: currentMode,
           date: dateObj,
           image_layout: currentImageLayout,
-          user_id: session?.user?.id || 'offline-user',
+          user_id: resolvedUserId,
           cashbook_id: activeBookId,
           syncStatus: 'PENDING',
           is_offline: true
@@ -4877,7 +4893,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           id: tempId,
           clientEntryId: tempId,
           cashbook_id: activeBookId,
-          user_id: session?.user?.id || 'offline-user',
+          user_id: resolvedUserId,
           user_name: resolvedName,
           amount: amountNum,
           type: currentShowForm as 'in' | 'out',
@@ -5093,11 +5109,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
           if (isNetworkFailure) {
             console.log('[Instant Save] Connection drop/offline detected, queuing entry for background sync:', tempId);
+            const activeBook = books.find(b => b.id === activeBookId);
+            const resolvedUserId = session?.user?.id || 
+              activeBook?.userId || 
+              localStorage.getItem('trackbook_last_user_id') || 
+              '00000000-0000-0000-0000-000000000000';
+
             syncManager.saveOfflineEntry({
               id: tempId,
               clientEntryId: tempId,
               cashbook_id: activeBookId,
-              user_id: session?.user?.id || 'offline-user',
+              user_id: resolvedUserId,
               user_name: resolvedName,
               amount: amountNum,
               type: currentShowForm as 'in' | 'out',

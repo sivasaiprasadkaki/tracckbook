@@ -6,6 +6,29 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.
 
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function resolveValidUserId(userId: any, cashbookId: string): Promise<string> {
+  if (typeof userId === 'string' && UUID_REGEX.test(userId)) {
+    return userId;
+  }
+  if (cashbookId) {
+    try {
+      const { data: cb } = await supabaseAdmin
+        .from('cashbooks')
+        .select('user_id')
+        .eq('id', cashbookId)
+        .maybeSingle();
+      if (cb?.user_id && UUID_REGEX.test(cb.user_id)) {
+        return cb.user_id;
+      }
+    } catch (e: any) {
+      console.warn('[Sync Server] Failed to resolve user_id from cashbook:', e.message);
+    }
+  }
+  return '00000000-0000-0000-0000-000000000000';
+}
+
 /**
  * Idempotent offline entry synchronization endpoint.
  * Prevents duplicate records by validating clientEntryId.
@@ -40,11 +63,13 @@ export async function handleSyncOfflineEntry(req: Request, res: Response) {
       console.warn('[Sync Server] Check existing warning:', e.message);
     }
 
+    const resolvedUserId = await resolveValidUserId(entry.user_id, entry.cashbook_id);
+
     // 2. Prepare entry payload preserving original date and created_at
     const entryPayload = {
       id: id,
       cashbook_id: entry.cashbook_id,
-      user_id: entry.user_id,
+      user_id: resolvedUserId,
       user_name: entry.user_name || 'User',
       amount: Number(entry.amount),
       type: entry.type === 'in' ? 'in' : 'out',
@@ -152,10 +177,12 @@ export async function handleBatchSyncOfflineEntries(req: Request, res: Response)
         continue;
       }
 
+      const resolvedUserId = await resolveValidUserId(item.user_id, item.cashbook_id);
+
       const payload = {
         id,
         cashbook_id: item.cashbook_id,
-        user_id: item.user_id,
+        user_id: resolvedUserId,
         user_name: item.user_name || 'User',
         amount: Number(item.amount),
         type: item.type === 'in' ? 'in' : 'out',
