@@ -292,14 +292,18 @@ export class TrackBookOfflineDB {
   }
 
   async getLocalImage(id: string): Promise<{ id: string; data: string } | null> {
-    const raw = localStorage.getItem();
-    if (raw) return { id, data: raw };
+    try {
+      const raw = localStorage.getItem(`trackbook_offline_image_${id}`);
+      if (raw) {
+        return { id, data: raw };
+      }
+    } catch {}
     return null;
   }
 
   async saveLocalImage(id: string, data: string): Promise<void> {
     try {
-      localStorage.setItem(, data);
+      localStorage.setItem(`trackbook_offline_image_${id}`, data);
     } catch {}
   }
 
@@ -614,7 +618,15 @@ export class BackgroundSyncManager {
             syncSuccess = true;
             syncedData = sbData || payload;
           } else {
-            console.error('[SyncManager] Supabase direct sync error:', sbErr);
+            const errDetail = typeof sbErr === 'object' ? JSON.stringify(sbErr) : String(sbErr || '');
+            const isFetchErr = errDetail.toLowerCase().includes('failed to fetch') || 
+              errDetail.toLowerCase().includes('network') || 
+              (typeof navigator !== 'undefined' && !navigator.onLine);
+            if (isFetchErr) {
+              console.log('[SyncManager] Network currently unreachable for direct sync, remaining in queue:', entry.id);
+            } else {
+              console.warn('[SyncManager] Supabase direct sync error:', sbErr);
+            }
           }
         }
 
@@ -631,9 +643,18 @@ export class BackgroundSyncManager {
         }
       } catch (e: any) {
         hasErrors = true;
-        console.error('[SyncManager] Error syncing entry:', entry.id, e);
+        const errMsg = e?.message || String(e || '');
+        const isNet = errMsg.toLowerCase().includes('failed to fetch') || 
+          errMsg.toLowerCase().includes('network') ||
+          (typeof navigator !== 'undefined' && !navigator.onLine);
+        if (isNet) {
+          console.log('[SyncManager] Network unreachable while syncing entry, will retry automatically:', entry.id);
+        } else {
+          console.warn('[SyncManager] Error syncing entry:', entry.id, e);
+        }
         await this.db.updateEntryStatus(entry.id, 'PENDING', e.message || 'Network error');
       }
+
     }
 
     this.isSyncing = false;

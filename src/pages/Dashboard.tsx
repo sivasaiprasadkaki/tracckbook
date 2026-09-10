@@ -4707,14 +4707,25 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
           await fetchData();
         } catch (bgErr: any) {
-          console.error('[Instant Edit] Background sync error:', bgErr);
-          setBooks(prev => prev.map(b => b.id === activeBookId ? {
-            ...b,
-            transactions: b.transactions.map(t => t.id === originalTx.id ? originalTx : t)
-          } : b));
-          entriesCache.set(activeBookId, prevCached);
-          setError(bgErr.message || 'Failed to update entry. Please check your connection.');
+          const errDetail = typeof bgErr === 'object' ? JSON.stringify(bgErr) : String(bgErr || '');
+          const isNetworkFailure = (typeof navigator !== 'undefined' && !navigator.onLine) || 
+            syncManager.network.state === 'offline' ||
+            errDetail.toLowerCase().includes('failed to fetch') || 
+            errDetail.toLowerCase().includes('network');
+
+          if (isNetworkFailure) {
+            console.log('[Instant Edit] Network offline; edit retained locally in cache');
+          } else {
+            console.error('[Instant Edit] Background sync error:', bgErr);
+            setBooks(prev => prev.map(b => b.id === activeBookId ? {
+              ...b,
+              transactions: b.transactions.map(t => t.id === originalTx.id ? originalTx : t)
+            } : b));
+            entriesCache.set(activeBookId, prevCached);
+            setError(bgErr.message || 'Failed to update entry. Please check your connection.');
+          }
         }
+
       })();
 
     } else {
@@ -4966,20 +4977,29 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               file_url: url
             }));
             const { error: attachError } = await supabase.from('attachments').insert(attachmentInserts);
-            if (attachError) console.error('[Instant Save] Error creating attachments:', attachError);
+            if (attachError) {
+              const attachErrStr = typeof attachError === 'object' ? JSON.stringify(attachError) : String(attachError || '');
+              if (attachErrStr.toLowerCase().includes('fetch') || !navigator.onLine) {
+                console.log('[Instant Save] Attachments deferred for background/offline sync');
+              } else {
+                console.warn('[Instant Save] Attachment save notice:', attachError);
+              }
+            }
           }
 
           await fetchData();
         } catch (bgErr: any) {
-          console.error('[Instant Save] Background sync error:', bgErr);
+          const errStr = typeof bgErr === 'object' ? JSON.stringify(bgErr) : String(bgErr || '');
           const isNetworkFailure = (typeof navigator !== 'undefined' && !navigator.onLine) || 
             syncManager.network.state === 'offline' ||
             bgErr?.message?.toLowerCase().includes('fetch') || 
+            bgErr?.details?.toLowerCase().includes('fetch') ||
             bgErr?.message?.toLowerCase().includes('network') ||
-            bgErr?.message?.toLowerCase().includes('failed to fetch');
+            errStr.toLowerCase().includes('failed to fetch') ||
+            errStr.toLowerCase().includes('network');
 
           if (isNetworkFailure) {
-            console.log('[Offline Queue] Storing pending offline entry due to connection drop:', tempId);
+            console.log('[Instant Save] Connection drop/offline detected, queuing entry for background sync:', tempId);
             syncManager.saveOfflineEntry({
               id: tempId,
               clientEntryId: tempId,
@@ -4996,7 +5016,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               syncStatus: 'PENDING',
               retryCount: 0,
               source: 'Manual',
-              images: [],
+              images: currentSelectedImages,
               is_offline: true
             });
             setBooks(prev => prev.map(b => b.id === activeBookId ? {
@@ -5006,6 +5026,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             return;
           }
 
+          console.error('[Instant Save] Background sync error:', bgErr);
           setBooks(prev => prev.map(b => b.id === activeBookId ? {
             ...b,
             transactions: b.transactions.filter(t => t.id !== tempId)
@@ -5013,6 +5034,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           entriesCache.set(activeBookId, prevCached);
           setError(bgErr.message || 'Failed to save entry. Please check your connection.');
         }
+
       })();
     }
   };

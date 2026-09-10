@@ -46,53 +46,87 @@ export async function uploadToCloudinary(fileDataUriOrFile: string | File, folde
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'dd2kcpetc';
   const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || 'trackbook_preset';
 
-  console.log(`[Cloudinary] Beginning upload process configured for:`, {
-    cloudName,
-    uploadPreset,
-    isString: typeof fileDataUriOrFile === 'string',
-    folder,
-  });
+  // Helper to convert File to Data URI
+  const toDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
 
-  const formData = new FormData();
-  formData.append('file', fileDataUriOrFile);
-  formData.append('upload_preset', uploadPreset);
-  if (folder) {
-    formData.append('folder', folder);
-  }
+  let base64String = typeof fileDataUriOrFile === 'string' ? fileDataUriOrFile : '';
 
+  // 1. Direct Cloudinary upload
   try {
+    const formData = new FormData();
+    formData.append('file', fileDataUriOrFile);
+    formData.append('upload_preset', uploadPreset);
+    if (folder) {
+      formData.append('folder', folder);
+    }
+
     const url = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
-    console.log(`[Cloudinary] Posting request to: ${url}`);
-    
     const response = await fetch(url, {
       method: 'POST',
       body: formData,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[Cloudinary] API Error Response [${response.status}]:`, errorText);
-      throw new Error(`Cloudinary upload failed with status ${response.status}: ${errorText}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.secure_url) {
+        return data.secure_url;
+      }
     }
-
-    const data = await response.json();
-    console.log('[Cloudinary] Successfully uploaded image. Response data parsed:', {
-      public_id: data.public_id,
-      secure_url: data.secure_url,
-      format: data.format,
-      bytes: data.bytes
-    });
-
-    if (!data.secure_url) {
-      throw new Error('Cloudinary response did not contain a valid secure_url field');
-    }
-
-    return data.secure_url;
-  } catch (error: any) {
-    console.error('[Cloudinary] Failure in uploadToCloudinary catch block:', error);
-    throw error;
+  } catch (directErr) {
+    console.warn('[Cloudinary] Direct upload attempt failed, attempting server proxy fallback:', directErr);
   }
+
+  // 2. Server proxy fallback (/api/cloudinary/upload)
+  try {
+    if (!base64String && fileDataUriOrFile instanceof File) {
+      base64String = await toDataUrl(fileDataUriOrFile);
+    }
+
+    if (base64String) {
+      const proxyRes = await fetch('/api/cloudinary/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file: base64String,
+          upload_preset: uploadPreset,
+          folder: folder
+        })
+      });
+
+      if (proxyRes.ok) {
+        const proxyData = await proxyRes.json();
+        if (proxyData.secure_url) {
+          console.log('[Cloudinary] Upload succeeded via server proxy fallback');
+          return proxyData.secure_url;
+        }
+      }
+    }
+  } catch (proxyErr) {
+    console.warn('[Cloudinary] Server proxy upload fallback was unreachable:', proxyErr);
+  }
+
+  // 3. Offline resilience fallback: preserve image locally so the transaction save succeeds
+  if (!base64String && fileDataUriOrFile instanceof File) {
+    try {
+      base64String = await toDataUrl(fileDataUriOrFile);
+    } catch (_) {}
+  }
+
+  if (base64String) {
+    console.warn('[Cloudinary] Network offline; stored image locally as data URI for offline sync.');
+    return base64String;
+  }
+
+  throw new Error('Unable to upload image and could not create offline image fallback.');
 }
+
 
 /**
  * Optimizes Cloudinary delivery URLs for ultra-low bandwidth usage

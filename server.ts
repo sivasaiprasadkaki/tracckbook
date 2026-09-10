@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 
 import parseReceiptHandler from "./api/gemini/parse-receipt.ts";
 import shareWhatsappHandler from "./api/reports/share-whatsapp.ts";
+import cloudinaryUploadHandler from "./api/cloudinary/upload.ts";
 import { 
   handleCreateInvitation, 
   handleVerifyInvitation, 
@@ -53,18 +54,7 @@ if (geminiApiKey !== "") {
 }
 
 const app = express();
-// Determine port based on environment
-// In AI Studio development, Nginx reverse proxy forwards traffic to port 3000.
-// In deployed Cloud Run production, Cloud Run injects PORT (typically 8080) and expects listening on that port.
-const getPort = (): number => {
-  if (process.env.NODE_ENV === "production" && process.env.PORT) {
-    const parsed = parseInt(process.env.PORT, 10);
-    if (!isNaN(parsed) && parsed > 0) return parsed;
-  }
-  return 3000;
-};
-
-const PORT = getPort();
+const PORT = 3000;
 
 // Health check endpoint (for container health checks and platform monitoring)
 app.get("/api/health", (req, res) => {
@@ -72,7 +62,12 @@ app.get("/api/health", (req, res) => {
 });
 
 // Body parser supporting larger images
-app.use(express.json({ limit: "15mb" }));
+app.use(express.json({ limit: "25mb" }));
+
+// Cloudinary Upload Proxy Endpoint
+app.post("/api/cloudinary/upload", (req, res) => {
+  cloudinaryUploadHandler(req as any, res as any);
+});
 
 // AI Parse Receipt Endpoint
 app.post("/api/gemini/parse-receipt", async (req, res) => {
@@ -299,20 +294,6 @@ if (process.env.NODE_ENV !== "production") {
 const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`[Express] Running on http://0.0.0.0:${PORT} (NODE_ENV: ${process.env.NODE_ENV || "development"})`);
 });
-
-// In production, if PORT is not 3000, also bind to port 3000 as a fallback if available
-if (process.env.NODE_ENV === "production" && PORT !== 3000) {
-  try {
-    const fallbackServer = app.listen(3000, "0.0.0.0", () => {
-      console.log(`[Express] Also listening on fallback port 3000`);
-    });
-    fallbackServer.on("error", (err: any) => {
-      console.log(`[Express] Port 3000 fallback not bound: ${err.message}`);
-    });
-  } catch (err: any) {
-    console.log(`[Express] Fallback port binding skipped: ${err.message}`);
-  }
-}
 
 const handleShutdown = () => {
   server.close(() => {
