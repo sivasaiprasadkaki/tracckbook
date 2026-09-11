@@ -743,6 +743,13 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                                           <p><span className="text-indigo-500">Amount:</span> ₹{item.payload.entry.amount || 0}</p>
                                           <p><span className="text-indigo-500">Category:</span> {item.payload.entry.category || 'General'}</p>
                                         </>
+                                      ) : item.payload.amount !== undefined ? (
+                                        <>
+                                          <p><span className="text-indigo-500">Type:</span> <span className={item.payload.type === 'in' ? 'text-emerald-500 font-bold' : 'text-rose-500 font-bold'}>{item.payload.type === 'in' ? 'Cash In (+)' : 'Cash Out (-)'}</span></p>
+                                          <p><span className="text-indigo-500">Amount:</span> ₹{item.payload.amount || 0}</p>
+                                          <p><span className="text-indigo-500">Desc:</span> {item.payload.description || 'N/A'}</p>
+                                          <p><span className="text-indigo-500">Category:</span> {item.payload.category || 'General'}</p>
+                                        </>
                                       ) : item.payload.id ? (
                                         <p><span className="text-rose-500">ID:</span> {item.payload.id}</p>
                                       ) : (

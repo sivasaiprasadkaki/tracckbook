@@ -23,9 +23,20 @@ export interface OfflineEntry {
   is_offline?: boolean;
 }
 
+export interface OfflineCashbook {
+  id: string;
+  name: string;
+  user_id?: string;
+  user_name?: string;
+  created_at: string;
+  syncStatus: 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED';
+  lastError?: string;
+  retryCount?: number;
+}
+
 export interface SyncQueueItem {
   id: string;
-  type: 'CREATE_ENTRY' | 'UPDATE_ENTRY' | 'DELETE_ENTRY';
+  type: 'CREATE_ENTRY' | 'UPDATE_ENTRY' | 'DELETE_ENTRY' | 'CREATE_CASHBOOK';
   status: 'pending' | 'syncing' | 'completed' | 'failed' | 'uploading' | 'scanning' | 'waiting_for_internet';
   priority: 'high' | 'normal' | 'low';
   retryCount: number;
@@ -236,6 +247,102 @@ export class TrackBookOfflineDB {
     } catch {}
 
     return [];
+  }
+
+  /**
+   * Get all local offline cashbooks
+   */
+  getLocalCashbooks(): OfflineCashbook[] {
+    try {
+      const key = 'trackbook_offline_pending_books_v1';
+      const raw = localStorage.getItem(key);
+      if (!raw) return [];
+      const list = JSON.parse(raw);
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Save a newly created cashbook to offline pending storage
+   */
+  async savePendingCashbook(cb: { id: string; name: string; user_id?: string; user_name?: string; created_at?: string }): Promise<boolean> {
+    try {
+      const key = 'trackbook_offline_pending_books_v1';
+      const list = this.getLocalCashbooks();
+      const idx = list.findIndex(item => item.id === cb.id);
+      const cashbookRecord: OfflineCashbook = {
+        id: cb.id,
+        name: cb.name,
+        user_id: cb.user_id,
+        user_name: cb.user_name,
+        created_at: cb.created_at || new Date().toISOString(),
+        syncStatus: 'PENDING',
+        retryCount: 0
+      };
+      if (idx >= 0) {
+        list[idx] = { ...list[idx], ...cashbookRecord };
+      } else {
+        list.push(cashbookRecord);
+      }
+      localStorage.setItem(key, JSON.stringify(list));
+      this.onDataChange?.();
+      return true;
+    } catch (e) {
+      console.warn('[OfflineDB] Error saving pending cashbook:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Get all pending offline cashbooks awaiting sync
+   */
+  async getPendingCashbooks(): Promise<OfflineCashbook[]> {
+    const list = this.getLocalCashbooks();
+    return list.filter(item => item && item.id && item.syncStatus !== 'SYNCED');
+  }
+
+  /**
+   * Update cashbook sync status
+   */
+  async updateCashbookStatus(id: string, status: 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED', error?: string): Promise<boolean> {
+    try {
+      const key = 'trackbook_offline_pending_books_v1';
+      const list = this.getLocalCashbooks();
+      const idx = list.findIndex(item => item.id === id);
+      if (idx >= 0) {
+        list[idx].syncStatus = status;
+        if (error !== undefined) list[idx].lastError = error;
+        if (status === 'FAILED') list[idx].retryCount = (list[idx].retryCount || 0) + 1;
+        localStorage.setItem(key, JSON.stringify(list));
+        this.onDataChange?.();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.warn('[OfflineDB] Error updating cashbook status:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Mark an offline cashbook as synced
+   */
+  async markCashbookSynced(id: string): Promise<void> {
+    try {
+      const key = 'trackbook_offline_pending_books_v1';
+      const list = this.getLocalCashbooks();
+      const idx = list.findIndex(item => item.id === id);
+      if (idx >= 0) {
+        list[idx].syncStatus = 'SYNCED';
+        list[idx].lastError = undefined;
+        localStorage.setItem(key, JSON.stringify(list));
+      }
+      this.onDataChange?.();
+    } catch (e) {
+      console.warn('[OfflineDB] Error marking cashbook synced:', e);
+    }
   }
 
   /**
@@ -632,7 +739,8 @@ export class BackgroundSyncManager {
   public async refreshPendingCount(): Promise<number> {
     try {
       const items = await this.db.getPendingEntries();
-      this.pendingCount = items.length;
+      const pendingBooks = await this.db.getPendingCashbooks();
+      this.pendingCount = items.length + pendingBooks.length;
       if (this.network.state === 'offline') {
         this.syncState = 'OFFLINE';
       } else if (this.isSyncing) {
@@ -681,6 +789,17 @@ export class BackgroundSyncManager {
   }
 
   /**
+   * Save a newly created cashbook while offline
+   */
+  async saveOfflineCashbook(book: { id: string; name: string; user_id?: string; user_name?: string; created_at?: string }): Promise<boolean> {
+    const success = await this.db.savePendingCashbook(book);
+    await this.refreshPendingCount();
+    this.notify();
+    this.emitToast('Cashbook saved offline • Will sync automatically when connected', 'info');
+    return success;
+  }
+
+  /**
    * Save a newly created entry while offline
    */
   async saveOfflineEntry(entry: OfflineEntry): Promise<boolean> {
@@ -698,6 +817,13 @@ export class BackgroundSyncManager {
     if (typeof navigator !== 'undefined' && (!navigator.onLine || this.network.state === 'offline')) {
       this.emitToast("You're offline. We'll retry when your connection returns.", 'info');
       return false;
+    }
+
+    const pendingBooks = await this.db.getPendingCashbooks();
+    for (const b of pendingBooks) {
+      if (b.syncStatus === 'FAILED' || b.syncStatus === 'SYNCING') {
+        await this.db.updateCashbookStatus(b.id, 'PENDING');
+      }
     }
 
     const pending = await this.db.getPendingEntries();
@@ -726,8 +852,10 @@ export class BackgroundSyncManager {
       return false;
     }
 
+    const pendingBooks = await this.db.getPendingCashbooks();
     const pending = await this.db.getPendingEntries();
-    if (pending.length === 0) {
+
+    if (pendingBooks.length === 0 && pending.length === 0) {
       this.pendingCount = 0;
       this.setSyncState('ONLINE');
       this.notify();
@@ -738,10 +866,12 @@ export class BackgroundSyncManager {
     this.setSyncState('SYNCING');
     this.notify();
 
-    // Sort by created_at ascending to preserve creation order
-    pending.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
     if (isManualRetry) {
+      for (const book of pendingBooks) {
+        if (book.syncStatus === 'FAILED') {
+          await this.db.updateCashbookStatus(book.id, 'PENDING');
+        }
+      }
       for (const entry of pending) {
         if (entry.syncStatus === 'FAILED') {
           await this.db.updateEntryStatus(entry.id, 'PENDING');
@@ -753,9 +883,89 @@ export class BackgroundSyncManager {
     let syncedInThisRun = 0;
     let anyFailed = false;
 
-    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
     try {
+      // =========================================================================
+      // REQUIREMENT: Cashbook MUST sync before dependent entries!
+      // =========================================================================
+      if (pendingBooks.length > 0) {
+        console.log(`[Sync] Found ${pendingBooks.length} pending offline cashbook(s) to synchronize.`);
+        for (const book of pendingBooks) {
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            await this.db.updateCashbookStatus(book.id, 'PENDING', 'Waiting for connection');
+            this.setSyncState('OFFLINE');
+            this.notify();
+            break;
+          }
+
+          console.log(`[Sync] Starting synchronization for cashbook: ${book.id} (${book.name})`);
+          await this.db.updateCashbookStatus(book.id, 'SYNCING');
+          this.notify();
+
+          let bookSuccess = false;
+          let bookError = '';
+
+          try {
+            const res = await fetch('/api/sync/cashbook', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: book.id,
+                name: book.name,
+                user_id: book.user_id,
+                user_name: book.user_name,
+                created_at: book.created_at
+              })
+            });
+
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success) {
+                bookSuccess = true;
+              } else {
+                bookError = json.error || 'Server rejected cashbook sync';
+              }
+            } else {
+              bookError = `Server responded with status ${res.status}`;
+            }
+          } catch (bookErr: any) {
+            bookError = bookErr?.message || 'Network error syncing cashbook';
+          }
+
+          if (bookSuccess) {
+            console.log(`[Sync] Confirmed success for cashbook: ${book.id}`);
+            await this.db.markCashbookSynced(book.id);
+            syncedInThisRun++;
+            this.notify();
+          } else {
+            const isNet = !navigator.onLine ||
+              bookError.toLowerCase().includes('failed to fetch') ||
+              bookError.toLowerCase().includes('network');
+
+            if (isNet) {
+              console.log(`[Sync] Connection lost during cashbook sync: ${book.id}`);
+              await this.db.updateCashbookStatus(book.id, 'PENDING', 'Waiting for connection');
+              this.setSyncState('OFFLINE');
+              this.notify();
+              break;
+            } else {
+              anyFailed = true;
+              console.error(`[Sync] FAILED for cashbook ${book.id}: ${bookError}`);
+              await this.db.updateCashbookStatus(book.id, 'FAILED', bookError);
+              this.notify();
+            }
+          }
+        }
+      }
+
+      // Re-query pending cashbooks to verify which cashbooks remain unconfirmed
+      const stillPendingBooks = await this.db.getPendingCashbooks();
+      const stillPendingBookIdSet = new Set(stillPendingBooks.map(b => b.id));
+
+      // Sort entries by created_at ascending to preserve creation order
+      pending.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+      const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
       for (const entry of pending) {
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           await this.db.updateEntryStatus(entry.id, 'PENDING', 'Waiting for connection');
@@ -764,7 +974,16 @@ export class BackgroundSyncManager {
           break;
         }
 
-        // 1. Move to SYNCING state and notify UI immediately
+        // CRITICAL CHECK: Do NOT sync an entry before its parent Cashbook exists on the backend!
+        if (stillPendingBookIdSet.has(entry.cashbook_id)) {
+          console.warn(`[Sync] Holding back entry ${entry.id}: parent cashbook ${entry.cashbook_id} is not yet confirmed on backend.`);
+          await this.db.updateEntryStatus(entry.id, 'PENDING', 'Waiting for parent cashbook sync');
+          continue;
+        }
+
+        console.log(`[Sync] Starting synchronization for transaction ${entry.clientEntryId || entry.id}`);
+
+        // 1. Move to SYNCING state and notify UI immediately (QUEUED -> SYNCING)
         await this.db.updateEntryStatus(entry.id, 'SYNCING');
         this.notify();
 
@@ -774,9 +993,9 @@ export class BackgroundSyncManager {
 
         // Resolve user_id if non-UUID
         let resolvedUserId = entry.user_id;
-        if (!UUID_REGEX.test(resolvedUserId)) {
+        if (!UUID_REGEX.test(resolvedUserId) || resolvedUserId === '00000000-0000-0000-0000-000000000000') {
           const cachedUserId = localStorage.getItem('trackbook_last_user_id');
-          if (cachedUserId && UUID_REGEX.test(cachedUserId)) {
+          if (cachedUserId && UUID_REGEX.test(cachedUserId) && cachedUserId !== '00000000-0000-0000-0000-000000000000') {
             resolvedUserId = cachedUserId;
           }
         }
@@ -798,6 +1017,7 @@ export class BackgroundSyncManager {
 
         // 2. Call backend idempotent endpoint
         try {
+          console.log(`[Sync] Request sent to /api/sync/offline-entry for entry ${payload.id}`);
           const res = await fetch('/api/sync/offline-entry', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -807,24 +1027,32 @@ export class BackgroundSyncManager {
             })
           });
 
+          console.log(`[Sync] Response status: ${res.status}`);
+
           if (res.ok) {
             const result = await res.json();
+            console.log(`[Sync] Backend response:`, result);
             if (result.success) {
               syncSuccess = true;
               syncedData = result.entry;
+              console.log(`[Sync] Supabase result: Entry ${payload.id} successfully written/confirmed`);
             } else {
               syncErrorMsg = result.error || 'Server rejected sync';
+              console.warn(`[Sync] Backend rejected entry ${payload.id}: ${syncErrorMsg}`);
             }
           } else {
             syncErrorMsg = `HTTP error ${res.status}`;
+            console.warn(`[Sync] HTTP error syncing entry ${payload.id}: status ${res.status}`);
           }
         } catch (apiErr: any) {
           syncErrorMsg = apiErr?.message || 'Network error connecting to sync server';
+          console.warn(`[Sync] Network exception for entry ${payload.id}:`, syncErrorMsg);
         }
 
         // 3. Fallback to direct Supabase upsert if server route is unavailable
         if (!syncSuccess && supabase && navigator.onLine) {
           try {
+            console.log(`[Sync] Attempting direct Supabase fallback for ${payload.id}`);
             const { data: existing } = await supabase
               .from('entries')
               .select('*')
@@ -834,18 +1062,36 @@ export class BackgroundSyncManager {
             if (existing) {
               syncSuccess = true;
               syncedData = existing;
+              console.log(`[Sync] Direct Supabase check: Entry already exists.`);
             } else {
+              const supabasePayload = {
+                id: payload.id,
+                cashbook_id: payload.cashbook_id,
+                user_id: payload.user_id,
+                user_name: payload.user_name || 'User',
+                amount: Number(payload.amount),
+                type: payload.type === 'in' ? 'in' : 'out',
+                description: payload.description || '',
+                category: payload.category || 'General',
+                mode: payload.mode || 'Cash',
+                date: payload.date || new Date().toISOString(),
+                image_layout: (entry as any).image_layout || 'split',
+                created_at: payload.created_at || new Date().toISOString()
+              };
+
               const { data: sbData, error: sbErr } = await supabase
                 .from('entries')
-                .upsert([payload], { onConflict: 'id' })
+                .upsert([supabasePayload], { onConflict: 'id' })
                 .select()
                 .maybeSingle();
 
               if (!sbErr) {
                 syncSuccess = true;
-                syncedData = sbData || payload;
+                syncedData = sbData || supabasePayload;
+                console.log(`[Sync] Supabase result: Direct upsert successful.`);
               } else {
                 syncErrorMsg = sbErr.message || syncErrorMsg;
+                console.warn(`[Sync] Direct Supabase upsert failed: ${sbErr.message}`);
               }
             }
           } catch (sbEx: any) {
@@ -855,8 +1101,10 @@ export class BackgroundSyncManager {
 
         // 4. Update entry state based on sync outcome
         if (syncSuccess) {
+          console.log(`[Sync] Confirmed success for entry ${entry.id}`);
           // Remove from active queue on confirmed success
           await this.db.markEntrySynced(entry.id);
+          console.log(`[Sync] Marked local entry synced: ${entry.id}`);
           syncedInThisRun++;
           this.entrySyncedCallbacks.forEach(cb => {
             try { cb(entry.id, syncedData); } catch (e) { console.error(e); }
@@ -868,12 +1116,16 @@ export class BackgroundSyncManager {
             syncErrorMsg.toLowerCase().includes('network');
 
           if (isNet) {
+            console.log(`[Sync] Connection offline/lost during sync. Keeping in local queue: ${entry.id}`);
             await this.db.updateEntryStatus(entry.id, 'PENDING', 'Waiting for connection');
             this.setSyncState('OFFLINE');
             this.notify();
             break;
           } else {
             anyFailed = true;
+            console.error(`[Sync] FAILED for entry ${entry.id}`);
+            console.error(`[Sync] Error: ${syncErrorMsg}`);
+            console.log(`[Sync] Keeping transaction in local queue with FAILED status: ${entry.id}`);
             await this.db.updateEntryStatus(entry.id, 'FAILED', syncErrorMsg || 'Sync failed');
             this.notify();
           }
@@ -907,8 +1159,25 @@ export class BackgroundSyncManager {
   }
 
   getQueueList(): SyncQueueItem[] {
+    const cashbooks = this.db.getLocalCashbooks();
     const entries = this.db.getLocalEntries();
-    return entries.map(e => ({
+
+    const cashbookItems: SyncQueueItem[] = cashbooks.map(b => ({
+      id: b.id,
+      type: 'CREATE_CASHBOOK' as const,
+      status: b.syncStatus === 'SYNCED' ? ('completed' as const)
+            : b.syncStatus === 'SYNCING' ? ('syncing' as const)
+            : b.syncStatus === 'FAILED' ? ('failed' as const)
+            : this.network.state === 'offline' ? ('waiting_for_internet' as const)
+            : ('pending' as const),
+      priority: 'high' as const,
+      retryCount: b.retryCount || 0,
+      createdAt: b.created_at,
+      payload: b,
+      error: b.lastError
+    }));
+
+    const entryItems: SyncQueueItem[] = entries.map(e => ({
       id: e.id,
       type: 'CREATE_ENTRY' as const,
       status: e.syncStatus === 'SYNCED' ? ('completed' as const)
@@ -922,6 +1191,8 @@ export class BackgroundSyncManager {
       payload: e,
       error: e.lastError
     }));
+
+    return [...cashbookItems, ...entryItems];
   }
 
   getPendingCount(): number {

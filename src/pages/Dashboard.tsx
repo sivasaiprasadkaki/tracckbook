@@ -279,6 +279,8 @@ interface Cashbook {
   user_name?: string;
   user_id?: string;
   userId?: string;
+  is_offline?: boolean;
+  syncStatus?: 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED';
 }
 
 function formatDateTime12h(dateVal: any): string {
@@ -3775,6 +3777,33 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           };
         });
 
+        // Load and merge pending offline cashbooks from IndexedDB
+        try {
+          const pendingBooks = await offlineDb.getPendingCashbooks();
+          if (pendingBooks && pendingBooks.length > 0) {
+            for (const pb of pendingBooks) {
+              const existingIdx = mappedBooks.findIndex(b => b.id === pb.id);
+              if (existingIdx === -1) {
+                mappedBooks.unshift({
+                  id: pb.id,
+                  name: pb.name,
+                  user_id: pb.user_id || session.user.id,
+                  user_name: pb.user_name || 'User',
+                  createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
+                  transactions: entriesCache.get(pb.id) || [],
+                  is_offline: pb.syncStatus !== 'SYNCED',
+                  syncStatus: pb.syncStatus || 'PENDING'
+                });
+              } else {
+                mappedBooks[existingIdx].is_offline = pb.syncStatus !== 'SYNCED';
+                mappedBooks[existingIdx].syncStatus = pb.syncStatus;
+              }
+            }
+          }
+        } catch (pbMergeErr) {
+          console.warn('[Offline] Error merging pending offline cashbooks:', pbMergeErr);
+        }
+
         // Load and merge pending offline entries from IndexedDB
         try {
           const pendingOfflineEntries = await offlineDb.getPendingEntries();
@@ -3838,8 +3867,83 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           }
         }
       } else {
-        // Do not clear books if backend request failed or returned empty while offline
-        console.log('[Dashboard] No remote cashbooks returned or offline. Preserving existing cached books.');
+        // Fallback for offline / network issue: load cached books + pending offline cashbooks
+        console.log('[Dashboard] No remote cashbooks returned or offline. Merging local cache and pending offline books.');
+        try {
+          const cachedBooks = await offlineDb.getCachedCashbooks(session.user.id);
+          const pendingBooks = await offlineDb.getPendingCashbooks();
+          const mergedMap = new Map<string, Cashbook>();
+
+          (cachedBooks || []).forEach((b: any) => {
+            if (b && b.id) {
+              mergedMap.set(b.id, {
+                ...b,
+                createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
+                transactions: Array.isArray(b.transactions) ? b.transactions : []
+              });
+            }
+          });
+
+          (pendingBooks || []).forEach((pb: any) => {
+            if (pb && pb.id) {
+              if (!mergedMap.has(pb.id)) {
+                mergedMap.set(pb.id, {
+                  id: pb.id,
+                  name: pb.name,
+                  user_id: pb.user_id || session.user.id,
+                  user_name: pb.user_name || 'User',
+                  createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
+                  transactions: entriesCache.get(pb.id) || [],
+                  is_offline: pb.syncStatus !== 'SYNCED',
+                  syncStatus: pb.syncStatus || 'PENDING'
+                });
+              } else {
+                const existing = mergedMap.get(pb.id)!;
+                existing.is_offline = pb.syncStatus !== 'SYNCED';
+                existing.syncStatus = pb.syncStatus;
+              }
+            }
+          });
+
+          if (mergedMap.size > 0) {
+            const list = Array.from(mergedMap.values());
+            const pendingOfflineEntries = await offlineDb.getPendingEntries();
+            if (pendingOfflineEntries && pendingOfflineEntries.length > 0) {
+              list.forEach(cb => {
+                const cbPending = pendingOfflineEntries.filter(e => e.cashbook_id === cb.id);
+                if (cbPending.length > 0) {
+                  const existingIds = new Set(cb.transactions.map(t => t.id));
+                  const pendingTxs: Transaction[] = cbPending
+                    .filter(e => !existingIds.has(e.id) && !existingIds.has(e.clientEntryId))
+                    .map(e => ({
+                      id: e.id,
+                      clientEntryId: e.clientEntryId || e.id,
+                      amount: e.amount,
+                      type: e.type,
+                      description: e.description,
+                      category: e.category,
+                      mode: e.mode,
+                      date: new Date(e.date),
+                      images: [],
+                      imageLayout: 'split',
+                      source: 'Manual',
+                      user_name: e.user_name,
+                      syncStatus: 'PENDING',
+                      is_offline: true,
+                      created_at: e.created_at
+                    }));
+                  if (pendingTxs.length > 0) {
+                    cb.transactions = [...pendingTxs, ...cb.transactions];
+                  }
+                }
+                entriesCache.set(cb.id, cb.transactions);
+              });
+            }
+            setBooks(list);
+          }
+        } catch (offlineErr) {
+          console.warn('[Dashboard] Offline fallback note:', offlineErr);
+        }
       }
     } catch (error: any) {
       console.warn('[Dashboard] Notice during data fetch (device offline or connection drop):', error);
@@ -4323,27 +4427,70 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       id: safeUUID(),
       name: newBookName.trim(),
       transactions: [],
-      createdAt: new Date()
+      createdAt: new Date(),
+      user_id: session.user.id
     };
 
-    // Update local state immediately for perceived speed
-    setBooks(prev => [...prev, newBook]);
+    // Update local state immediately for perceived speed and persist to offline cache
+    setBooks(prev => {
+      const next = [...prev, newBook];
+      try {
+        if (session?.user?.id) {
+          localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
+          offlineDb.saveCachedCashbooks(session.user.id, next);
+        }
+      } catch (cacheErr) {
+        console.warn('[CreateBook] Cache save note:', cacheErr);
+      }
+      return next;
+    });
+
     setNewBookName('');
     setCreateBookError(null);
     setIsCreatingBook(false);
     setIsSubmitting(false);
 
-    // Then handle Supabase in background
-    if (supabase) {
+    // Sync in background via backend proxy endpoint, direct Supabase, or offline queue
+    const resolvedUserName = session.user.user_metadata?.full_name || 
+                             session.user.user_metadata?.name || 
+                             session.user.email?.split('@')[0] || 'User';
+
+    const payload = { 
+      id: newBook.id, 
+      name: newBook.name, 
+      created_at: safeToISOString(newBook.createdAt),
+      user_id: session.user.id,
+      user_name: resolvedUserName
+    };
+
+    const isOffline = typeof navigator !== 'undefined' && (!navigator.onLine || syncManager.network.state === 'offline');
+    if (isOffline) {
+      console.log('[CreateBook] Offline state detected. Book queued for background sync:', newBook.id);
+      await syncManager.saveOfflineCashbook(payload);
+      return;
+    }
+
+    // Try backend sync endpoint first (runs via service role on Express server)
+    let syncSuccess = false;
+    try {
+      const res = await fetch('/api/sync/cashbook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          syncSuccess = true;
+          console.log('[CreateBook] Book created/synced successfully via backend endpoint:', newBook.id);
+        }
+      }
+    } catch (apiErr: any) {
+      console.log('[CreateBook] Notice communicating with backend sync, trying direct fallback:', apiErr?.message);
+    }
+
+    if (!syncSuccess && supabase) {
       try {
-        const resolvedUser = await resolveUserDataForAttachments();
-        const payload: any = { 
-          id: newBook.id, 
-          name: newBook.name, 
-          created_at: safeToISOString(newBook.createdAt),
-          user_id: session.user.id,
-          user_name: resolvedUser.name
-        };
         const { error } = await supabase
           .from('cashbooks')
           .insert([payload]);
@@ -4354,14 +4501,30 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             const { error: retryError } = await supabase
               .from('cashbooks')
               .insert([fallbackPayload]);
-            if (retryError) throw retryError;
+            if (retryError) {
+              console.warn('[CreateBook] Supabase retry note:', retryError.message);
+              await syncManager.saveOfflineCashbook(payload);
+            } else {
+              syncSuccess = true;
+            }
           } else {
-            throw error;
+            console.warn('[CreateBook] Supabase insert note:', error.message);
+            await syncManager.saveOfflineCashbook(payload);
           }
+        } else {
+          syncSuccess = true;
         }
-      } catch (error) {
-        console.error('Error creating book in Supabase:', error);
-        // If it fails, we might want to revert local state, but usually it's fine
+      } catch (error: any) {
+        const isNetwork = !navigator.onLine ||
+          error?.name === 'TypeError' ||
+          error?.message?.toLowerCase().includes('failed to fetch') ||
+          error?.message?.toLowerCase().includes('network');
+        if (isNetwork) {
+          console.log('[CreateBook] Connection offline/dropped during creation. Queued for background sync:', newBook.id);
+        } else {
+          console.warn('[CreateBook] Notice during book creation:', error?.message || error);
+        }
+        await syncManager.saveOfflineCashbook(payload);
       }
     }
   };
@@ -4387,9 +4550,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           .update({ name: editBookName.trim() })
           .eq('id', isEditingBook)
           .eq('user_id', session.user.id);
-        if (error) throw error;
-      } catch (error) {
-        console.error('Error updating book in Supabase:', error);
+        if (error) {
+          console.warn('[UpdateBook] Supabase update note:', error.message);
+        }
+      } catch (error: any) {
+        const isNetwork = !navigator.onLine || 
+          error?.name === 'TypeError' || 
+          error?.message?.toLowerCase().includes('failed to fetch');
+        if (isNetwork) {
+          console.log('[UpdateBook] Offline/network notice during update. Local cache updated.');
+        } else {
+          console.warn('[UpdateBook] Notice during book update:', error?.message || error);
+        }
       }
     }
 
@@ -4410,59 +4582,82 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     if (!bookToDup || !session) return;
     
     const newName = `${bookToDup.name} (Copy)`;
-    const newBookId = 'book_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const newBookId = safeUUID();
     
-    if (supabase) {
+    const resolvedUserName = session.user.user_metadata?.full_name || 
+                             session.user.user_metadata?.name || 
+                             session.user.email?.split('@')[0] || 'User';
+
+    const payload: any = {
+      id: newBookId,
+      name: newName,
+      user_id: session.user.id,
+      user_name: resolvedUserName,
+      created_at: new Date().toISOString()
+    };
+    
+    // Try backend sync endpoint first
+    let syncBookSuccess = false;
+    try {
+      const res = await fetch('/api/sync/cashbook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) syncBookSuccess = true;
+      }
+    } catch (e) {}
+
+    if (!syncBookSuccess && supabase) {
       try {
-        const resolvedUser = await resolveUserDataForAttachments();
-        const payload: any = {
-          id: newBookId,
-          name: newName,
-          user_id: session.user.id,
-          user_name: resolvedUser.name
-        };
-        const { error } = await supabase.from('cashbooks').insert(payload);
+        const { error } = await supabase.from('cashbooks').insert([payload]);
         if (error) {
           if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
             const fallbackPayload = { ...payload };
             delete fallbackPayload.user_name;
-            await supabase.from('cashbooks').insert(fallbackPayload);
-          } else {
-            throw error;
+            await supabase.from('cashbooks').insert([fallbackPayload]);
           }
         }
-      } catch (err) {
-        console.error('Error duplicating book in Supabase:', err);
+      } catch (err: any) {
+        const isNet = !navigator.onLine || err?.name === 'TypeError' || err?.message?.toLowerCase().includes('failed to fetch');
+        if (isNet) {
+          console.log('[DuplicateBook] Offline during duplication, queued book locally.');
+        } else {
+          console.warn('[DuplicateBook] Notice duplicating book in Supabase:', err?.message || err);
+        }
+        await syncManager.saveOfflineCashbook(payload);
       }
     }
     
     const sourceEntries = entriesCache.get(bookId) || bookToDup.transactions || [];
     const dupTransactions = sourceEntries.map((t: any) => ({
       ...t,
-      id: 'tx_' + Math.random().toString(36).substring(2, 11),
+      id: safeUUID(),
       cashbook_id: newBookId,
+      created_at: new Date().toISOString()
     }));
     
-    if (supabase && dupTransactions.length > 0) {
+    if (dupTransactions.length > 0 && supabase) {
       try {
-        await supabase.from('transactions').insert(
+        await supabase.from('entries').insert(
           dupTransactions.map((t: any) => ({
             id: t.id,
             cashbook_id: newBookId,
-            amount: t.amount,
-            type: t.type,
-            description: t.description,
-            category: t.category,
-            mode: t.mode,
-            date: t.date,
-            images: t.images || [],
-            image_layout: t.imageLayout || 'split',
-            is_ai: !!t.isAi,
-            source: t.source || 'Manual'
+            user_id: session.user.id,
+            user_name: resolvedUserName,
+            amount: Number(t.amount) || 0,
+            type: t.type === 'in' ? 'in' : 'out',
+            description: t.description || '',
+            category: t.category || 'General',
+            mode: t.mode || 'Cash',
+            date: t.date || new Date().toISOString(),
+            image_layout: t.imageLayout || 'split'
           }))
         );
-      } catch (err) {
-        console.error('Error duplicating transactions in Supabase:', err);
+      } catch (err: any) {
+        console.warn('[DuplicateBook] Notice duplicating entries in Supabase:', err?.message || err);
       }
     }
     
@@ -4470,11 +4665,19 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       id: newBookId,
       name: newName,
       transactions: dupTransactions,
-      createdAt: new Date()
+      createdAt: new Date(),
+      user_id: session.user.id
     };
     
     entriesCache.set(newBookId, dupTransactions);
-    setBooks([newBook, ...books]);
+    setBooks(prev => {
+      const next = [newBook, ...prev];
+      if (session?.user?.id) {
+        localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
+        offlineDb.saveCachedCashbooks(session.user.id, next);
+      }
+      return next;
+    });
   };
 
   const handleExportBookFromList = async (bookId: string, format: 'pdf' | 'excel') => {
@@ -5111,6 +5314,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             console.log('[Instant Save] Connection drop/offline detected, queuing entry for background sync:', tempId);
             const activeBook = books.find(b => b.id === activeBookId);
             const resolvedUserId = session?.user?.id || 
+              activeBook?.user_id || 
               activeBook?.userId || 
               localStorage.getItem('trackbook_last_user_id') || 
               '00000000-0000-0000-0000-000000000000';

@@ -25,7 +25,7 @@ import {
   handleGetCashbookEntries,
   handleSaveCashbookEntry
 } from "./api/rbac.ts";
-import { handleSyncOfflineEntry, handleBatchSyncOfflineEntries } from "./api/sync.ts";
+import { handleSyncOfflineEntry, handleBatchSyncOfflineEntries, handleSyncCashbook } from "./api/sync.ts";
 
 const envConfig = dotenv.config();
 if (envConfig.parsed) {
@@ -104,6 +104,7 @@ app.get("/api/rbac/cashbook-entries", handleGetCashbookEntries);
 app.post("/api/rbac/cashbook-entries", handleGetCashbookEntries);
 app.post("/api/rbac/save-entry", handleSaveCashbookEntry);
 app.post("/api/sync/offline-entry", handleSyncOfflineEntry);
+app.post("/api/sync/cashbook", handleSyncCashbook);
 app.post("/api/sync/batch", handleBatchSyncOfflineEntries);
 app.delete("/api/rbac/members", handleRemoveMember);
 app.get("/api/rbac/members", handleGetMembers);
