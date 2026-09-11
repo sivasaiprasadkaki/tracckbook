@@ -4473,14 +4473,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     // Try backend sync endpoint first (runs via service role on Express server)
     let syncSuccess = false;
     try {
-      const res = await fetch('/api/sync/cashbook', {
+      const res = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ action: 'cashbook', ...payload })
       });
       if (res.ok) {
         const json = await res.json();
-        if (json.success) {
+        if (json && json.success === true) {
           syncSuccess = true;
           console.log('[CreateBook] Book created/synced successfully via backend endpoint:', newBook.id);
         }
@@ -4599,14 +4599,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     // Try backend sync endpoint first
     let syncBookSuccess = false;
     try {
-      const res = await fetch('/api/sync/cashbook', {
+      const res = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ action: 'cashbook', ...payload })
       });
       if (res.ok) {
         const json = await res.json();
-        if (json.success) syncBookSuccess = true;
+        if (json && json.success === true) syncBookSuccess = true;
       }
     } catch (e) {}
 

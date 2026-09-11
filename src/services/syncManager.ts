@@ -897,7 +897,7 @@ export class BackgroundSyncManager {
             break;
           }
 
-          console.log(`[Sync] Starting synchronization for cashbook: ${book.id} (${book.name})`);
+          console.log(`[Sync] POST /api/sync action=cashbook for cashbook: ${book.id} (${book.name})`);
           await this.db.updateCashbookStatus(book.id, 'SYNCING');
           this.notify();
 
@@ -905,10 +905,12 @@ export class BackgroundSyncManager {
           let bookError = '';
 
           try {
-            const res = await fetch('/api/sync/cashbook', {
+            console.log(`[Sync] POST /api/sync action=cashbook`);
+            const res = await fetch('/api/sync', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
+                action: 'cashbook',
                 id: book.id,
                 name: book.name,
                 user_id: book.user_id,
@@ -917,18 +919,24 @@ export class BackgroundSyncManager {
               })
             });
 
+            console.log(`[Sync] Response status: ${res.status}`);
+
             if (res.ok) {
               const json = await res.json();
-              if (json.success) {
+              if (json && json.success === true) {
                 bookSuccess = true;
+                console.log(`[Sync] Backend success confirmed for cashbook: ${book.id}`);
               } else {
-                bookError = json.error || 'Server rejected cashbook sync';
+                bookError = json?.error || 'Server rejected cashbook sync';
+                console.warn(`[Sync] POST /api/sync failed: ${bookError}`);
               }
             } else {
               bookError = `Server responded with status ${res.status}`;
+              console.warn(`[Sync] POST /api/sync failed: HTTP ${res.status}`);
             }
           } catch (bookErr: any) {
             bookError = bookErr?.message || 'Network error syncing cashbook';
+            console.warn(`[Sync] POST /api/sync failed:`, bookError);
           }
 
           if (bookSuccess) {
@@ -1015,13 +1023,14 @@ export class BackgroundSyncManager {
           source: 'Offline Sync'
         };
 
-        // 2. Call backend idempotent endpoint
+        // 2. Call backend canonical endpoint POST /api/sync with action='offline-entry'
         try {
-          console.log(`[Sync] Request sent to /api/sync/offline-entry for entry ${payload.id}`);
-          const res = await fetch('/api/sync/offline-entry', {
+          console.log(`[Sync] POST /api/sync action=offline-entry for entry ${payload.id}`);
+          const res = await fetch('/api/sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              action: 'offline-entry',
               clientEntryId: payload.id,
               entry: payload
             })
@@ -1031,18 +1040,17 @@ export class BackgroundSyncManager {
 
           if (res.ok) {
             const result = await res.json();
-            console.log(`[Sync] Backend response:`, result);
-            if (result.success) {
+            if (result && result.success === true) {
               syncSuccess = true;
               syncedData = result.entry;
-              console.log(`[Sync] Supabase result: Entry ${payload.id} successfully written/confirmed`);
+              console.log(`[Sync] Backend success confirmed: Entry ${payload.id} written/confirmed`);
             } else {
-              syncErrorMsg = result.error || 'Server rejected sync';
-              console.warn(`[Sync] Backend rejected entry ${payload.id}: ${syncErrorMsg}`);
+              syncErrorMsg = result?.error || 'Server rejected sync';
+              console.warn(`[Sync] POST /api/sync failed: ${syncErrorMsg}`);
             }
           } else {
-            syncErrorMsg = `HTTP error ${res.status}`;
-            console.warn(`[Sync] HTTP error syncing entry ${payload.id}: status ${res.status}`);
+            syncErrorMsg = `Server responded with status ${res.status}`;
+            console.warn(`[Sync] POST /api/sync failed: HTTP ${res.status}`);
           }
         } catch (apiErr: any) {
           syncErrorMsg = apiErr?.message || 'Network error connecting to sync server';

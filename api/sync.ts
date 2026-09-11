@@ -296,14 +296,41 @@ export async function handleSyncCashbook(req: Request, res: Response) {
 }
 
 export default async function syncHandler(req: any, res: any) {
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method === 'GET') {
+    return res.status(200).json({ ok: true, message: 'Sync module ready' });
+  }
+
   if (req.method === 'POST') {
-    if (req.body?.entries) {
-      return handleBatchSyncOfflineEntries(req, res);
-    }
-    if (req.body?.name && !req.body?.amount) {
+    const action = req.body?.action;
+
+    if (action === 'cashbook') {
+      console.log('[Sync API] Action: cashbook');
       return handleSyncCashbook(req, res);
     }
-    return handleSyncOfflineEntry(req, res);
+
+    if (action === 'offline-entry') {
+      console.log('[Sync API] Action: offline-entry');
+      return handleSyncOfflineEntry(req, res);
+    }
+
+    if (action === 'batch-offline-entry') {
+      console.log('[Sync API] Action: batch-offline-entry');
+      return handleBatchSyncOfflineEntries(req, res);
+    }
+
+    console.warn('[Sync API] Unknown sync action:', action);
+    return res.status(400).json({
+      success: false,
+      error: 'Unknown sync action'
+    });
   }
-  return res.status(200).json({ ok: true, message: 'Sync module ready' });
+
+  return res.status(405).json({
+    success: false,
+    error: 'Method Not Allowed'
+  });
 }
