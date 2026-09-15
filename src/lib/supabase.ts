@@ -64,12 +64,64 @@ const dynamicStorage = {
     } else {
       sessionStorage.setItem(key, value);
     }
+    if (key.startsWith('sb-') || key.endsWith('-auth-token')) {
+      try {
+        localStorage.setItem('trackbook_cached_auth_session', value);
+      } catch {}
+    }
   },
   removeItem: (key: string): void => {
     if (typeof window === 'undefined') return;
     localStorage.removeItem(key);
     sessionStorage.removeItem(key);
+    if (key.startsWith('sb-') || key.endsWith('-auth-token')) {
+      try {
+        localStorage.removeItem('trackbook_cached_auth_session');
+      } catch {}
+    }
   }
+};
+
+export const getCachedLocalSession = (): any => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const direct = localStorage.getItem('trackbook_cached_auth_session');
+    if (direct) {
+      const parsed = JSON.parse(direct);
+      if (parsed && (parsed.user || parsed.access_token)) {
+        return parsed;
+      }
+    }
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('sb-') || key.endsWith('-auth-token'))) {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && (parsed.user || parsed.access_token)) {
+            return parsed;
+          }
+        }
+      }
+    }
+
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key && (key.startsWith('sb-') || key.endsWith('-auth-token'))) {
+        const raw = sessionStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && (parsed.user || parsed.access_token)) {
+            return parsed;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Supabase Auth Safety] Error reading cached local session:', e);
+  }
+  return null;
 };
 
 const createWrappedSupabaseClient = () => {
@@ -84,7 +136,7 @@ const createWrappedSupabaseClient = () => {
     }
   });
 
-  // Wrap getSession to handle refresh token invalidation and prevent null-destructure crashes
+  // Wrap getSession to handle refresh token invalidation, preserve offline sessions, and prevent crashes
   const originalGetSession = client.auth.getSession.bind(client.auth);
   client.auth.getSession = async () => {
     try {
@@ -100,8 +152,33 @@ const createWrappedSupabaseClient = () => {
           console.warn('[Supabase Auth Safety] Invalid refresh token detected from getSession, auto-clearing corrupt local storage.');
           clearSupabaseAuthStorage();
           res.data = { session: null };
+          return res;
+        }
+
+        // If error is network or offline, restore cached session rather than failing
+        const isOfflineOrNetwork = (typeof navigator !== 'undefined' && !navigator.onLine) ||
+          errMsg.toLowerCase().includes('failed to fetch') ||
+          errMsg.toLowerCase().includes('network') ||
+          errMsg.toLowerCase().includes('abort');
+
+        if (isOfflineOrNetwork) {
+          const cached = getCachedLocalSession();
+          if (cached) {
+            console.log('[Supabase Auth Safety] Offline/network error during getSession. Preserving local cached session.');
+            return { data: { session: cached }, error: null };
+          }
         }
       }
+
+      // If res.data.session is null but device is offline, check local cache
+      if (!res?.data?.session && typeof navigator !== 'undefined' && !navigator.onLine) {
+        const cached = getCachedLocalSession();
+        if (cached) {
+          console.log('[Supabase Auth Safety] Device is offline with empty getSession. Returning local cached session.');
+          return { data: { session: cached }, error: null };
+        }
+      }
+
       return res;
     } catch (err: any) {
       console.warn('[Supabase Auth Safety] getSession exception:', err?.message || err);
@@ -113,7 +190,23 @@ const createWrappedSupabaseClient = () => {
         errMsg.includes('Refresh token')
       ) {
         clearSupabaseAuthStorage();
+        return { data: { session: null }, error: err };
       }
+
+      // If offline / network error thrown, fall back to cached session
+      const isOfflineOrNetwork = (typeof navigator !== 'undefined' && !navigator.onLine) ||
+        errMsg.toLowerCase().includes('failed to fetch') ||
+        errMsg.toLowerCase().includes('network') ||
+        errMsg.toLowerCase().includes('abort');
+
+      if (isOfflineOrNetwork) {
+        const cached = getCachedLocalSession();
+        if (cached) {
+          console.log('[Supabase Auth Safety] Restored cached session after getSession network exception.');
+          return { data: { session: cached }, error: null };
+        }
+      }
+
       return { data: { session: null }, error: err };
     }
   };

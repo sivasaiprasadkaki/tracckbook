@@ -1740,55 +1740,61 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   }, [session?.user?.id]);
 
   const [userName, setUserName] = useState(initialUserName);
-  const [books, setBooks] = useState<Cashbook[]>(() => {
-    try {
-      localStorage.removeItem('trackbook_cached_books'); // Purge legacy unscoped cache
-      if (currentUserId) {
-        const saved = localStorage.getItem(`trackbook_cached_books_${currentUserId}`);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const restored = parsed.map((b: any) => ({
-              ...b,
-              createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
-              transactions: Array.isArray(b.transactions) ? b.transactions.map((t: any) => ({
-                ...t,
-                date: t.date ? new Date(t.date) : new Date(),
-                images: t.images || []
-              })) : []
-            }));
-            restored.forEach((b: any) => {
-              if (b.id && Array.isArray(b.transactions)) {
-                entriesCache.set(b.id, b.transactions);
-              }
-            });
-            return restored;
-          }
-        }
-      }
-    } catch (e) {}
-    return [];
-  });
-  
-  const booksLengthRef = useRef(books.length);
-  const initialLoadedRef = useRef(false);
-  useEffect(() => {
-    booksLengthRef.current = books.length;
-  }, [books.length]);
 
-  const prevUserIdRef = useRef<string | null>(currentUserId || null);
-  useEffect(() => {
-    if (currentUserId !== prevUserIdRef.current) {
-      prevUserIdRef.current = currentUserId || null;
-      if (currentUserId) {
-        // First try localStorage for instant zero-latency load
-        let cached: Cashbook[] = [];
-        try {
-          const saved = localStorage.getItem(`trackbook_cached_books_${currentUserId}`);
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed)) {
-              cached = parsed.map((b: any) => ({
+  // Persistent tombstone helpers to guarantee deleted cashbooks can NEVER reappear
+  const DELETED_BOOKS_KEY = 'trackbook_deleted_book_ids';
+
+  const getDeletedBookIds = (): Set<string> => {
+    try {
+      const raw = localStorage.getItem(DELETED_BOOKS_KEY);
+      if (!raw) return new Set<string>();
+      const parsed = JSON.parse(raw);
+      return new Set<string>(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      return new Set<string>();
+    }
+  };
+
+  const recordDeletedBookId = (id: string) => {
+    if (!id) return;
+    try {
+      const set = getDeletedBookIds();
+      set.add(id);
+      localStorage.setItem(DELETED_BOOKS_KEY, JSON.stringify(Array.from(set)));
+    } catch {}
+  };
+
+  const removeDeletedBookId = (id: string) => {
+    if (!id) return;
+    try {
+      const set = getDeletedBookIds();
+      set.delete(id);
+      localStorage.setItem(DELETED_BOOKS_KEY, JSON.stringify(Array.from(set)));
+    } catch {}
+  };
+
+  // Synchronous loader for complete offline-first cashbooks & entries
+  const loadCompleteLocalCashbooks = (userId?: string): Cashbook[] => {
+    if (typeof window === 'undefined') return [];
+    const mergedMap = new Map<string, Cashbook>();
+    const deletedIds = getDeletedBookIds();
+
+    // 1. Load cached synced cashbooks
+    try {
+      const effectiveUserId = userId || localStorage.getItem('trackbook_last_user_id');
+      let raw: string | null = null;
+      if (effectiveUserId) {
+        raw = localStorage.getItem(`trackbook_cached_books_${effectiveUserId}`);
+      }
+      if (!raw) {
+        raw = localStorage.getItem('trackbook_cached_books_latest');
+      }
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((b: any) => {
+            if (b && b.id && !deletedIds.has(b.id)) {
+              mergedMap.set(b.id, {
                 ...b,
                 createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
                 transactions: Array.isArray(b.transactions) ? b.transactions.map((t: any) => ({
@@ -1796,18 +1802,126 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   date: t.date ? new Date(t.date) : new Date(),
                   images: t.images || []
                 })) : []
-              }));
-            }
-          }
-        } catch (e) {}
-
-        if (cached.length > 0) {
-          setBooks(cached);
-          cached.forEach(b => {
-            if (b.id && Array.isArray(b.transactions)) {
-              entriesCache.set(b.id, b.transactions);
+              });
             }
           });
+        }
+      }
+    } catch (e) {}
+
+    // 2. Merge pending offline cashbooks (only those that are truly pending and not deleted)
+    try {
+      const rawBooks = localStorage.getItem('trackbook_offline_pending_books_v1');
+      if (rawBooks) {
+        const pendingBooks = JSON.parse(rawBooks);
+        if (Array.isArray(pendingBooks)) {
+          pendingBooks.forEach((pb: any) => {
+            if (pb && pb.id && !deletedIds.has(pb.id) && pb.syncStatus !== 'SYNCED') {
+              if (!mergedMap.has(pb.id)) {
+                // Check if a book with same name already exists to prevent duplicate offline creations
+                const normName = (pb.name || '').trim().toLowerCase();
+                const alreadyExists = Array.from(mergedMap.values()).some(b => b.name.trim().toLowerCase() === normName);
+                if (!alreadyExists) {
+                  mergedMap.set(pb.id, {
+                    id: pb.id,
+                    name: pb.name,
+                    user_id: pb.user_id || userId || 'offline-user',
+                    user_name: pb.user_name || 'User',
+                    createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
+                    transactions: entriesCache.get(pb.id) || [],
+                    is_offline: true,
+                    syncStatus: pb.syncStatus || 'PENDING'
+                  });
+                }
+              } else {
+                const existing = mergedMap.get(pb.id)!;
+                existing.is_offline = pb.syncStatus !== 'SYNCED';
+                existing.syncStatus = pb.syncStatus;
+              }
+            }
+          });
+        }
+      }
+    } catch (e) {}
+
+    // 3. Merge pending offline entries
+    try {
+      const rawEntries = localStorage.getItem('trackbook_offline_pending_entries_v1');
+      if (rawEntries) {
+        const pendingEntries = JSON.parse(rawEntries);
+        if (Array.isArray(pendingEntries) && pendingEntries.length > 0) {
+          mergedMap.forEach((cb) => {
+            const cbPending = pendingEntries.filter((e: any) => e.cashbook_id === cb.id && e.syncStatus !== 'SYNCED');
+            if (cbPending.length > 0) {
+              const existingIds = new Set(cb.transactions.map(t => t.id));
+              const newTxs: Transaction[] = cbPending
+                .filter((e: any) => !existingIds.has(e.id) && !existingIds.has(e.clientEntryId))
+                .map((e: any) => ({
+                  id: e.id,
+                  clientEntryId: e.clientEntryId || e.id,
+                  amount: e.amount,
+                  type: e.type,
+                  description: e.description,
+                  category: e.category,
+                  mode: e.mode,
+                  date: new Date(e.date),
+                  images: [],
+                  imageLayout: 'split',
+                  source: 'Manual',
+                  user_name: e.user_name,
+                  syncStatus: 'PENDING',
+                  is_offline: true,
+                  created_at: e.created_at
+                }));
+              if (newTxs.length > 0) {
+                cb.transactions = [...newTxs, ...cb.transactions];
+              }
+            }
+            entriesCache.set(cb.id, cb.transactions);
+          });
+        }
+      }
+    } catch (e) {}
+
+    const result = Array.from(mergedMap.values());
+    result.forEach(cb => {
+      if (cb.id && Array.isArray(cb.transactions) && cb.transactions.length > 0) {
+        entriesCache.set(cb.id, cb.transactions);
+      }
+    });
+    return result;
+  };
+
+  const [books, setBooks] = useState<Cashbook[]>(() => {
+    try {
+      localStorage.removeItem('trackbook_cached_books'); // Purge legacy unscoped cache
+      return loadCompleteLocalCashbooks(currentUserId);
+    } catch (e) {
+      return [];
+    }
+  });
+  
+  const booksRef = useRef<Cashbook[]>(books);
+  const booksLengthRef = useRef(books.length);
+  const initialLoadedRef = useRef(false);
+  useEffect(() => {
+    booksRef.current = books;
+    booksLengthRef.current = books.length;
+  }, [books]);
+
+  const prevUserIdRef = useRef<string | null>(currentUserId || null);
+  useEffect(() => {
+    if (currentUserId !== prevUserIdRef.current) {
+      prevUserIdRef.current = currentUserId || null;
+      if (currentUserId) {
+        const cached = loadCompleteLocalCashbooks(currentUserId);
+        const currentInMemory = booksRef.current || [];
+        const merged = new Map<string, Cashbook>();
+        cached.forEach(b => { if (b && b.id) merged.set(b.id, b); });
+        currentInMemory.forEach(b => { if (b && b.id) merged.set(b.id, { ...merged.get(b.id), ...b }); });
+        const combined = Array.from(merged.values());
+        if (combined.length > 0) {
+          setBooks(combined);
           setIsLoading(false);
         }
 
@@ -1823,20 +1937,143 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 images: t.images || []
               })) : []
             }));
-            setBooks(mapped);
-            mapped.forEach(b => {
-              if (b.id && Array.isArray(b.transactions)) {
-                entriesCache.set(b.id, b.transactions);
-              }
-            });
-            setIsLoading(false);
+            const local = loadCompleteLocalCashbooks(currentUserId);
+            const inMem = booksRef.current || [];
+            const idbMap = new Map<string, Cashbook>();
+            local.forEach(b => { if (b && b.id) idbMap.set(b.id, b); });
+            inMem.forEach(b => { if (b && b.id) idbMap.set(b.id, { ...idbMap.get(b.id), ...b }); });
+            mapped.forEach(b => { if (b && b.id && !idbMap.has(b.id)) idbMap.set(b.id, b); });
+            const finalList = Array.from(idbMap.values());
+            if (finalList.length > 0) {
+              setBooks(finalList);
+              finalList.forEach(b => {
+                if (b.id && Array.isArray(b.transactions) && b.transactions.length > 0) {
+                  entriesCache.set(b.id, b.transactions);
+                }
+              });
+              setIsLoading(false);
+            }
           }
         }).catch(() => {});
       } else {
-        setBooks([]);
-        setIsLoading(false);
+        // Only clear if user explicitly clicked sign out — NEVER on network loss or background disconnect
+        const isExplicit = typeof localStorage !== 'undefined' && localStorage.getItem('trackbook_explicit_logout') === 'true';
+        if (isExplicit) {
+          setBooks([]);
+          setIsLoading(false);
+        }
       }
     }
+  }, [currentUserId]);
+
+  const preserveAndMergeLocalCache = useCallback(async () => {
+    const effectiveUserId = currentUserId || (typeof localStorage !== 'undefined' ? localStorage.getItem('trackbook_last_user_id') || '' : '');
+    const currentInMemory = booksRef.current || [];
+    const local = loadCompleteLocalCashbooks(effectiveUserId);
+    const deletedIds = getDeletedBookIds();
+
+    const mergedMap = new Map<string, Cashbook>();
+
+    // 1. Populate with local cache (contains localStorage cached books + pending offline books + pending entries)
+    local.forEach(b => {
+      if (b && b.id && !deletedIds.has(b.id)) {
+        mergedMap.set(b.id, b);
+      }
+    });
+
+    // 2. Layer in-memory books to ensure in-memory state, active transactions, and rich image arrays are never lost
+    currentInMemory.forEach(b => {
+      if (b && b.id && !deletedIds.has(b.id)) {
+        const localBook = mergedMap.get(b.id);
+        const inMemoryTxs = (b.transactions && b.transactions.length > 0)
+          ? b.transactions
+          : (localBook?.transactions || entriesCache.get(b.id) || []);
+
+        mergedMap.set(b.id, {
+          ...localBook,
+          ...b,
+          transactions: inMemoryTxs
+        });
+
+        if (inMemoryTxs.length > 0) {
+          entriesCache.set(b.id, inMemoryTxs);
+        }
+      }
+    });
+
+    // Immediately render current synchronous cache + in-memory state without waiting for async promises
+    const immediateList = Array.from(mergedMap.values());
+    if (immediateList.length > 0) {
+      setBooks(immediateList);
+      setIsLoading(false);
+      setIsEntriesLoading(false);
+    }
+
+    // 3. Layer any additional pending books or entries from IndexedDB
+    try {
+      const idbPendingBooks = await offlineDb.getPendingCashbooks();
+      if (Array.isArray(idbPendingBooks)) {
+        idbPendingBooks.forEach(pb => {
+          if (pb && pb.id && !mergedMap.has(pb.id) && !deletedIds.has(pb.id) && pb.syncStatus !== 'SYNCED') {
+            mergedMap.set(pb.id, {
+              id: pb.id,
+              name: pb.name,
+              user_id: pb.user_id || effectiveUserId || 'offline-user',
+              user_name: pb.user_name || 'User',
+              createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
+              transactions: entriesCache.get(pb.id) || [],
+              is_offline: true,
+              syncStatus: pb.syncStatus || 'PENDING'
+            });
+          }
+        });
+      }
+
+      const idbPendingEntries = await offlineDb.getPendingEntries();
+      if (Array.isArray(idbPendingEntries) && idbPendingEntries.length > 0) {
+        mergedMap.forEach(cb => {
+          const cbPending = idbPendingEntries.filter(e => e.cashbook_id === cb.id);
+          if (cbPending.length > 0) {
+            const existingIds = new Set(cb.transactions.map(t => t.id));
+            const newTxs: Transaction[] = cbPending
+              .filter(e => !existingIds.has(e.id) && !existingIds.has(e.clientEntryId))
+              .map(e => ({
+                id: e.id,
+                clientEntryId: e.clientEntryId || e.id,
+                amount: e.amount,
+                type: e.type,
+                description: e.description,
+                category: e.category,
+                mode: e.mode,
+                date: new Date(e.date),
+                images: [],
+                imageLayout: 'split',
+                source: 'Manual',
+                user_name: e.user_name,
+                syncStatus: 'PENDING',
+                is_offline: true,
+                created_at: e.created_at
+              }));
+            if (newTxs.length > 0) {
+              cb.transactions = [...newTxs, ...cb.transactions];
+              entriesCache.set(cb.id, cb.transactions);
+            }
+          }
+        });
+      }
+    } catch {}
+
+    const finalList = Array.from(mergedMap.values());
+    if (finalList.length > 0) {
+      setBooks(finalList);
+      finalList.forEach(b => {
+        if (b.id && Array.isArray(b.transactions) && b.transactions.length > 0) {
+          entriesCache.set(b.id, b.transactions);
+        }
+      });
+    }
+    setIsLoading(false);
+    setIsEntriesLoading(false);
   }, [currentUserId]);
 
   const resolveUserDataForAttachments = async () => {
@@ -1894,13 +2131,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isLoading, setIsLoading] = useState(() => {
     try {
-      if (currentUserId) {
-        const saved = localStorage.getItem(`trackbook_cached_books_${currentUserId}`);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) return false;
-        }
-      }
+      const local = loadCompleteLocalCashbooks(currentUserId);
+      if (local.length > 0) return false;
     } catch (e) {}
     return true;
   });
@@ -1942,18 +2174,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const offline = state === 'offline';
       setIsOffline(prev => {
         if (!prev && offline) {
-          setShowOfflineDialog(true);
+          preserveAndMergeLocalCache();
         } else if (prev && !offline) {
           setShowOfflineDialog(false);
           setReconnectedToast('Internet connection restored! Synced.');
           setTimeout(() => setReconnectedToast(null), 3500);
+          syncManager.triggerSync().then(() => {
+            window.dispatchEvent(new CustomEvent('trackbook_refresh_cashbooks'));
+          }).catch(() => {
+            window.dispatchEvent(new CustomEvent('trackbook_refresh_cashbooks'));
+          });
         }
         return offline;
       });
     };
     const unsubscribe = syncManager.network.subscribe(handleNetworkChange);
     return () => unsubscribe();
-  }, []);
+  }, [preserveAndMergeLocalCache]);
 
   // Offline entry sync listener and real-time status updates
   useEffect(() => {
@@ -2423,6 +2660,96 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     pendingActionRef.current = undoAction;
   }, [undoAction]);
 
+  /**
+   * Completely and permanently purge a cashbook from all state, local caches, IndexedDB, Supabase, and backend
+   */
+  const purgeBookCompletely = async (targetId: string) => {
+    if (!targetId) return;
+    const userId = session?.user?.id;
+
+    // 1. Tombstone permanently in localStorage
+    recordDeletedBookId(targetId);
+
+    // 2. Clear from React UI state, refs and caches
+    setBooks(prev => prev.filter(b => b.id !== targetId));
+    booksRef.current = booksRef.current.filter(b => b.id !== targetId);
+    if (activeBookId === targetId) {
+      handleSelectBook(null);
+    }
+    entriesCache.delete(targetId);
+
+    // 3. Purge from local storage caches
+    if (userId) {
+      try {
+        const cacheKey = `trackbook_cached_books_${userId}`;
+        const raw = localStorage.getItem(cacheKey);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            localStorage.setItem(cacheKey, JSON.stringify(list.filter((b: any) => b.id !== targetId)));
+          }
+        }
+      } catch {}
+    }
+    try {
+      const latestRaw = localStorage.getItem('trackbook_cached_books_latest');
+      if (latestRaw) {
+        const list = JSON.parse(latestRaw);
+        if (Array.isArray(list)) {
+          localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(list.filter((b: any) => b.id !== targetId)));
+        }
+      }
+      localStorage.removeItem('trackbook_cached_books');
+    } catch {}
+
+    // 4. Purge from pending offline books and entries
+    try {
+      const rawBooks = localStorage.getItem('trackbook_offline_pending_books_v1');
+      if (rawBooks) {
+        const list = JSON.parse(rawBooks);
+        if (Array.isArray(list)) {
+          localStorage.setItem('trackbook_offline_pending_books_v1', JSON.stringify(list.filter((b: any) => b.id !== targetId)));
+        }
+      }
+      const rawEnts = localStorage.getItem('trackbook_offline_pending_entries_v1');
+      if (rawEnts) {
+        const list = JSON.parse(rawEnts);
+        if (Array.isArray(list)) {
+          localStorage.setItem('trackbook_offline_pending_entries_v1', JSON.stringify(list.filter((e: any) => e.cashbook_id !== targetId)));
+        }
+      }
+    } catch {}
+
+    // 5. OfflineDB & SyncManager delete
+    try {
+      await syncManager.deleteCashbook(targetId, userId);
+    } catch (err) {
+      console.warn('[purgeBookCompletely] SyncManager delete notice:', err);
+    }
+
+    // 6. Direct Supabase deletion
+    if (supabase) {
+      try {
+        await supabase.from('entries').delete().eq('cashbook_id', targetId);
+        await supabase.from('cashbook_members').delete().eq('cashbook_id', targetId);
+        await supabase.from('cashbooks').delete().eq('id', targetId);
+      } catch (err) {
+        console.warn('[purgeBookCompletely] Direct Supabase delete notice:', err);
+      }
+    }
+
+    // 7. Backend service role proxy deletion (bypasses RLS, deletes entries, members and book reliably)
+    try {
+      await fetch('/api/sync/delete-cashbook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: targetId, userId })
+      });
+    } catch (err) {
+      console.warn('[purgeBookCompletely] Backend proxy delete notice:', err);
+    }
+  };
+
   const commitPendingDeletion = async (action: {
     type: 'book' | 'transaction' | 'bulk_books' | 'bulk_transactions';
     data: any;
@@ -2435,21 +2762,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       if (action.type === 'book') {
         const bookId = action.data.book?.id || action.data.id;
         console.log('[DelayedDelete] Committing book deletion to database:', bookId);
-        const { error } = await supabase
-          .from('cashbooks')
-          .delete()
-          .eq('id', bookId)
-          .eq('user_id', session.user.id);
-        if (error) throw error;
+        await purgeBookCompletely(bookId);
       } else if (action.type === 'bulk_books') {
-        const ids = action.data.map((item: any) => item.book.id);
+        const ids = action.data.map((item: any) => item.book?.id || item.id);
         console.log('[DelayedDelete] Committing bulk book deletion to database:', ids);
-        const { error } = await supabase
-          .from('cashbooks')
-          .delete()
-          .in('id', ids)
-          .eq('user_id', session.user.id);
-        if (error) throw error;
+        for (const id of ids) {
+          await purgeBookCompletely(id);
+        }
       } else if (action.type === 'transaction') {
         console.log('[DelayedDelete] Committing transaction deletion to database:', action.data.id);
         const { error } = await supabase
@@ -3196,12 +3515,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const triggerUploadSelector = (target: 'ai' | 'transaction') => {
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      showInAppAlert(
-        "Offline Mode",
-        "Attachments are unavailable while offline. You can still add your entry without an image or PDF, and it will sync automatically once you are back online.",
-        "warning"
-      );
+    const isDeviceOffline = isOffline || 
+      (typeof navigator !== 'undefined' && !navigator.onLine) || 
+      syncManager.network.state === 'offline' ||
+      (typeof window !== 'undefined' && (window as any).TrackBookBridge?.isNetworkAvailable?.() === false);
+
+    if (isDeviceOffline) {
+      const msg = "You are offline. Images can only be added when you are online.";
+      showInAppAlert("Offline Mode", msg, "warning");
+      if (typeof window !== 'undefined' && (window as any).TrackBookBridge?.showToast) {
+        (window as any).TrackBookBridge.showToast(msg);
+      }
       return;
     }
     if (window.innerWidth < 768) {
@@ -3535,14 +3859,24 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   // Stable component-level data fetch and sync function
   const fetchData = useCallback(async (force: boolean = false) => {
     if (!session || !supabase) {
-      if (!session) setBooks([]);
+      if (!session) {
+        const isExplicit = typeof localStorage !== 'undefined' && localStorage.getItem('trackbook_explicit_logout') === 'true';
+        if (isExplicit) {
+          setBooks([]);
+        }
+      }
       setIsLoading(false);
       return;
     }
 
-    // If device is offline, retain existing cached cashbooks and entries immediately
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      console.log('[fetchData] Device is offline. Retaining existing cached cashbooks and entries.');
+    // If device is offline, retain existing cached cashbooks and entries immediately without making network calls
+    const isDeviceOffline = (typeof navigator !== 'undefined' && !navigator.onLine) || 
+      syncManager.network.state === 'offline' ||
+      (typeof window !== 'undefined' && (window as any).TrackBookBridge?.isNetworkAvailable?.() === false);
+
+    if (isDeviceOffline) {
+      console.log('[fetchData] Device is offline. Retaining local cached cashbooks and pending entries.');
+      preserveAndMergeLocalCache();
       setIsLoading(false);
       setIsEntriesLoading(false);
       return;
@@ -3560,6 +3894,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       console.log('[fetchData] Loading cashbooks and entries...');
       const userEmail = session.user.email ? session.user.email.toLowerCase() : '';
       let rawCashbooksList: any[] = [];
+      let networkFetchSucceeded = false;
 
       // 1. Fetch all user cashbooks (owned + member/joined) via RBAC Service Backend
       try {
@@ -3568,6 +3903,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           const rbacJson = await rbacRes.json();
           if (rbacJson.success && Array.isArray(rbacJson.cashbooks)) {
             rawCashbooksList = rbacJson.cashbooks;
+            networkFetchSucceeded = true;
           }
         }
       } catch (rbacErr) {
@@ -3576,12 +3912,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
       // 2. Direct Supabase fallback / merge for owned cashbooks
       try {
-        const { data: rawOwnedCashbooks } = await supabase
+        const { data: rawOwnedCashbooks, error: ownedErr } = await supabase
           .from('cashbooks')
           .select('*')
           .eq('user_id', session.user.id);
 
-        if (rawOwnedCashbooks && rawOwnedCashbooks.length > 0) {
+        if (!ownedErr && rawOwnedCashbooks) {
+          networkFetchSucceeded = true;
           const existingIds = new Set(rawCashbooksList.map(c => c.id));
           for (const cb of rawOwnedCashbooks) {
             if (!existingIds.has(cb.id)) {
@@ -3595,13 +3932,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
       // 3. Direct Supabase query for cashbook_members in case there are additional member cashbooks
       try {
-        const { data: memberRows } = await supabase
+        const { data: memberRows, error: memErr } = await supabase
           .from('cashbook_members')
           .select('cashbook_id')
           .or(`user_id.eq.${session.user.id},email.ilike.${userEmail}`)
           .in('status', ['Active', 'active', 'Accepted', 'accepted']);
 
-        if (memberRows && memberRows.length > 0) {
+        if (!memErr && memberRows) {
+          networkFetchSucceeded = true;
           const existingIds = new Set(rawCashbooksList.map(c => c.id));
           const missingIds = memberRows.map(m => m.cashbook_id).filter(id => id && !existingIds.has(id));
 
@@ -3618,6 +3956,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         }
       } catch (memFetchErr) {
         console.warn('[Dashboard] Direct cashbook_members query note:', memFetchErr);
+      }
+
+      // If all network queries failed (e.g. sudden network loss during request):
+      if (!networkFetchSucceeded && booksRef.current.length > 0) {
+        console.warn('[Dashboard] Network requests failed. Preserving current in-memory cashbooks.');
+        preserveAndMergeLocalCache();
+        return;
       }
 
       // Extract pending undo deletion IDs to prevent deleted items from reappearing before commit
@@ -3747,7 +4092,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         const mappedBooks = cashbooks.map(cb => {
           const rawEntries = entriesMapByCashbook.get(cb.id) || [];
-          const entryList = rawEntries.map(t => {
+          let entryList = rawEntries.map(t => {
             const images = attachmentsMap.get(t.id) || [];
             const details = attachmentsDetailsMap.get(t.id) || [];
             const isMerged = t.image_layout === 'merge' || t.bill_type === 'MERGE' || t.billType === 'MERGE';
@@ -3765,9 +4110,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             };
           });
 
+          // If network fetch for entries failed or returned empty while we have cached entries, preserve them
+          if (entryList.length === 0) {
+            const existingBook = booksRef.current.find(b => b.id === cb.id);
+            const cached = entriesCache.get(cb.id) || existingBook?.transactions || [];
+            if (cached.length > 0) {
+              entryList = cached;
+            }
+          }
+
           // Update memory cache
-          entriesCache.set(cb.id, entryList);
-          lastFetchTimeCache.set(cb.id, Date.now());
+          if (entryList.length > 0) {
+            entriesCache.set(cb.id, entryList);
+            lastFetchTimeCache.set(cb.id, Date.now());
+          }
 
           return {
             ...cb,
@@ -3843,117 +4199,81 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           console.warn('[Offline] Error merging pending offline entries:', offlineMergeErr);
         }
 
-        setBooks(mappedBooks);
+        // Authoritative server books (excluding any deleted ones)
+        const deletedIds = getDeletedBookIds();
+        const cleanServerBooks = mappedBooks.filter(b => b && b.id && !deletedIds.has(b.id));
+        const finalMap = new Map<string, Cashbook>();
+        const existingNames = new Set<string>();
+
+        // 1. Authoritative server books from database
+        cleanServerBooks.forEach(b => {
+          finalMap.set(b.id, b);
+          existingNames.add(b.name.trim().toLowerCase());
+        });
+
+        // 2. Only add un-synced offline books that are NOT deleted and not duplicated
+        try {
+          const pendingOffline = (offlineDb.getLocalCashbooks() || [])
+            .filter(pb => pb && pb.id && !deletedIds.has(pb.id) && pb.syncStatus !== 'SYNCED');
+
+          pendingOffline.forEach(pb => {
+            const normName = (pb.name || '').trim().toLowerCase();
+            if (!finalMap.has(pb.id) && !existingNames.has(normName)) {
+              finalMap.set(pb.id, {
+                id: pb.id,
+                name: pb.name,
+                user_id: pb.user_id || session.user.id,
+                user_name: pb.user_name || 'User',
+                createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
+                transactions: entriesCache.get(pb.id) || [],
+                is_offline: true,
+                syncStatus: pb.syncStatus || 'PENDING'
+              });
+              existingNames.add(normName);
+            }
+          });
+        } catch (e) {}
+
+        const finalMergedList = Array.from(finalMap.values());
+        setBooks(finalMergedList);
         try {
           if (session?.user?.id) {
-            localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(mappedBooks));
-            offlineDb.saveCachedCashbooks(session.user.id, mappedBooks);
+            localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(finalMergedList));
+            localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(finalMergedList));
+            offlineDb.saveCachedCashbooks(session.user.id, finalMergedList);
           }
           localStorage.removeItem('trackbook_cached_books');
         } catch (e) {}
 
         // Keep entriesCache fully hydrated for all cashbooks
-        mappedBooks.forEach(cb => {
-          if (cb && cb.id && Array.isArray(cb.transactions)) {
+        finalMergedList.forEach(cb => {
+          if (cb && cb.id && Array.isArray(cb.transactions) && cb.transactions.length > 0) {
             entriesCache.set(cb.id, cb.transactions);
           }
         });
 
         // Solve loading delay by resolving activeBookId immediately if not set
         if (bookSlugRef.current) {
-          const foundBook = mappedBooks.find(b => getBookSlug(b.name, b.id) === bookSlugRef.current || b.id === bookSlugRef.current);
+          const foundBook = finalMergedList.find(b => getBookSlug(b.name, b.id) === bookSlugRef.current || b.id === bookSlugRef.current);
           if (foundBook) {
             setActiveBookIdState(foundBook.id);
           }
         }
       } else {
-        // Fallback for offline / network issue: load cached books + pending offline cashbooks
-        console.log('[Dashboard] No remote cashbooks returned or offline. Merging local cache and pending offline books.');
-        try {
-          const cachedBooks = await offlineDb.getCachedCashbooks(session.user.id);
-          const pendingBooks = await offlineDb.getPendingCashbooks();
-          const mergedMap = new Map<string, Cashbook>();
-
-          (cachedBooks || []).forEach((b: any) => {
-            if (b && b.id) {
-              mergedMap.set(b.id, {
-                ...b,
-                createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
-                transactions: Array.isArray(b.transactions) ? b.transactions : []
-              });
-            }
-          });
-
-          (pendingBooks || []).forEach((pb: any) => {
-            if (pb && pb.id) {
-              if (!mergedMap.has(pb.id)) {
-                mergedMap.set(pb.id, {
-                  id: pb.id,
-                  name: pb.name,
-                  user_id: pb.user_id || session.user.id,
-                  user_name: pb.user_name || 'User',
-                  createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
-                  transactions: entriesCache.get(pb.id) || [],
-                  is_offline: pb.syncStatus !== 'SYNCED',
-                  syncStatus: pb.syncStatus || 'PENDING'
-                });
-              } else {
-                const existing = mergedMap.get(pb.id)!;
-                existing.is_offline = pb.syncStatus !== 'SYNCED';
-                existing.syncStatus = pb.syncStatus;
-              }
-            }
-          });
-
-          if (mergedMap.size > 0) {
-            const list = Array.from(mergedMap.values());
-            const pendingOfflineEntries = await offlineDb.getPendingEntries();
-            if (pendingOfflineEntries && pendingOfflineEntries.length > 0) {
-              list.forEach(cb => {
-                const cbPending = pendingOfflineEntries.filter(e => e.cashbook_id === cb.id);
-                if (cbPending.length > 0) {
-                  const existingIds = new Set(cb.transactions.map(t => t.id));
-                  const pendingTxs: Transaction[] = cbPending
-                    .filter(e => !existingIds.has(e.id) && !existingIds.has(e.clientEntryId))
-                    .map(e => ({
-                      id: e.id,
-                      clientEntryId: e.clientEntryId || e.id,
-                      amount: e.amount,
-                      type: e.type,
-                      description: e.description,
-                      category: e.category,
-                      mode: e.mode,
-                      date: new Date(e.date),
-                      images: [],
-                      imageLayout: 'split',
-                      source: 'Manual',
-                      user_name: e.user_name,
-                      syncStatus: 'PENDING',
-                      is_offline: true,
-                      created_at: e.created_at
-                    }));
-                  if (pendingTxs.length > 0) {
-                    cb.transactions = [...pendingTxs, ...cb.transactions];
-                  }
-                }
-                entriesCache.set(cb.id, cb.transactions);
-              });
-            }
-            setBooks(list);
-          }
-        } catch (offlineErr) {
-          console.warn('[Dashboard] Offline fallback note:', offlineErr);
-        }
+        // Fallback for offline / network issue: preserve in-memory state and merge local cache
+        console.log('[Dashboard] No remote cashbooks returned. Preserving local cache and pending offline books.');
+        preserveAndMergeLocalCache();
       }
     } catch (error: any) {
       console.warn('[Dashboard] Notice during data fetch (device offline or connection drop):', error);
       // Retain last known good data — do NOT wipe books or entries
+      preserveAndMergeLocalCache();
     } finally {
       initialLoadedRef.current = true;
       setIsLoading(false);
       setIsEntriesLoading(false);
     }
-  }, [session]);
+  }, [session, preserveAndMergeLocalCache]);
 
   // Fetch data from Supabase init, on invitation accepted, and periodic background refresh
   useEffect(() => {
@@ -3964,17 +4284,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     };
 
     const handleNativeOnline = () => {
-      console.log('[Dashboard] Native online event detected. Immediately updating state and syncing.');
+      console.log('[Dashboard] Native online event detected. Syncing in background.');
       setIsOffline(false);
       syncManager.network.updateState('good');
-      syncManager.triggerSync();
-      fetchData(true);
+      syncManager.triggerSync().then(() => {
+        fetchData(true);
+      }).catch(() => {
+        fetchData(true);
+      });
     };
 
     const handleNativeOffline = () => {
       console.log('[Dashboard] Native offline event detected.');
       setIsOffline(true);
       syncManager.network.updateState('offline');
+      preserveAndMergeLocalCache();
     };
 
     window.addEventListener('trackbook_refresh_cashbooks', handleCashbookRefresh);
@@ -4739,12 +5063,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const originalIndex = books.findIndex(b => b.id === targetId);
       const cached = entriesCache.get(targetId) || [];
 
-      // Immediately remove from UI state
-      setBooks(prevBooks => prevBooks.filter(b => b.id !== targetId));
       setDeleteConfirmId(null);
       if (activeBookId === targetId) {
         handleSelectBook(null);
       }
+
+      // Purge completely and permanently right now
+      await purgeBookCompletely(targetId);
 
       if (bookToDeleteObj) {
         handleStartUndoableDelete({
@@ -4774,12 +5099,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return books.findIndex(b => b.id === id);
     });
 
-    const idsSet = new Set(selectedBooks);
+    const idsList = Array.from(selectedBooks);
 
-    // Immediately remove from UI state
-    setBooks(prevBooks => prevBooks.filter(b => !idsSet.has(b.id)));
     setSelectedBooks(new Set());
     setShowBulkDeleteConfirm(false);
+
+    // Purge completely and permanently right now
+    for (const id of idsList) {
+      await purgeBookCompletely(id);
+    }
 
     handleStartUndoableDelete({
       type: 'bulk_books',
@@ -5335,7 +5663,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               syncStatus: 'PENDING',
               retryCount: 0,
               source: 'Manual',
-              images: currentSelectedImages,
+              images: [],
               is_offline: true
             });
             setBooks(prev => prev.map(b => b.id === activeBookId ? {
@@ -6463,6 +6791,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     if (!files) return;
     const rawFiles = Array.from(files) as File[];
     if (rawFiles.length === 0) return;
+
+    const isDeviceOffline = isOffline || 
+      (typeof navigator !== 'undefined' && !navigator.onLine) || 
+      syncManager.network.state === 'offline' ||
+      (typeof window !== 'undefined' && (window as any).TrackBookBridge?.isNetworkAvailable?.() === false);
+
+    if (isDeviceOffline) {
+      const msg = "You are offline. Images can only be added when you are online.";
+      showInAppAlert("Offline Mode", msg, "warning");
+      if (typeof window !== 'undefined' && (window as any).TrackBookBridge?.showToast) {
+        (window as any).TrackBookBridge.showToast(msg);
+      }
+      return;
+    }
 
     if (selectedImages.length >= 7) {
       showInAppAlert('Attachment Limit', 'Maximum 7 bills / attachments allowed. Please remove an existing attachment to add more.', 'warning');
@@ -7716,6 +8058,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   const handleSignOut = async () => {
     try {
+      localStorage.setItem('trackbook_explicit_logout', 'true');
       clearSessionUnlocked();
       localStorage.removeItem('trackbook_cached_books');
       localStorage.removeItem('trackbook_avatar');
@@ -14793,6 +15136,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         isOpen={isMediaPickerOpen}
         onClose={() => setIsMediaPickerOpen(false)}
         theme={theme}
+        onOfflineAttempt={(msg) => showInAppAlert("Offline Mode", msg, "warning")}
         onSelectPhoto={() => {
           if (activeUploadTarget === 'ai') {
             fileInputRef.current?.click();
@@ -14885,19 +15229,32 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       vibrate(40);
                       try {
                         if (undoAction.type === 'book') {
+                          const book = undoAction.data.book || undoAction.data;
+                          const bookId = book?.id;
+                          if (bookId) {
+                            removeDeletedBookId(bookId);
+                            syncManager.saveOfflineCashbook({
+                              id: book.id,
+                              name: book.name,
+                              user_id: book.user_id || session?.user?.id || 'offline-user',
+                              user_name: book.user_name || 'User',
+                              created_at: safeToISOString(book.createdAt)
+                            });
+                          }
                           // Restore cashbook metadata
                           setBooks(prevBooks => {
                             const next = [...prevBooks];
                             const insertIdx = undoAction.originalIndex !== undefined ? undoAction.originalIndex : next.length;
-                            next.splice(insertIdx, 0, undoAction.data.book || undoAction.data);
+                            next.splice(insertIdx, 0, book);
                             return next;
                           });
                           // Restore entries cache
-                          const bookId = undoAction.data.book?.id || undoAction.data.id;
                           if (undoAction.data.cachedEntries) {
                             entriesCache.set(bookId, undoAction.data.cachedEntries);
                           }
-                          // Do NOT navigate or select! Fulfills user requirement of no automatic navigation!
+                          if (session && navigator.onLine) {
+                            syncManager.triggerSync();
+                          }
 
                         } else if (undoAction.type === 'bulk_books') {
                           setBooks(prevBooks => {
@@ -14909,6 +15266,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             })).sort((a: any, b: any) => a.index - b.index);
 
                             sortedPairs.forEach((pair: any) => {
+                              const book = pair.item.book;
+                              const bId = book?.id;
+                              if (bId) {
+                                removeDeletedBookId(bId);
+                                syncManager.saveOfflineCashbook({
+                                  id: book.id,
+                                  name: book.name,
+                                  user_id: book.user_id || session?.user?.id || 'offline-user',
+                                  user_name: book.user_name || 'User',
+                                  created_at: safeToISOString(book.createdAt)
+                                });
+                              }
                               next.splice(pair.index, 0, pair.item.book);
                               if (pair.item.cachedEntries) {
                                 entriesCache.set(pair.item.book.id, pair.item.cachedEntries);
@@ -14916,6 +15285,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             });
                             return next;
                           });
+                          if (session && navigator.onLine) {
+                            syncManager.triggerSync();
+                          }
 
                         } else if (undoAction.type === 'transaction') {
                           // Put back in active book transactions

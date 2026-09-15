@@ -162,13 +162,18 @@ export class TrackBookOfflineDB {
    * Save cached cashbooks and entries to IndexedDB and localStorage
    */
   async saveCachedCashbooks(userId: string, cashbooks: any[]): Promise<boolean> {
-    if (!cashbooks || !Array.isArray(cashbooks)) return false;
+    if (!cashbooks || !Array.isArray(cashbooks) || cashbooks.length === 0) {
+      // NEVER overwrite local cache with an empty array during network loss or empty API responses
+      return false;
+    }
 
-    // Fast synchronous localStorage write
+    // Fast synchronous localStorage write with latest fallback
     try {
+      const serialized = JSON.stringify(cashbooks);
       if (userId) {
-        localStorage.setItem(`${LOCAL_STORAGE_BOOKS_PREFIX}${userId}`, JSON.stringify(cashbooks));
+        localStorage.setItem(`${LOCAL_STORAGE_BOOKS_PREFIX}${userId}`, serialized);
       }
+      localStorage.setItem('trackbook_cached_books_latest', serialized);
     } catch (e) {
       console.warn('[OfflineDB] localStorage quota note for cashbooks:', e);
     }
@@ -186,7 +191,7 @@ export class TrackBookOfflineDB {
             if (book && book.id) {
               store.put({
                 ...book,
-                user_id: userId,
+                user_id: userId || book.user_id,
                 updated_at: new Date().toISOString()
               });
             }
@@ -205,7 +210,9 @@ export class TrackBookOfflineDB {
   /**
    * Read cached cashbooks and entries from IndexedDB (with localStorage fallback)
    */
-  async getCachedCashbooks(userId: string): Promise<any[]> {
+  async getCachedCashbooks(userId?: string): Promise<any[]> {
+    const effectiveUserId = userId || (typeof localStorage !== 'undefined' ? localStorage.getItem('trackbook_last_user_id') || '' : '');
+
     // 1. IndexedDB structured read
     try {
       const db = await this.init();
@@ -214,13 +221,16 @@ export class TrackBookOfflineDB {
           try {
             const tx = db.transaction(STORE_CACHED_BOOKS, 'readonly');
             const store = tx.objectStore(STORE_CACHED_BOOKS);
-            let req: IDBRequest;
-            if (userId && store.indexNames.contains('user_id')) {
-              req = store.index('user_id').getAll(userId);
-            } else {
-              req = store.getAll();
-            }
-            req.onsuccess = () => resolve(req.result || []);
+            const req = store.getAll();
+            req.onsuccess = () => {
+              const all = req.result || [];
+              if (effectiveUserId && all.length > 0) {
+                const userSpecific = all.filter((b: any) => b.user_id === effectiveUserId || !b.user_id);
+                resolve(userSpecific.length > 0 ? userSpecific : all);
+              } else {
+                resolve(all);
+              }
+            };
             req.onerror = () => resolve([]);
           } catch {
             resolve([]);
@@ -235,14 +245,19 @@ export class TrackBookOfflineDB {
       console.warn('[OfflineDB] Error reading cached cashbooks from IndexedDB:', e);
     }
 
-    // 2. localStorage fallback
+    // 2. localStorage fallback (check user-specific, then latest global snapshot)
     try {
-      if (userId) {
-        const raw = localStorage.getItem(`${LOCAL_STORAGE_BOOKS_PREFIX}${userId}`);
+      if (effectiveUserId) {
+        const raw = localStorage.getItem(`${LOCAL_STORAGE_BOOKS_PREFIX}${effectiveUserId}`);
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed) && parsed.length > 0) return parsed;
         }
+      }
+      const rawLatest = localStorage.getItem('trackbook_cached_books_latest');
+      if (rawLatest) {
+        const parsed = JSON.parse(rawLatest);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
 
@@ -327,6 +342,89 @@ export class TrackBookOfflineDB {
   }
 
   /**
+   * Delete an offline cashbook from pending storage and cached storage
+   */
+  async deleteCashbook(id: string): Promise<boolean> {
+    try {
+      const key = 'trackbook_offline_pending_books_v1';
+      const list = this.getLocalCashbooks();
+      const filtered = list.filter(item => item && item.id !== id);
+      localStorage.setItem(key, JSON.stringify(filtered));
+
+      // Also clean up any pending entries for this cashbook
+      const entKey = 'trackbook_offline_pending_entries_v1';
+      const rawEnts = localStorage.getItem(entKey);
+      if (rawEnts) {
+        try {
+          const ents = JSON.parse(rawEnts);
+          if (Array.isArray(ents)) {
+            localStorage.setItem(entKey, JSON.stringify(ents.filter((e: any) => e.cashbook_id !== id)));
+          }
+        } catch {}
+      }
+
+      // Also delete from IndexedDB cached books
+      await this.deleteCachedCashbook(id);
+
+      this.onDataChange?.();
+      return true;
+    } catch (e) {
+      console.warn('[OfflineDB] Error deleting cashbook:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Delete cashbook from IndexedDB cached books store and localStorage
+   */
+  async deleteCachedCashbook(id: string, userId?: string): Promise<boolean> {
+    try {
+      const db = await this.init();
+      if (db && db.objectStoreNames.contains(STORE_CACHED_BOOKS)) {
+        await new Promise<void>((resolve) => {
+          try {
+            const tx = db.transaction(STORE_CACHED_BOOKS, 'readwrite');
+            const store = tx.objectStore(STORE_CACHED_BOOKS);
+            store.delete(id);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => resolve();
+          } catch {
+            resolve();
+          }
+        });
+      }
+
+      // Prune from localStorage cached books
+      const effectiveUserId = userId || (typeof localStorage !== 'undefined' ? localStorage.getItem('trackbook_last_user_id') || '' : '');
+      if (effectiveUserId) {
+        const key = `${LOCAL_STORAGE_BOOKS_PREFIX}${effectiveUserId}`;
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          try {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              localStorage.setItem(key, JSON.stringify(list.filter((b: any) => b.id !== id)));
+            }
+          } catch {}
+        }
+      }
+      const latestRaw = localStorage.getItem('trackbook_cached_books_latest');
+      if (latestRaw) {
+        try {
+          const list = JSON.parse(latestRaw);
+          if (Array.isArray(list)) {
+            localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(list.filter((b: any) => b.id !== id)));
+          }
+        } catch {}
+      }
+      localStorage.removeItem('trackbook_cached_books');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Mark an offline cashbook as synced
    */
   async markCashbookSynced(id: string): Promise<void> {
@@ -349,16 +447,22 @@ export class TrackBookOfflineDB {
    * Save or update an offline entry
    */
   async saveEntry(entry: OfflineEntry): Promise<boolean> {
-    this.memEntries.set(entry.id, entry);
+    // STRICT OFFLINE IMAGE RULE: Pending offline entries are never allowed to have images
+    const sanitizedEntry: OfflineEntry = {
+      ...entry,
+      images: []
+    };
+
+    this.memEntries.set(sanitizedEntry.id, sanitizedEntry);
 
     // 1. Update localStorage fallback
     try {
       const local = this.getLocalBackup();
-      const idx = local.findIndex(e => e.id === entry.id);
+      const idx = local.findIndex(e => e.id === sanitizedEntry.id);
       if (idx >= 0) {
-        local[idx] = entry;
+        local[idx] = sanitizedEntry;
       } else {
-        local.push(entry);
+        local.push(sanitizedEntry);
       }
       this.setLocalBackup(local);
     } catch (err) {
@@ -375,7 +479,7 @@ export class TrackBookOfflineDB {
       return new Promise<boolean>((resolve) => {
         const tx = db.transaction(STORE_ENTRIES, 'readwrite');
         const store = tx.objectStore(STORE_ENTRIES);
-        store.put(entry);
+        store.put(sanitizedEntry);
 
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
@@ -731,6 +835,14 @@ export class BackgroundSyncManager {
     return true;
   }
 
+  public async deleteCashbook(id: string, userId?: string): Promise<boolean> {
+    await this.db.deleteCashbook(id);
+    await this.db.deleteCachedCashbook(id, userId);
+    this.refreshPendingCount();
+    this.notify();
+    return true;
+  }
+
   public setSyncState(newState: SyncStateMode) {
     this.syncState = newState;
     this.notify();
@@ -803,7 +915,11 @@ export class BackgroundSyncManager {
    * Save a newly created entry while offline
    */
   async saveOfflineEntry(entry: OfflineEntry): Promise<boolean> {
-    const success = await this.db.saveEntry(entry);
+    const sanitizedEntry: OfflineEntry = {
+      ...entry,
+      images: []
+    };
+    const success = await this.db.saveEntry(sanitizedEntry);
     await this.refreshPendingCount();
     this.notify();
     this.emitToast('Entry saved offline • Will sync automatically when connected', 'info');

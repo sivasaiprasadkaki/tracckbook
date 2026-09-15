@@ -1,6 +1,7 @@
 import React, { useState, useEffect, lazy, Suspense, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from './lib/supabase';
+import { supabase, getCachedLocalSession } from './lib/supabase';
+import { syncManager } from './services/syncManager';
 import { Loader2 } from 'lucide-react';
 import { cn } from './lib/utils';
 import SmartUpdateManager from './components/SmartUpdateManager';
@@ -84,16 +85,27 @@ function NavigationHandler({
     const sessionTimeout = setTimeout(() => {
       console.warn('Auth session lookup taking too long, forcing load completion...');
       setLoading(false);
-    }, 5000); // 5 second safety net
+    }, 4000); // Safety net
 
     supabase.auth.getSession().then((res) => {
       clearTimeout(sessionTimeout);
       const sessionVal = res?.data?.session || null;
-      setSession(sessionVal);
-      setLoading(false);
       if (sessionVal) {
+        setSession(sessionVal);
         console.log('[DEBUG] SESSION REFRESHED');
+      } else {
+        const isExplicit = typeof localStorage !== 'undefined' && localStorage.getItem('trackbook_explicit_logout') === 'true';
+        if (isExplicit) {
+          setSession(null);
+        } else {
+          // Preserve local session if available to avoid unmounting Dashboard during offline transitions
+          const cached = getCachedLocalSession();
+          if (cached) {
+            setSession(cached);
+          }
+        }
       }
+      setLoading(false);
       
       // If we have recovery parameters in the hash or search, ensure we route to /reset-password
       const recoveryState = checkRecoveryContext();
@@ -103,16 +115,34 @@ function NavigationHandler({
         navigate('/reset-password' + currentSearch + currentHash, { replace: true });
       }
     }).catch(err => {
-      console.warn('Auth session lookup note:', err?.message || err);
+      console.warn('Auth session lookup note (offline / network error):', err?.message || err);
       clearTimeout(sessionTimeout);
+      // Retain existing restored local session
       setLoading(false);
     });
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, sessionVal) => {
       console.log(`[DEBUG] AUTH STATE CHANGED: ${event}`);
-      setSession(sessionVal);
-      if (sessionVal) {
+      if (event === 'SIGNED_OUT') {
+        const isExplicit = typeof localStorage !== 'undefined' && localStorage.getItem('trackbook_explicit_logout') === 'true';
+
+        // Never clear session on transient network disconnect or unexpected SIGNED_OUT
+        if (!isExplicit) {
+          console.warn('[App Auth] Preserving session despite SIGNED_OUT event because user did not explicitly sign out.');
+          const cached = getCachedLocalSession();
+          if (cached) {
+            setSession(cached);
+          }
+          return;
+        }
+
+        try {
+          localStorage.removeItem('trackbook_explicit_logout');
+        } catch {}
+        setSession(null);
+      } else if (sessionVal) {
+        setSession(sessionVal);
         console.log('[DEBUG] SESSION REFRESHED');
       }
       
@@ -162,8 +192,8 @@ export default function App() {
     };
   }, []);
 
-  const [session, setSession] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState<any>(() => getCachedLocalSession());
+  const [loading, setLoading] = useState<boolean>(() => !getCachedLocalSession());
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('theme');

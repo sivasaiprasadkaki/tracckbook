@@ -295,6 +295,50 @@ export async function handleSyncCashbook(req: Request, res: Response) {
   }
 }
 
+/**
+ * Handle deletion of a cashbook and its associated entries/members securely via service role
+ */
+export async function handleDeleteCashbook(req: Request, res: Response) {
+  res.setHeader('Content-Type', 'application/json');
+  try {
+    const { id } = req.body || {};
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'Missing cashbook id' });
+    }
+
+    // 1. Delete all entries belonging to this cashbook
+    try {
+      await supabaseAdmin.from('entries').delete().eq('cashbook_id', id);
+    } catch (e: any) {
+      console.warn('[Sync Server] Warning deleting entries for cashbook:', e.message);
+    }
+
+    // 2. Delete all members belonging to this cashbook
+    try {
+      await supabaseAdmin.from('cashbook_members').delete().eq('cashbook_id', id);
+    } catch (e: any) {
+      console.warn('[Sync Server] Warning deleting members for cashbook:', e.message);
+    }
+
+    // 3. Delete the cashbook itself
+    const { error: delErr } = await supabaseAdmin
+      .from('cashbooks')
+      .delete()
+      .eq('id', id);
+
+    if (delErr) {
+      console.warn('[Sync Server] Error deleting cashbook from Supabase:', delErr.message);
+      return res.status(500).json({ success: false, error: delErr.message });
+    }
+
+    console.log(`[Sync Server] Cashbook ${id} successfully deleted from backend.`);
+    return res.json({ success: true, message: 'Cashbook deleted successfully' });
+  } catch (err: any) {
+    console.error('[Sync Server] Exception in handleDeleteCashbook:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Server error' });
+  }
+}
+
 export default async function syncHandler(req: any, res: any) {
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -310,6 +354,11 @@ export default async function syncHandler(req: any, res: any) {
     if (action === 'cashbook') {
       console.log('[Sync API] Action: cashbook');
       return handleSyncCashbook(req, res);
+    }
+
+    if (action === 'delete-cashbook') {
+      console.log('[Sync API] Action: delete-cashbook');
+      return handleDeleteCashbook(req, res);
     }
 
     if (action === 'offline-entry') {
