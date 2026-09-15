@@ -4544,7 +4544,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         uniques.set(b.id, b);
       }
     });
-    return Array.from(uniques.values()).filter(b => b.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    const list = Array.from(uniques.values()).filter(b => b.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+    // Sort latest created cashbook first (descending order by creation date/time)
+    return list.sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : ((a as any).created_at ? new Date((a as any).created_at).getTime() : 0);
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : ((b as any).created_at ? new Date((b as any).created_at).getTime() : 0);
+      const validA = isNaN(timeA) ? 0 : timeA;
+      const validB = isNaN(timeB) ? 0 : timeB;
+      return validB - validA;
+    });
   }, [books, searchQuery]);
 
   const totals = useMemo(() => {
@@ -4757,7 +4766,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     // Update local state immediately for perceived speed and persist to offline cache
     setBooks(prev => {
-      const next = [...prev, newBook];
+      const next = [newBook, ...prev.filter(b => b.id !== newBook.id)];
       try {
         if (session?.user?.id) {
           localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
