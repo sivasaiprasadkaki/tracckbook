@@ -15,6 +15,7 @@ import {
   BookOpen
 } from 'lucide-react';
 import { cn, vibrate } from '../lib/utils';
+import { useAppVersion } from '../hooks/useAppVersion';
 
 export type SectionType = 
   | 'dashboard' 
@@ -72,6 +73,7 @@ export default function SaaSSidebar({
 }: SaaSSidebarProps) {
   const [internalCollapsed, setInternalCollapsed] = React.useState(false);
   const [internalOpenMobile, setInternalOpenMobile] = React.useState(false);
+  const { versionDisplay } = useAppVersion();
 
   const isCollapsed = controlledIsCollapsed !== undefined ? controlledIsCollapsed : internalCollapsed;
   const setIsCollapsed = controlledSetIsCollapsed || setInternalCollapsed;
@@ -317,6 +319,15 @@ export default function SaaSSidebar({
           <LogOut size={16} className="shrink-0" />
           {!isCollapsed && <span>Sign Out</span>}
         </button>
+
+        {/* Dynamic App Version Display */}
+        {!isCollapsed && (
+          <div className="pt-2 text-center select-none">
+            <span className="text-[10.5px] font-medium text-slate-400 dark:text-zinc-500 tracking-wide">
+              {versionDisplay}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -114,6 +114,7 @@ import { addPdfBrandingFooter } from '../utils/pdfBranding';
 import { exitNativeApp } from '../services/biometricSecurityService';
 import { InAppSelect } from '../components/InAppSelect';
 import { InAppDialog, DialogOptions } from '../components/InAppDialog';
+import { useAppVersion } from '../hooks/useAppVersion';
 
 interface TimelineStep {
   id: string;
@@ -1705,6 +1706,7 @@ export function getBookSlug(name: string, id: string): string {
 
 export default function Dashboard({ session, theme, setTheme }: { session: any, theme: 'light' | 'dark', setTheme: React.Dispatch<React.SetStateAction<'light' | 'dark'>> }) {
   const shouldReduceMotion = useReducedMotion();
+  const { versionDisplay } = useAppVersion();
   // Routing Hooks
   const { bookSlug, tabName } = useParams();
   const navigate = useNavigate();
@@ -8455,6 +8457,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <LogOut size={18} />
                         <span className="font-medium flex-1 text-left">Logout</span>
                       </button>
+
+                      {/* Version Display */}
+                      <div className="pt-2 pb-0.5 px-3 mt-1 border-t border-slate-100 dark:border-zinc-800/80 text-center select-none">
+                        <span className="text-[11px] font-medium text-slate-400 dark:text-zinc-500 tracking-wide">
+                          {versionDisplay}
+                        </span>
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -12496,6 +12505,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             'Save Settings'
                           )}
                         </button>
+                      </div>
+
+                      {/* Version Display in Profile Settings */}
+                      <div className="pt-2 text-center select-none">
+                        <span className="text-xs font-medium text-slate-400 dark:text-zinc-500 tracking-wide">
+                          {versionDisplay}
+                        </span>
                       </div>
                     </div>
                   ) : (

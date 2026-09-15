@@ -288,6 +288,15 @@ if (process.env.NODE_ENV !== "production") {
 } else {
   console.log("[Server] Configuring production static asset server...");
   const distPath = path.join(process.cwd(), "dist");
+  app.use((req, res, next) => {
+    if (req.path === "/sw.js") {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+      res.setHeader("Service-Worker-Allowed", "/");
+    }
+    next();
+  });
   app.use(express.static(distPath));
   app.get("*", (req, res) => {
     res.sendFile(path.join(distPath, "index.html"));

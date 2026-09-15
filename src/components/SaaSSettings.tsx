@@ -23,6 +23,7 @@ import { cn, vibrate } from '../lib/utils';
 import { ALL_ROLES, ROLE_DEFINITIONS } from '../lib/rbac';
 import RolesPermissionsModal from './RolesPermissionsModal';
 import { InAppDialog, DialogOptions } from './InAppDialog';
+import { useAppVersion } from '../hooks/useAppVersion';
 
 interface SaaSSettingsProps {
   theme: 'light' | 'dark';
@@ -53,6 +54,7 @@ export default function SaaSSettings({
 }: SaaSSettingsProps) {
 
   const [activeTab, setActiveTab] = useState<TabType>('profile');
+  const { versionDisplay } = useAppVersion();
   
   // Profile inputs
   const [nameInput, setNameInput] = useState(userName);
@@ -633,7 +635,7 @@ export default function SaaSSettings({
                       TrackBook SaaS Engine
                     </h4>
                     <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-semibold mt-0.5">
-                      Production Release: v5.2.4
+                      {versionDisplay}
                     </p>
                   </div>
                 </div>

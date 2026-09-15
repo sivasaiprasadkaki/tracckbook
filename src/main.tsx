@@ -6,18 +6,28 @@ import './index.css';
 
 if ('serviceWorker' in navigator) {
   if (import.meta.env.PROD) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').then(registration => {
-        console.log('SW registered: ', registration);
-        // Check for updates on load so new deployments show immediately
-        registration.update();
-      }).catch(registrationError => {
-        console.log('SW registration failed: ', registrationError);
-      });
-    });
+    const registerSW = () => {
+      navigator.serviceWorker
+        .register('/sw.js', { scope: '/' })
+        .then((registration) => {
+          console.log('[TrackBook] SW registered with scope:', registration.scope);
+          // Check for updates on load so new deployments show immediately
+          registration.update().catch(() => {});
+        })
+        .catch((registrationError) => {
+          console.warn('[TrackBook] SW registration failed:', registrationError);
+        });
+    };
+
+    // In Android WebView and fast-loading pages, readyState may already be complete
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      registerSW();
+    } else {
+      window.addEventListener('load', registerSW);
+    }
   } else {
     // In dev mode, unregister any active service worker so it doesn't serve stale/cached Vite modules
-    navigator.serviceWorker.getRegistrations().then(registrations => {
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
       for (const registration of registrations) {
         registration.unregister();
       }

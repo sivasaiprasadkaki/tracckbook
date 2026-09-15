@@ -20,6 +20,9 @@ export interface TrackBookAndroidBridge {
   signInWithGoogle?: (options?: string) => string | boolean | Promise<string | boolean>;
   isGoogleAuthSupported?: () => boolean | Promise<boolean>;
   exitApp?: () => void | Promise<void>;
+  getAppVersion?: () => string | number | Promise<string | number>;
+  getVersion?: () => string | number | Promise<string | number>;
+  appVersion?: string | number;
 }
 
 declare global {
