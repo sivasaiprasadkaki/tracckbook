@@ -26,12 +26,19 @@ if ('serviceWorker' in navigator) {
       window.addEventListener('load', registerSW);
     }
   } else {
-    // In dev mode, unregister any active service worker so it doesn't serve stale/cached Vite modules
+    // In dev mode, unregister any active service worker and clear stale caches so it doesn't serve stale/cached Vite modules
     navigator.serviceWorker.getRegistrations().then((registrations) => {
       for (const registration of registrations) {
         registration.unregister();
       }
     });
+    if ('caches' in window) {
+      caches.keys().then((names) => {
+        for (const name of names) {
+          caches.delete(name);
+        }
+      }).catch(() => {});
+    }
   }
 }
 

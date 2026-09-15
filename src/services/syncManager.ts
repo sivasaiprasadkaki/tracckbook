@@ -774,8 +774,10 @@ export class BackgroundSyncManager {
 
   private listeners: (() => void)[] = [];
   private entrySyncedCallbacks: ((clientEntryId: string, syncedEntry: any) => void)[] = [];
+  private cashbookSyncedCallbacks: ((cashbookId: string, syncedBook: any) => void)[] = [];
   private toastListeners: ((msg: string, type: 'success' | 'info' | 'error') => void)[] = [];
   private retryTimeout: any = null;
+  private activeSyncPromise: Promise<boolean> | null = null;
 
   constructor() {
     this.init();
@@ -881,6 +883,13 @@ export class BackgroundSyncManager {
     };
   }
 
+  onCashbookSynced(cb: (cashbookId: string, syncedBook: any) => void) {
+    this.cashbookSyncedCallbacks.push(cb);
+    return () => {
+      this.cashbookSyncedCallbacks = this.cashbookSyncedCallbacks.filter(c => c !== cb);
+    };
+  }
+
   subscribeToToasts(cb: (msg: string, type: 'success' | 'info' | 'error') => void) {
     this.toastListeners.push(cb);
     return () => {
@@ -958,7 +967,10 @@ export class BackgroundSyncManager {
    */
   async triggerSync(isManualRetry = false): Promise<boolean> {
     if (this.isSyncing) {
-      console.log('[SyncManager] Sync already in progress, skipping duplicate call.');
+      if (this.activeSyncPromise) {
+        console.log('[SyncManager] Sync already in progress, awaiting existing sync promise.');
+        return this.activeSyncPromise;
+      }
       return false;
     }
 
@@ -968,6 +980,15 @@ export class BackgroundSyncManager {
       return false;
     }
 
+    this.activeSyncPromise = this.executeSync(isManualRetry);
+    try {
+      return await this.activeSyncPromise;
+    } finally {
+      this.activeSyncPromise = null;
+    }
+  }
+
+  private async executeSync(isManualRetry = false): Promise<boolean> {
     const pendingBooks = await this.db.getPendingCashbooks();
     const pending = await this.db.getPendingEntries();
 
@@ -1059,6 +1080,9 @@ export class BackgroundSyncManager {
             console.log(`[Sync] Confirmed success for cashbook: ${book.id}`);
             await this.db.markCashbookSynced(book.id);
             syncedInThisRun++;
+            this.cashbookSyncedCallbacks.forEach(cb => {
+              try { cb(book.id, book); } catch (e) { console.error(e); }
+            });
             this.notify();
           } else {
             const isNet = !navigator.onLine ||
@@ -1261,7 +1285,7 @@ export class BackgroundSyncManager {
       this.notify();
     }
 
-    if (syncedInThisRun > 0) {
+    if (syncedInThisRun > 0 || pendingBooks.length > 0 || pending.length > 0) {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('trackbook_refresh_cashbooks'));
       }

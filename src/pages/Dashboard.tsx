@@ -1490,15 +1490,24 @@ async function fetchAttachmentsDeduplicated(entryIds: string[]): Promise<{ attac
     try {
       const startTime = performance.now();
       const [attachmentsRes, aiAttachmentsRes] = await Promise.all([
-        supabase.from('attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', entryIds),
-        supabase.from('ai_attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', entryIds)
-      ]);
+        supabase ? supabase.from('attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', entryIds) : Promise.resolve({ data: [] }),
+        supabase ? supabase.from('ai_attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', entryIds) : Promise.resolve({ data: [] })
+      ]).catch((err) => {
+        console.warn('[Deduplication] Attachments query note (network/offline):', err?.message || err);
+        return [{ data: [] }, { data: [] }];
+      });
       const duration = performance.now() - startTime;
       console.log(`[Performance] Attachments load timing: fetched from db in ${duration.toFixed(2)}ms for ${entryIds.length} entries`);
       
       return {
-        attachments: attachmentsRes.data || [],
-        aiAttachments: aiAttachmentsRes.data || []
+        attachments: (attachmentsRes as any)?.data || [],
+        aiAttachments: (aiAttachmentsRes as any)?.data || []
+      };
+    } catch (err) {
+      console.warn('[Deduplication] Safe fallback for fetchAttachmentsDeduplicated:', err);
+      return {
+        attachments: [],
+        aiAttachments: []
       };
     } finally {
       inFlightAttachmentQueries.delete(batchKey);
@@ -1775,6 +1784,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     } catch {}
   };
 
+  // Helper to ensure cashbooks are always sorted latest created first
+  const sortCashbooksLatestFirst = (list: Cashbook[]): Cashbook[] => {
+    return [...list].sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : ((a as any).created_at ? new Date((a as any).created_at).getTime() : 0);
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : ((b as any).created_at ? new Date((b as any).created_at).getTime() : 0);
+      const validA = isNaN(timeA) ? 0 : timeA;
+      const validB = isNaN(timeB) ? 0 : timeB;
+      return validB - validA;
+    });
+  };
+
   // Synchronous loader for complete offline-first cashbooks & entries
   const loadCompleteLocalCashbooks = (userId?: string): Cashbook[] => {
     if (typeof window === 'undefined') return [];
@@ -1798,7 +1818,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             if (b && b.id && !deletedIds.has(b.id)) {
               mergedMap.set(b.id, {
                 ...b,
-                createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
+                createdAt: b.createdAt ? new Date(b.createdAt) : (b.created_at ? new Date(b.created_at) : new Date()),
                 transactions: Array.isArray(b.transactions) ? b.transactions.map((t: any) => ({
                   ...t,
                   date: t.date ? new Date(t.date) : new Date(),
@@ -1811,14 +1831,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       }
     } catch (e) {}
 
-    // 2. Merge pending offline cashbooks (only those that are truly pending and not deleted)
+    // 2. Merge offline cashbooks (preserve them whether pending or newly synced)
     try {
       const rawBooks = localStorage.getItem('trackbook_offline_pending_books_v1');
       if (rawBooks) {
         const pendingBooks = JSON.parse(rawBooks);
         if (Array.isArray(pendingBooks)) {
           pendingBooks.forEach((pb: any) => {
-            if (pb && pb.id && !deletedIds.has(pb.id) && pb.syncStatus !== 'SYNCED') {
+            if (pb && pb.id && !deletedIds.has(pb.id)) {
               if (!mergedMap.has(pb.id)) {
                 // Check if a book with same name already exists to prevent duplicate offline creations
                 const normName = (pb.name || '').trim().toLowerCase();
@@ -1829,9 +1849,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     name: pb.name,
                     user_id: pb.user_id || userId || 'offline-user',
                     user_name: pb.user_name || 'User',
-                    createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
+                    createdAt: pb.created_at ? new Date(pb.created_at) : (pb.createdAt ? new Date(pb.createdAt) : new Date()),
                     transactions: entriesCache.get(pb.id) || [],
-                    is_offline: true,
+                    is_offline: pb.syncStatus !== 'SYNCED',
                     syncStatus: pb.syncStatus || 'PENDING'
                   });
                 }
@@ -1846,14 +1866,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       }
     } catch (e) {}
 
-    // 3. Merge pending offline entries
+    // 3. Merge offline entries (preserve them until server response confirms them)
     try {
       const rawEntries = localStorage.getItem('trackbook_offline_pending_entries_v1');
       if (rawEntries) {
         const pendingEntries = JSON.parse(rawEntries);
         if (Array.isArray(pendingEntries) && pendingEntries.length > 0) {
           mergedMap.forEach((cb) => {
-            const cbPending = pendingEntries.filter((e: any) => e.cashbook_id === cb.id && e.syncStatus !== 'SYNCED');
+            const cbPending = pendingEntries.filter((e: any) => e.cashbook_id === cb.id && !deletedIds.has(e.id));
             if (cbPending.length > 0) {
               const existingIds = new Set(cb.transactions.map(t => t.id));
               const newTxs: Transaction[] = cbPending
@@ -1871,8 +1891,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   imageLayout: 'split',
                   source: 'Manual',
                   user_name: e.user_name,
-                  syncStatus: 'PENDING',
-                  is_offline: true,
+                  syncStatus: e.syncStatus || 'PENDING',
+                  is_offline: e.syncStatus !== 'SYNCED',
                   created_at: e.created_at
                 }));
               if (newTxs.length > 0) {
@@ -1885,7 +1905,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       }
     } catch (e) {}
 
-    const result = Array.from(mergedMap.values());
+    const result = sortCashbooksLatestFirst(Array.from(mergedMap.values()));
     result.forEach(cb => {
       if (cb.id && Array.isArray(cb.transactions) && cb.transactions.length > 0) {
         entriesCache.set(cb.id, cb.transactions);
@@ -2004,7 +2024,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     });
 
     // Immediately render current synchronous cache + in-memory state without waiting for async promises
-    const immediateList = Array.from(mergedMap.values());
+    const immediateList = sortCashbooksLatestFirst(Array.from(mergedMap.values()));
     if (immediateList.length > 0) {
       setBooks(immediateList);
       setIsLoading(false);
@@ -2016,15 +2036,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const idbPendingBooks = await offlineDb.getPendingCashbooks();
       if (Array.isArray(idbPendingBooks)) {
         idbPendingBooks.forEach(pb => {
-          if (pb && pb.id && !mergedMap.has(pb.id) && !deletedIds.has(pb.id) && pb.syncStatus !== 'SYNCED') {
+          if (pb && pb.id && !mergedMap.has(pb.id) && !deletedIds.has(pb.id)) {
             mergedMap.set(pb.id, {
               id: pb.id,
               name: pb.name,
               user_id: pb.user_id || effectiveUserId || 'offline-user',
               user_name: pb.user_name || 'User',
-              createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
+              createdAt: pb.created_at ? new Date(pb.created_at) : ((pb as any).createdAt ? new Date((pb as any).createdAt) : new Date()),
               transactions: entriesCache.get(pb.id) || [],
-              is_offline: true,
+              is_offline: pb.syncStatus !== 'SYNCED',
               syncStatus: pb.syncStatus || 'PENDING'
             });
           }
@@ -2034,7 +2054,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const idbPendingEntries = await offlineDb.getPendingEntries();
       if (Array.isArray(idbPendingEntries) && idbPendingEntries.length > 0) {
         mergedMap.forEach(cb => {
-          const cbPending = idbPendingEntries.filter(e => e.cashbook_id === cb.id);
+          const cbPending = idbPendingEntries.filter(e => e.cashbook_id === cb.id && !deletedIds.has(e.id));
           if (cbPending.length > 0) {
             const existingIds = new Set(cb.transactions.map(t => t.id));
             const newTxs: Transaction[] = cbPending
@@ -2052,8 +2072,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 imageLayout: 'split',
                 source: 'Manual',
                 user_name: e.user_name,
-                syncStatus: 'PENDING',
-                is_offline: true,
+                syncStatus: e.syncStatus || 'PENDING',
+                is_offline: e.syncStatus !== 'SYNCED',
                 created_at: e.created_at
               }));
             if (newTxs.length > 0) {
@@ -2065,7 +2085,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       }
     } catch {}
 
-    const finalList = Array.from(mergedMap.values());
+    const finalList = sortCashbooksLatestFirst(Array.from(mergedMap.values()));
     if (finalList.length > 0) {
       setBooks(finalList);
       finalList.forEach(b => {
@@ -2147,6 +2167,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   });
   const [isEntriesLoading, setIsEntriesLoading] = useState(false);
   const [showOfflineDialog, setShowOfflineDialog] = useState(false);
+  const [showOfflinePdfDialog, setShowOfflinePdfDialog] = useState(false);
   const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && !navigator.onLine);
   const [isRetryingNetwork, setIsRetryingNetwork] = useState(false);
   const [reconnectedToast, setReconnectedToast] = useState<string | null>(null);
@@ -2194,7 +2215,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     return () => unsubscribe();
   }, [preserveAndMergeLocalCache]);
 
-  // Offline entry sync listener and real-time status updates
+  // Offline entry & cashbook sync listener and real-time status updates
   useEffect(() => {
     const unsubEntry = syncManager.onEntrySynced((clientEntryId, syncedEntry) => {
       setBooks(prevBooks => {
@@ -2225,6 +2246,36 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       });
     });
 
+    const unsubCashbook = syncManager.onCashbookSynced((cashbookId, syncedBook) => {
+      setBooks(prevBooks => {
+        let changed = false;
+        const nextBooks = prevBooks.map(b => {
+          if (b.id === cashbookId) {
+            changed = true;
+            return {
+              ...b,
+              ...(syncedBook || {}),
+              id: syncedBook?.id || b.id,
+              syncStatus: 'SYNCED' as const,
+              is_offline: false
+            };
+          }
+          return b;
+        });
+        if (changed) {
+          try {
+            const effectiveUserId = currentUserId || localStorage.getItem('trackbook_last_user_id');
+            if (effectiveUserId) {
+              localStorage.setItem(`trackbook_cached_books_${effectiveUserId}`, JSON.stringify(nextBooks));
+              localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(nextBooks));
+            }
+          } catch (e) {}
+          return nextBooks;
+        }
+        return prevBooks;
+      });
+    });
+
     const unsubToasts = syncManager.subscribeToToasts((msg) => {
       setReconnectedToast(msg);
       setTimeout(() => setReconnectedToast(null), 3500);
@@ -2232,9 +2283,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     return () => {
       unsubEntry();
+      unsubCashbook();
       unsubToasts();
     };
-  }, []);
+  }, [currentUserId]);
 
   const handleRetryConnection = async () => {
     vibrate();
@@ -4213,10 +4265,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           existingNames.add(b.name.trim().toLowerCase());
         });
 
-        // 2. Only add un-synced offline books that are NOT deleted and not duplicated
+        // 2. Only add offline books that are NOT deleted and not duplicated
         try {
           const pendingOffline = (offlineDb.getLocalCashbooks() || [])
-            .filter(pb => pb && pb.id && !deletedIds.has(pb.id) && pb.syncStatus !== 'SYNCED');
+            .filter(pb => pb && pb.id && !deletedIds.has(pb.id));
 
           pendingOffline.forEach(pb => {
             const normName = (pb.name || '').trim().toLowerCase();
@@ -4226,17 +4278,24 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 name: pb.name,
                 user_id: pb.user_id || session.user.id,
                 user_name: pb.user_name || 'User',
-                createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
+                createdAt: pb.created_at ? new Date(pb.created_at) : ((pb as any).createdAt ? new Date((pb as any).createdAt) : new Date()),
                 transactions: entriesCache.get(pb.id) || [],
-                is_offline: true,
+                is_offline: pb.syncStatus !== 'SYNCED',
                 syncStatus: pb.syncStatus || 'PENDING'
               });
               existingNames.add(normName);
             }
           });
+
+          // Also retain any active in-memory books not yet returned by the server
+          (booksRef.current || []).forEach(b => {
+            if (b && b.id && !deletedIds.has(b.id) && !finalMap.has(b.id)) {
+              finalMap.set(b.id, b);
+            }
+          });
         } catch (e) {}
 
-        const finalMergedList = Array.from(finalMap.values());
+        const finalMergedList = sortCashbooksLatestFirst(Array.from(finalMap.values()));
         setBooks(finalMergedList);
         try {
           if (session?.user?.id) {
@@ -4291,6 +4350,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       syncManager.network.updateState('good');
       syncManager.triggerSync().then(() => {
         fetchData(true);
+        setTimeout(() => fetchData(true), 1500);
       }).catch(() => {
         fetchData(true);
       });
@@ -5023,6 +5083,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     if (format === 'excel') {
       await backgroundExportManager.enqueueExcelTask(book.id, book.name, txs);
     } else {
+      if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+        vibrate(20);
+        setShowOfflinePdfDialog(true);
+        return;
+      }
       setPdfQualityModalState({
         isOpen: true,
         cashbookId: book.id,
@@ -6975,6 +7040,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
   const exportToPDF = async (isCompressed = true) => {
     if (!activeBook || reportLoading) return;
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(20);
+      setShowOfflinePdfDialog(true);
+      return;
+    }
     try {
       console.log("Starting PDF export. Compressed mode:", isCompressed);
       setReportLoading({ type: 'pdf', progress: 5, message: 'Preparing document setup...' });
@@ -10513,6 +10583,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   <div 
                     onClick={() => {
                       if (activeBook) {
+                        if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+                          vibrate(20);
+                          setShowOfflinePdfDialog(true);
+                          return;
+                        }
                         if (!filteredTransactions || filteredTransactions.length === 0) {
                           showInAppAlert('No Transactions', 'No transactions found to export in this cashbook.', 'info');
                           return;
@@ -15538,6 +15613,51 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         transactions={pdfQualityModalState?.transactions || []}
         theme={theme}
       />
+
+      {/* Offline PDF Export Blocked Dialog Modal */}
+      <AnimatePresence>
+        {showOfflinePdfDialog && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 20 }}
+              className={cn(
+                "w-full max-w-sm p-6 rounded-3xl shadow-2xl space-y-5 text-center border transition-all duration-300",
+                theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
+              )}
+            >
+              <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shadow-inner">
+                <WifiOff size={26} className="stroke-[2.5]" />
+              </div>
+              
+              <div className="space-y-2">
+                <h3 className="text-xl font-black tracking-tight">PDF Export Offline</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                  Generating and downloading PDF reports requires an active internet connection to download and render receipt attachments. Please reconnect to the internet to export as PDF.
+                </p>
+                <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-zinc-900 text-[11px] text-slate-600 dark:text-slate-300 font-medium">
+                  Tip: Excel (.xlsx) export is fully supported offline.
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  id="btn-close-offline-pdf-dialog"
+                  onClick={() => {
+                    vibrate();
+                    setShowOfflinePdfDialog(false);
+                  }}
+                  className="w-full py-3 px-4 rounded-xl text-xs font-bold transition-all shadow-md bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
+                >
+                  Understood
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Quit App Confirmation Dialog Modal */}
       <AnimatePresence>

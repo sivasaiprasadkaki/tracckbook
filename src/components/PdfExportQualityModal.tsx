@@ -11,7 +11,8 @@ import {
   AlertCircle,
   ExternalLink,
   Layers,
-  ArrowRight
+  ArrowRight,
+  WifiOff
 } from 'lucide-react';
 import { backgroundExportManager, ExportTask } from '../services/exportManager';
 import { cn } from '../lib/utils';
@@ -42,6 +43,8 @@ export function PdfExportQualityModal({
   const [progress, setProgress] = useState<number>(0);
   const [statusMessage, setStatusMessage] = useState<string>('Preparing your PDF...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
   // Calculate receipts/attachments count for dynamic feedback
   const totalReceipts = React.useMemo(() => {
@@ -95,6 +98,12 @@ export function PdfExportQualityModal({
   }, [activeTaskId, state, totalReceipts]);
 
   const handleStartExport = async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setErrorMessage('PDF download is blocked while offline. An active internet connection is required to compile and download PDF statements.');
+      setState('error');
+      return;
+    }
+
     try {
       setState('generating');
       setProgress(5);
@@ -300,6 +309,16 @@ export function PdfExportQualityModal({
                 </div>
 
                 {/* Actions */}
+                {isOffline && (
+                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 flex items-start gap-2.5 text-xs font-medium">
+                    <WifiOff size={16} className="shrink-0 mt-0.5 text-amber-500" />
+                    <div className="leading-relaxed">
+                      <span className="font-bold">Offline PDF Download Blocked: </span>
+                      PDF report generation and download require an active internet connection to download and render receipt attachments. Please connect to the internet to export as PDF.
+                    </div>
+                  </div>
+                )}
+
                 <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-zinc-800">
                   <button
                     id="btn-cancel-quality-selection"
@@ -310,13 +329,19 @@ export function PdfExportQualityModal({
                   </button>
                   <motion.button
                     id="btn-export-pdf-confirm"
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+                    whileHover={isOffline ? {} : { scale: 1.02 }}
+                    whileTap={isOffline ? {} : { scale: 0.98 }}
+                    disabled={isOffline}
                     onClick={handleStartExport}
-                    className="px-6 py-2.5 text-xs sm:text-sm font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center gap-2 transition-all cursor-pointer"
+                    className={cn(
+                      "px-6 py-2.5 text-xs sm:text-sm font-semibold rounded-xl shadow-sm flex items-center gap-2 transition-all",
+                      isOffline
+                        ? "bg-slate-200 dark:bg-zinc-800 text-slate-400 dark:text-zinc-500 cursor-not-allowed opacity-80"
+                        : "bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
+                    )}
                   >
-                    <Download size={16} />
-                    Export PDF
+                    {isOffline ? <WifiOff size={16} /> : <Download size={16} />}
+                    {isOffline ? 'Offline (Download Blocked)' : 'Export PDF'}
                   </motion.button>
                 </div>
               </div>

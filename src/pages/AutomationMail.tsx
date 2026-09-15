@@ -318,6 +318,10 @@ export default function AutomationMail({ session, theme, setTheme }: AutomationM
 
   const handleDownloadPDF = async () => {
     if (!selectedBook) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      alert('Offline PDF Download Blocked: Generating and downloading PDF reports requires an active internet connection. Please connect to the internet to download PDF statements.');
+      return;
+    }
     vibrate(10);
     // Delegate entirely to the existing reports module background generator with compression
     await backgroundExportManager.enqueueTask(selectedBook.id, selectedBook.name, selectedBook.transactions || [], true);
