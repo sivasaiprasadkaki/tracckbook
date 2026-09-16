@@ -12,16 +12,9 @@ const DUMMY_UUID = '00000000-0000-0000-0000-000000000000';
 let cachedSystemUserId: string | null = null;
 
 async function resolveValidUserId(userId: any, cashbookId: string): Promise<string> {
-  // 1. If a non-dummy UUID is provided, verify it exists in auth.users
+  // 1. If a valid non-dummy UUID is provided, trust it directly from the authenticated session
   if (typeof userId === 'string' && UUID_REGEX.test(userId) && userId !== DUMMY_UUID) {
-    try {
-      const { data: userCheck } = await supabaseAdmin.auth.admin.getUserById(userId);
-      if (userCheck?.user?.id) {
-        return userCheck.user.id;
-      }
-    } catch (e: any) {
-      console.warn('[Sync Server] User validation warning for ' + userId + ':', e.message);
-    }
+    return userId;
   }
 
   // 2. Query cashbook owner: Every cashbook in Supabase has a valid user_id foreign key
@@ -227,7 +220,7 @@ export async function handleBatchSyncOfflineEntries(req: Request, res: Response)
 export async function handleSyncCashbook(req: Request, res: Response) {
   res.setHeader('Content-Type', 'application/json');
   try {
-    const { id, name, user_id, user_name, created_at } = req.body;
+    const { id, name, user_id, user_name, user_email, created_at } = req.body;
     if (!id || !name) {
       return res.status(400).json({ success: false, error: 'Missing id or name for cashbook' });
     }
@@ -261,6 +254,9 @@ export async function handleSyncCashbook(req: Request, res: Response) {
     if (user_name) {
       payload.user_name = user_name;
     }
+    if (user_email) {
+      payload.user_email = user_email;
+    }
 
     const { data: created, error } = await supabaseAdmin
       .from('cashbooks')
@@ -270,12 +266,15 @@ export async function handleSyncCashbook(req: Request, res: Response) {
 
     if (error) {
       console.warn('[Sync Server] Cashbook upsert note, retrying without optional columns:', error.message);
-      const fallbackPayload = {
+      const fallbackPayload: any = {
         id,
         name,
         user_id: resolvedUserId,
         created_at: created_at || new Date().toISOString()
       };
+      if (user_email) {
+        fallbackPayload.user_email = user_email;
+      }
       const { data: retryCreated, error: retryErr } = await supabaseAdmin
         .from('cashbooks')
         .upsert([fallbackPayload], { onConflict: 'id' })

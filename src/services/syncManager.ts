@@ -162,12 +162,11 @@ export class TrackBookOfflineDB {
    * Save cached cashbooks and entries to IndexedDB and localStorage
    */
   async saveCachedCashbooks(userId: string, cashbooks: any[]): Promise<boolean> {
-    if (!cashbooks || !Array.isArray(cashbooks) || cashbooks.length === 0) {
-      // NEVER overwrite local cache with an empty array during network loss or empty API responses
+    if (!cashbooks || !Array.isArray(cashbooks)) {
       return false;
     }
 
-    // Fast synchronous localStorage write with latest fallback
+    // Fast synchronous localStorage write
     try {
       const serialized = JSON.stringify(cashbooks);
       if (userId) {
@@ -178,7 +177,7 @@ export class TrackBookOfflineDB {
       console.warn('[OfflineDB] localStorage quota note for cashbooks:', e);
     }
 
-    // Structured IndexedDB write
+    // Structured IndexedDB write: replace cached store contents with current authoritative list
     try {
       const db = await this.init();
       if (!db || !db.objectStoreNames.contains(STORE_CACHED_BOOKS)) return true;
@@ -187,6 +186,8 @@ export class TrackBookOfflineDB {
         try {
           const tx = db.transaction(STORE_CACHED_BOOKS, 'readwrite');
           const store = tx.objectStore(STORE_CACHED_BOOKS);
+          // Always clear previous cached books so deleted cashbooks never linger
+          store.clear();
           for (const book of cashbooks) {
             if (book && book.id) {
               store.put({

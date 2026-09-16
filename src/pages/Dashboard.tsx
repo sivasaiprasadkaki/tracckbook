@@ -1801,15 +1801,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     const mergedMap = new Map<string, Cashbook>();
     const deletedIds = getDeletedBookIds();
 
-    // 1. Load cached synced cashbooks
+    // 1. Load cached synced cashbooks strictly scoped to this user
     try {
       const effectiveUserId = userId || localStorage.getItem('trackbook_last_user_id');
       let raw: string | null = null;
       if (effectiveUserId) {
         raw = localStorage.getItem(`trackbook_cached_books_${effectiveUserId}`);
-      }
-      if (!raw) {
-        raw = localStorage.getItem('trackbook_cached_books_latest');
       }
       if (raw) {
         const parsed = JSON.parse(raw);
@@ -1831,16 +1828,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       }
     } catch (e) {}
 
-    // 2. Merge offline cashbooks (preserve them whether pending or newly synced)
+    // 2. Merge offline cashbooks (strictly ONLY if PENDING sync)
     try {
       const rawBooks = localStorage.getItem('trackbook_offline_pending_books_v1');
       if (rawBooks) {
         const pendingBooks = JSON.parse(rawBooks);
         if (Array.isArray(pendingBooks)) {
           pendingBooks.forEach((pb: any) => {
-            if (pb && pb.id && !deletedIds.has(pb.id)) {
+            if (pb && pb.id && !deletedIds.has(pb.id) && pb.syncStatus === 'PENDING') {
               if (!mergedMap.has(pb.id)) {
-                // Check if a book with same name already exists to prevent duplicate offline creations
                 const normName = (pb.name || '').trim().toLowerCase();
                 const alreadyExists = Array.from(mergedMap.values()).some(b => b.name.trim().toLowerCase() === normName);
                 if (!alreadyExists) {
@@ -1851,14 +1847,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     user_name: pb.user_name || 'User',
                     createdAt: pb.created_at ? new Date(pb.created_at) : (pb.createdAt ? new Date(pb.createdAt) : new Date()),
                     transactions: entriesCache.get(pb.id) || [],
-                    is_offline: pb.syncStatus !== 'SYNCED',
-                    syncStatus: pb.syncStatus || 'PENDING'
+                    is_offline: true,
+                    syncStatus: 'PENDING'
                   });
                 }
-              } else {
-                const existing = mergedMap.get(pb.id)!;
-                existing.is_offline = pb.syncStatus !== 'SYNCED';
-                existing.syncStatus = pb.syncStatus;
               }
             }
           });
@@ -1937,19 +1929,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       prevUserIdRef.current = currentUserId || null;
       if (currentUserId) {
         const cached = loadCompleteLocalCashbooks(currentUserId);
-        const currentInMemory = booksRef.current || [];
-        const merged = new Map<string, Cashbook>();
-        cached.forEach(b => { if (b && b.id) merged.set(b.id, b); });
-        currentInMemory.forEach(b => { if (b && b.id) merged.set(b.id, { ...merged.get(b.id), ...b }); });
-        const combined = Array.from(merged.values());
-        if (combined.length > 0) {
-          setBooks(combined);
+        if (cached.length > 0) {
+          setBooks(cached);
           setIsLoading(false);
+        } else {
+          // Reset books for new user until fetch completes
+          setBooks([]);
         }
 
-        // Also query IndexedDB for full offline cache
+        // Also query IndexedDB for full offline cache strictly for this user
         offlineDb.getCachedCashbooks(currentUserId).then((idbBooks) => {
-          if (idbBooks && idbBooks.length > 0) {
+          if (idbBooks && idbBooks.length > 0 && currentUserId === prevUserIdRef.current) {
             const mapped = idbBooks.map((b: any) => ({
               ...b,
               createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
@@ -1960,10 +1950,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               })) : []
             }));
             const local = loadCompleteLocalCashbooks(currentUserId);
-            const inMem = booksRef.current || [];
             const idbMap = new Map<string, Cashbook>();
             local.forEach(b => { if (b && b.id) idbMap.set(b.id, b); });
-            inMem.forEach(b => { if (b && b.id) idbMap.set(b.id, { ...idbMap.get(b.id), ...b }); });
             mapped.forEach(b => { if (b && b.id && !idbMap.has(b.id)) idbMap.set(b.id, b); });
             const finalList = Array.from(idbMap.values());
             if (finalList.length > 0) {
@@ -4049,47 +4037,54 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
       const cashbooks = (rawCashbooksList || []).filter(cb => cb && cb.id && !pendingBookIds.has(cb.id));
 
-      if (cashbooks && cashbooks.length > 0) {
-        // Fetch all entries for these cashbooks in a single query
+      if (networkFetchSucceeded) {
+        // Authoritative remote cashbooks list from Supabase
         const cashbookIds = cashbooks.map(cb => cb.id);
         let entries: any[] = [];
-        try {
-          const { data: dbEntries, error: entErr } = await supabase
-            .from('entries')
-            .select('*')
-            .in('cashbook_id', cashbookIds)
-            .order('date', { ascending: false });
+        let entFetchFailed = false;
 
-          if (!entErr && dbEntries) {
-            entries = dbEntries;
-          } else if (entErr) {
-            console.warn('[Dashboard] Direct entries select warning, will check RBAC endpoint:', entErr.message);
+        if (cashbookIds.length > 0) {
+          try {
+            const { data: dbEntries, error: entErr } = await supabase
+              .from('entries')
+              .select('*')
+              .in('cashbook_id', cashbookIds)
+              .order('date', { ascending: false });
+
+            if (!entErr && dbEntries) {
+              entries = dbEntries;
+            } else if (entErr) {
+              entFetchFailed = true;
+              console.warn('[Dashboard] Direct entries select warning, will check RBAC endpoint:', entErr.message);
+            }
+          } catch (e: any) {
+            entFetchFailed = true;
+            console.warn('[Dashboard] Direct entries select exception:', e.message);
           }
-        } catch (e: any) {
-          console.warn('[Dashboard] Direct entries select exception:', e.message);
-        }
 
-        // Secondary fallback / augmentation via RBAC Service Backend to ensure member entries are fully loaded
-        try {
-          const rbacEntRes = await fetch('/api/rbac/cashbook-entries', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cashbookIds, cashbookId: cashbookIds })
-          });
+          // Secondary fallback / augmentation via RBAC Service Backend to ensure member entries are fully loaded
+          try {
+            const rbacEntRes = await fetch('/api/rbac/cashbook-entries', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ cashbookIds, cashbookId: cashbookIds })
+            });
 
-          if (rbacEntRes.ok) {
-            const rbacEntJson = await rbacEntRes.json();
-            if (rbacEntJson.success && Array.isArray(rbacEntJson.entries)) {
-              const existingEntryIds = new Set(entries.map(e => e.id));
-              for (const re of rbacEntJson.entries) {
-                if (re && re.id && !existingEntryIds.has(re.id)) {
-                  entries.push(re);
+            if (rbacEntRes.ok) {
+              const rbacEntJson = await rbacEntRes.json();
+              if (rbacEntJson.success && Array.isArray(rbacEntJson.entries)) {
+                entFetchFailed = false;
+                const existingEntryIds = new Set(entries.map(e => e.id));
+                for (const re of rbacEntJson.entries) {
+                  if (re && re.id && !existingEntryIds.has(re.id)) {
+                    entries.push(re);
+                  }
                 }
               }
             }
+          } catch (rbacEntErr) {
+            console.warn('[Dashboard] RBAC entries fallback note:', rbacEntErr);
           }
-        } catch (rbacEntErr) {
-          console.warn('[Dashboard] RBAC entries fallback note:', rbacEntErr);
         }
 
         const entriesMapByCashbook = new Map<string, any[]>();
@@ -4164,8 +4159,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             };
           });
 
-          // If network fetch for entries failed or returned empty while we have cached entries, preserve them
-          if (entryList.length === 0) {
+          // Only restore cached entries if entries network query actually failed
+          if (entryList.length === 0 && entFetchFailed) {
             const existingBook = booksRef.current.find(b => b.id === cb.id);
             const cached = entriesCache.get(cb.id) || existingBook?.transactions || [];
             if (cached.length > 0) {
@@ -4187,26 +4182,28 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           };
         });
 
-        // Load and merge pending offline cashbooks from IndexedDB
+        // Load and merge pending offline cashbooks from IndexedDB (strictly if PENDING sync)
         try {
           const pendingBooks = await offlineDb.getPendingCashbooks();
           if (pendingBooks && pendingBooks.length > 0) {
             for (const pb of pendingBooks) {
-              const existingIdx = mappedBooks.findIndex(b => b.id === pb.id);
-              if (existingIdx === -1) {
-                mappedBooks.unshift({
-                  id: pb.id,
-                  name: pb.name,
-                  user_id: pb.user_id || session.user.id,
-                  user_name: pb.user_name || 'User',
-                  createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
-                  transactions: entriesCache.get(pb.id) || [],
-                  is_offline: pb.syncStatus !== 'SYNCED',
-                  syncStatus: pb.syncStatus || 'PENDING'
-                });
-              } else {
-                mappedBooks[existingIdx].is_offline = pb.syncStatus !== 'SYNCED';
-                mappedBooks[existingIdx].syncStatus = pb.syncStatus;
+              if (pb && pb.id && pb.syncStatus === 'PENDING') {
+                const existingIdx = mappedBooks.findIndex(b => b.id === pb.id);
+                if (existingIdx === -1) {
+                  mappedBooks.unshift({
+                    id: pb.id,
+                    name: pb.name,
+                    user_id: pb.user_id || session.user.id,
+                    user_name: pb.user_name || 'User',
+                    createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
+                    transactions: entriesCache.get(pb.id) || [],
+                    is_offline: true,
+                    syncStatus: 'PENDING'
+                  });
+                } else {
+                  mappedBooks[existingIdx].is_offline = true;
+                  mappedBooks[existingIdx].syncStatus = 'PENDING';
+                }
               }
             }
           }
@@ -4259,16 +4256,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         const finalMap = new Map<string, Cashbook>();
         const existingNames = new Set<string>();
 
-        // 1. Authoritative server books from database
+        // 1. Authoritative server books from database (SUPABASE IS SINGLE SOURCE OF TRUTH)
         cleanServerBooks.forEach(b => {
           finalMap.set(b.id, b);
           existingNames.add(b.name.trim().toLowerCase());
         });
 
-        // 2. Only add offline books that are NOT deleted and not duplicated
+        // 2. Only add offline books that are strictly PENDING sync and NOT deleted
         try {
           const pendingOffline = (offlineDb.getLocalCashbooks() || [])
-            .filter(pb => pb && pb.id && !deletedIds.has(pb.id));
+            .filter(pb => pb && pb.id && !deletedIds.has(pb.id) && pb.syncStatus === 'PENDING');
 
           pendingOffline.forEach(pb => {
             const normName = (pb.name || '').trim().toLowerCase();
@@ -4280,20 +4277,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 user_name: pb.user_name || 'User',
                 createdAt: pb.created_at ? new Date(pb.created_at) : ((pb as any).createdAt ? new Date((pb as any).createdAt) : new Date()),
                 transactions: entriesCache.get(pb.id) || [],
-                is_offline: pb.syncStatus !== 'SYNCED',
-                syncStatus: pb.syncStatus || 'PENDING'
+                is_offline: true,
+                syncStatus: 'PENDING'
               });
               existingNames.add(normName);
             }
           });
-
-          // Also retain any active in-memory books not yet returned by the server
-          (booksRef.current || []).forEach(b => {
-            if (b && b.id && !deletedIds.has(b.id) && !finalMap.has(b.id)) {
-              finalMap.set(b.id, b);
-            }
-          });
         } catch (e) {}
+
+        // NO RESURRECTION OF DELETED BOOKS:
+        // Do NOT re-add books from booksRef.current! If a book is missing from Supabase, it is deleted!
 
         const finalMergedList = sortCashbooksLatestFirst(Array.from(finalMap.values()));
         setBooks(finalMergedList);
@@ -4306,12 +4299,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           localStorage.removeItem('trackbook_cached_books');
         } catch (e) {}
 
-        // Keep entriesCache fully hydrated for all cashbooks
+        // Keep entriesCache fully hydrated for all existing cashbooks, clean out deleted ones
+        const validBookIds = new Set(finalMergedList.map(b => b.id));
+        for (const cachedId of Array.from(entriesCache.keys())) {
+          if (!validBookIds.has(cachedId)) {
+            entriesCache.delete(cachedId);
+          }
+        }
         finalMergedList.forEach(cb => {
           if (cb && cb.id && Array.isArray(cb.transactions) && cb.transactions.length > 0) {
             entriesCache.set(cb.id, cb.transactions);
           }
         });
+
+        // If currently active cashbook was deleted from remote, reset selection
+        if (activeBookId && !validBookIds.has(activeBookId)) {
+          handleSelectBook(null);
+        }
 
         // Solve loading delay by resolving activeBookId immediately if not set
         if (bookSlugRef.current) {
@@ -4322,7 +4326,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         }
       } else {
         // Fallback for offline / network issue: preserve in-memory state and merge local cache
-        console.log('[Dashboard] No remote cashbooks returned. Preserving local cache and pending offline books.');
+        console.log('[Dashboard] No remote response (offline). Preserving local cache and pending offline books.');
         preserveAndMergeLocalCache();
       }
     } catch (error: any) {
@@ -4391,6 +4395,86 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [session, fetchData]);
+
+  // Real-time synchronization: listen to changes in cashbooks table (INSERT, UPDATE, DELETE)
+  // This guarantees that any changes made on the mobile APK or web immediately reflect everywhere without manual refresh
+  useEffect(() => {
+    if (!supabase || !session?.user?.id) return;
+
+    const currentUserId = session.user.id;
+    const currentUserEmail = (session.user.email || '').trim().toLowerCase();
+
+    const channel = supabase
+      .channel(`realtime_cashbooks_sync_${currentUserId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cashbooks' },
+        (payload: any) => {
+          console.log('[Realtime] Cashbook table change detected:', payload.eventType, payload);
+
+          if (payload.eventType === 'DELETE') {
+            const deletedId = payload.old?.id;
+            if (deletedId) {
+              recordDeletedBookId(deletedId);
+              setBooks(prev => prev.filter(b => b.id !== deletedId));
+              booksRef.current = booksRef.current.filter(b => b.id !== deletedId);
+              entriesCache.delete(deletedId);
+              if (activeBookId === deletedId) {
+                handleSelectBook(null);
+              }
+              try {
+                const cacheKey = `trackbook_cached_books_${currentUserId}`;
+                const raw = localStorage.getItem(cacheKey);
+                if (raw) {
+                  const list = JSON.parse(raw);
+                  if (Array.isArray(list)) {
+                    localStorage.setItem(cacheKey, JSON.stringify(list.filter((b: any) => b.id !== deletedId)));
+                  }
+                }
+                localStorage.removeItem('trackbook_cached_books_latest');
+                offlineDb.deleteCashbook(deletedId);
+              } catch (_) {}
+            }
+          } else if (payload.eventType === 'INSERT') {
+            const newRow = payload.new;
+            if (newRow && (newRow.user_id === currentUserId || (currentUserEmail && newRow.user_email?.toLowerCase() === currentUserEmail))) {
+              const deletedIds = getDeletedBookIds();
+              if (deletedIds.has(newRow.id)) return;
+
+              setBooks(prev => {
+                if (prev.some(b => b.id === newRow.id)) return prev;
+                const formatted: Cashbook = {
+                  id: newRow.id,
+                  name: newRow.name,
+                  user_id: newRow.user_id || currentUserId,
+                  user_name: newRow.user_name || 'User',
+                  createdAt: newRow.created_at ? new Date(newRow.created_at) : new Date(),
+                  transactions: [],
+                  is_offline: false,
+                  syncStatus: 'SYNCED'
+                };
+                const next = sortCashbooksLatestFirst([formatted, ...prev]);
+                try {
+                  localStorage.setItem(`trackbook_cached_books_${currentUserId}`, JSON.stringify(next));
+                  localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(next));
+                } catch (_) {}
+                return next;
+              });
+            }
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedRow = payload.new;
+            if (updatedRow && updatedRow.id) {
+              setBooks(prev => prev.map(b => b.id === updatedRow.id ? { ...b, name: updatedRow.name } : b));
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, session?.user?.id, session?.user?.email, activeBookId]);
 
   // Automatic migration utility for legacy base64 images in database tables
   useEffect(() => {
@@ -4845,17 +4929,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setIsCreatingBook(false);
     setIsSubmitting(false);
 
-    // Sync in background via backend proxy endpoint, direct Supabase, or offline queue
+    // Sync in background via direct Supabase, backend proxy endpoint, or offline queue
     const resolvedUserName = session.user.user_metadata?.full_name || 
                              session.user.user_metadata?.name || 
                              session.user.email?.split('@')[0] || 'User';
 
-    const payload = { 
+    const payload: any = { 
       id: newBook.id, 
       name: newBook.name, 
       created_at: safeToISOString(newBook.createdAt),
       user_id: session.user.id,
-      user_name: resolvedUserName
+      user_name: resolvedUserName,
+      user_email: session.user.email || undefined
     };
 
     const isOffline = typeof navigator !== 'undefined' && (!navigator.onLine || syncManager.network.state === 'offline');
@@ -4865,62 +4950,65 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return;
     }
 
-    // Try backend sync endpoint first (runs via service role on Express server)
     let syncSuccess = false;
-    try {
-      const res = await fetch('/api/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'cashbook', ...payload })
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.success === true) {
-          syncSuccess = true;
-          console.log('[CreateBook] Book created/synced successfully via backend endpoint:', newBook.id);
-        }
-      }
-    } catch (apiErr: any) {
-      console.log('[CreateBook] Notice communicating with backend sync, trying direct fallback:', apiErr?.message);
-    }
 
-    if (!syncSuccess && supabase) {
+    // 1. Direct Supabase insert first with user's authenticated session so it's immediately available in mobile APK
+    if (supabase) {
       try {
         const { error } = await supabase
           .from('cashbooks')
           .insert([payload]);
-        if (error) {
+        if (!error) {
+          syncSuccess = true;
+          console.log('[CreateBook] Direct Supabase insert successful:', newBook.id);
+        } else {
+          // If column mismatch error (e.g. user_email or user_name not in table schema), retry with core columns
           if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
-            const fallbackPayload = { ...payload };
-            delete fallbackPayload.user_name;
+            const fallbackPayload: any = {
+              id: payload.id,
+              name: payload.name,
+              created_at: payload.created_at,
+              user_id: payload.user_id
+            };
             const { error: retryError } = await supabase
               .from('cashbooks')
               .insert([fallbackPayload]);
-            if (retryError) {
-              console.warn('[CreateBook] Supabase retry note:', retryError.message);
-              await syncManager.saveOfflineCashbook(payload);
-            } else {
+            if (!retryError) {
               syncSuccess = true;
+              console.log('[CreateBook] Direct Supabase insert (fallback columns) successful:', newBook.id);
             }
           } else {
-            console.warn('[CreateBook] Supabase insert note:', error.message);
-            await syncManager.saveOfflineCashbook(payload);
+            console.warn('[CreateBook] Direct Supabase insert note, falling back to sync endpoint:', error.message);
           }
-        } else {
-          syncSuccess = true;
         }
-      } catch (error: any) {
-        const isNetwork = !navigator.onLine ||
-          error?.name === 'TypeError' ||
-          error?.message?.toLowerCase().includes('failed to fetch') ||
-          error?.message?.toLowerCase().includes('network');
-        if (isNetwork) {
-          console.log('[CreateBook] Connection offline/dropped during creation. Queued for background sync:', newBook.id);
-        } else {
-          console.warn('[CreateBook] Notice during book creation:', error?.message || error);
+      } catch (err: any) {
+        console.warn('[CreateBook] Direct Supabase insert exception:', err?.message);
+      }
+    }
+
+    // 2. Try backend sync endpoint if direct insert was not successful
+    if (!syncSuccess) {
+      try {
+        const res = await fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cashbook', ...payload })
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.success === true) {
+            syncSuccess = true;
+            console.log('[CreateBook] Book created/synced successfully via backend endpoint:', newBook.id);
+          }
         }
+      } catch (apiErr: any) {
+        console.warn('[CreateBook] Sync API error, saving to offline queue:', apiErr?.message);
         await syncManager.saveOfflineCashbook(payload);
       }
+    }
+
+    if (!syncSuccess) {
+      await syncManager.saveOfflineCashbook(payload);
     }
   };
 
