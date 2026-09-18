@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { addPdfBrandingFooter } from '../utils/pdfBranding';
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx-js-style';
 import { uploadToCloudinary, getUserCloudinaryFolder, getExportOptimizedCloudinaryUrl } from './cloudinary';
 import { processAndOcrImage } from './ocrService';
 
@@ -823,27 +823,11 @@ export class BackgroundExportManager {
         }));
 
         task.progress = 70;
-        task.message = 'Computing formulas, balances and sheet summary...';
+        task.message = 'Computing dynamic SUBTOTAL formulas, balances and sheet summary...';
         await this.db.saveTask(task);
         this.notifyListeners();
 
-        const totalIn = transactions.filter(t => t.type === 'in').reduce((sum, t) => sum + (t.amount || 0), 0);
-        const totalOut = transactions.filter(t => t.type === 'out').reduce((sum, t) => sum + (t.amount || 0), 0);
-        const balance = totalIn - totalOut;
-
-        const ws = XLSX.utils.json_to_sheet(data);
-        
-        // Add summary rows
-        XLSX.utils.sheet_add_aoa(ws, [
-          [],
-          ['', '', '', '', totalIn, totalOut],
-          ['', '', '', '', balance]
-        ], { origin: -1 });
-
-        // Update summary labels to align with the new column structure
-        const lastRow = XLSX.utils.decode_range(ws['!ref'] || 'A1').e.r;
-        ws[XLSX.utils.encode_cell({ r: lastRow - 1, c: 3 })] = { v: 'TOTAL', t: 's' };
-        ws[XLSX.utils.encode_cell({ r: lastRow, c: 3 })] = { v: 'BALANCE', t: 's' };
+        const ws = buildTransactionsWorksheet(transactions, transactionPageMap);
 
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Transactions");
@@ -1581,33 +1565,7 @@ export class BackgroundExportManager {
       currentPage += pagesUsed;
     }
 
-    const data = transactions.map(t => ({
-      Date: safeFormatDate(t.date),
-      Details: t.description,
-      Category: t.category,
-      Mode: t.mode,
-      'Cash In': t.type === 'in' ? t.amount : 0,
-      'Cash Out': t.type === 'out' ? t.amount : 0,
-      'Reference': transactionPageMap.get(t.id) || '-'
-    }));
-
-    const totalIn = transactions.filter(t => t.type === 'in').reduce((sum, t) => sum + (t.amount || 0), 0);
-    const totalOut = transactions.filter(t => t.type === 'out').reduce((sum, t) => sum + (t.amount || 0), 0);
-    const balance = totalIn - totalOut;
-
-    const ws = XLSX.utils.json_to_sheet(data);
-    
-    // Add summary rows
-    XLSX.utils.sheet_add_aoa(ws, [
-      [],
-      ['', '', '', '', totalIn, totalOut],
-      ['', '', '', '', balance]
-    ], { origin: -1 });
-
-    // Update summary labels
-    const lastRow = XLSX.utils.decode_range(ws['!ref'] || 'A1').e.r;
-    ws[XLSX.utils.encode_cell({ r: lastRow - 1, c: 3 })] = { v: 'TOTAL', t: 's' };
-    ws[XLSX.utils.encode_cell({ r: lastRow, c: 3 })] = { v: 'BALANCE', t: 's' };
+    const ws = buildTransactionsWorksheet(transactions, transactionPageMap);
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Transactions");
@@ -1789,3 +1747,95 @@ function safeFormatDate(dateStr: string) {
     return dateStr;
   }
 }
+
+/**
+ * Builds an Excel worksheet with transaction records, an AutoFilter table,
+ * and dynamic Excel SUBTOTAL(109, ...) formulas that automatically update
+ * when filtered or sorted in Excel.
+ */
+export function buildTransactionsWorksheet(transactions: any[], transactionPageMap?: Map<string, string>) {
+  const data = (transactions || []).map(t => ({
+    Date: safeFormatDate(t.date),
+    Details: t.description || '',
+    Category: t.category || '',
+    Mode: t.mode || '',
+    'Cash In': t.type === 'in' ? (t.amount || 0) : 0,
+    'Cash Out': t.type === 'out' ? (t.amount || 0) : 0,
+    'Reference': (transactionPageMap && transactionPageMap.get(t.id)) || '-'
+  }));
+
+  const totalIn = (transactions || []).filter(t => t.type === 'in').reduce((sum, t) => sum + (t.amount || 0), 0);
+  const totalOut = (transactions || []).filter(t => t.type === 'out').reduce((sum, t) => sum + (t.amount || 0), 0);
+  const balance = totalIn - totalOut;
+
+  const ws = XLSX.utils.json_to_sheet(data);
+
+  const startRow = 2;
+  const endRow = Math.max(2, data.length + 1);
+
+  // Add blank row, then dynamic TOTAL row with SUBTOTAL(109,...), then dynamic BALANCE row
+  // Note: Col 0=A (Date), 1=B (Details), 2=C (Category), 3=D (Mode), 4=E (Cash In), 5=F (Cash Out), 6=G (Reference)
+  XLSX.utils.sheet_add_aoa(ws, [
+    [],
+    ['', '', '', 'TOTAL', { t: 'n', f: `SUBTOTAL(109,E${startRow}:E${endRow})`, v: totalIn }, { t: 'n', f: `SUBTOTAL(109,F${startRow}:F${endRow})`, v: totalOut }],
+    ['', '', '', 'BALANCE', { t: 'n', f: `SUBTOTAL(109,E${startRow}:E${endRow})-SUBTOTAL(109,F${startRow}:F${endRow})`, v: balance }]
+  ], { origin: -1 });
+
+  // Enable AutoFilter on the data table (columns A to G)
+  ws['!autofilter'] = { ref: `A1:G${endRow}` };
+
+  // Set standard column widths so values and headers are comfortably readable
+  ws['!cols'] = [
+    { wch: 14 }, // Date
+    { wch: 30 }, // Details
+    { wch: 16 }, // Category
+    { wch: 16 }, // Mode
+    { wch: 14 }, // Cash In
+    { wch: 14 }, // Cash Out
+    { wch: 24 }  // Reference
+  ];
+
+  // Apply thin black borders and custom styling
+  const borderStyle = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'thin', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } }
+  };
+
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+  const lastRow = range.e.r;
+  for (let R = range.s.r; R <= range.e.r; ++R) {
+    // Skip the blank separator row between transactions and totals
+    if (R === lastRow - 2) continue;
+
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      // Summary rows: style columns 3, 4, 5 on TOTAL and columns 3, 4 on BALANCE
+      if (R === lastRow - 1 && (C < 3 || C > 5)) continue;
+      if (R === lastRow && (C < 3 || C > 4)) continue;
+
+      const cell_address = XLSX.utils.encode_cell({ r: R, c: C });
+      if (!ws[cell_address]) {
+        ws[cell_address] = { t: 's', v: '' };
+      }
+
+      const cell = ws[cell_address];
+      cell.s = cell.s || {};
+      cell.s.border = borderStyle;
+
+      // Header row styling: light gray background fill and bold text
+      if (R === 0) {
+        cell.s.fill = { fgColor: { rgb: 'F2F2F2' } };
+        cell.s.font = { bold: true };
+      }
+
+      // Summary labels and values: bold text
+      if (R >= lastRow - 1) {
+        cell.s.font = { bold: true };
+      }
+    }
+  }
+
+  return ws;
+}
+

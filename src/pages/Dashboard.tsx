@@ -14,6 +14,7 @@ import {
   ArrowDownCircle, 
   History, 
   BookOpen, 
+  BookMarked,
   Loader2,
   X,
   Image as ImageIcon,
@@ -26,6 +27,7 @@ import {
   Key,
   List,
   Download,
+  Filter,
   RotateCw,
   RotateCcw,
   RefreshCw,
@@ -92,7 +94,7 @@ import XLSX from 'xlsx-js-style';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
-import { backgroundExportManager } from '../services/exportManager';
+import { backgroundExportManager, buildTransactionsWorksheet } from '../services/exportManager';
 import { syncManager, offlineDb, OfflineEntry } from '../services/syncManager';
 import { SyncStatusBadge } from '../components/SyncStatusBadge';
 import DownloadCenter, { DownloadCenterTrigger } from '../components/DownloadCenter';
@@ -321,6 +323,38 @@ function safeFormatDate(dateVal: any, options?: Intl.DateTimeFormatOptions, loca
   return 'N/A';
 }
 
+function getBookRelativeDate(book: any): string {
+  if (!book) return 'Updated recently';
+  const dateVal = book.updated_at || book.created_at || book.createdAt;
+  const txs = Array.isArray(book.transactions) ? book.transactions : [];
+  let maxTime = dateVal ? new Date(dateVal).getTime() : 0;
+  for (let i = 0; i < txs.length; i++) {
+    const tTime = txs[i]?.date ? new Date(txs[i].date).getTime() : 0;
+    if (tTime > maxTime) {
+      maxTime = tTime;
+    }
+  }
+  if (!maxTime || isNaN(maxTime)) {
+    return 'Updated recently';
+  }
+  const diffMs = Date.now() - maxTime;
+  if (diffMs < 0) return 'Updated just now';
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMinutes < 1) return 'Updated just now';
+  if (diffMinutes < 60) return `Updated ${diffMinutes}m ago`;
+  if (diffHours < 24) return `Updated ${diffHours}h ago`;
+  if (diffDays === 1) return 'Updated yesterday';
+  if (diffDays < 30) return `Updated ${diffDays} days ago`;
+  if (diffDays < 365) {
+    const months = Math.floor(diffDays / 30);
+    return `Updated ${months} ${months === 1 ? 'month' : 'months'} ago`;
+  }
+  return `Updated ${new Date(maxTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+}
+
 function safeFormatTime(dateVal: any, options?: Intl.DateTimeFormatOptions, locales: string = 'en-IN'): string {
   if (!dateVal) return 'N/A';
   try {
@@ -426,6 +460,52 @@ function persistAttachmentCacheToStorage() {
   } catch (e) {
     console.error('[Cache] Error saving attachment cache to localStorage:', e);
   }
+}
+
+function getBookDisplayInfo(book: any): { text: string; isNegative: boolean } {
+  if (!book) return { text: '0', isNegative: false };
+  const txs: any[] = (Array.isArray(book.transactions) && book.transactions.length > 0)
+    ? book.transactions
+    : (entriesCache.get(book.id) || []);
+  let cashIn = 0;
+  let cashOut = 0;
+  for (let i = 0; i < txs.length; i++) {
+    const t = txs[i];
+    const amt = parseFloat(t?.amount) || 0;
+    if (t?.type === 'in') {
+      cashIn += amt;
+    } else if (t?.type === 'out') {
+      cashOut += amt;
+    }
+  }
+  const net = cashIn - cashOut;
+
+  const formatAmt = (val: number): string => {
+    const absVal = Math.abs(val);
+    if (isNaN(absVal)) return '0';
+    if (absVal % 1 !== 0) {
+      // Has decimal/fractional part - format with 2 decimal places
+      return absVal.toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    }
+    return absVal.toLocaleString('en-IN');
+  };
+
+  // If net balance is negative, display with minus sign and red color
+  if (net < 0) {
+    return {
+      text: `-${formatAmt(net)}`,
+      isNegative: true,
+    };
+  }
+
+  // If net balance is positive or zero, display formatted net amount in emerald green
+  return {
+    text: formatAmt(net),
+    isNegative: false,
+  };
 }
 
 /**
@@ -7035,7 +7115,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     let currentPage = 1;
     const transactionPageMap = new Map<string, string>();
     
-    const transactionsWithImages = filteredTransactions.filter(t => t.images && t.images.length > 0);
+    // Determine transactions to export: if in reports tab and filter active, export filtered; otherwise active/filtered
+    const transactionsToExport = filteredTransactions;
+
+    const transactionsWithImages = transactionsToExport.filter(t => t.images && t.images.length > 0);
     for (const t of transactionsWithImages) {
       const layout = t.imageLayout || 'split';
       const imageCount = t.images?.length || 0;
@@ -7050,76 +7133,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       currentPage += pagesUsed;
     }
 
-    const data = filteredTransactions.map(t => ({
-      Date: safeFormatDate(t.date),
-      Details: t.description,
-      Category: t.category,
-      Mode: t.mode,
-      'Cash In': t.type === 'in' ? t.amount : 0,
-      'Cash Out': t.type === 'out' ? t.amount : 0,
-      'Reference': transactionPageMap.get(t.id) || '-'
-    }));
-
-    // Add totals and balance as per user reference
-    const totalIn = totals.in;
-    const totalOut = totals.out;
-    const balance = totals.net;
-
-    const ws = XLSX.utils.json_to_sheet(data);
-    
-    // Add summary rows
-    XLSX.utils.sheet_add_aoa(ws, [
-      [],
-      ['', '', '', '', totalIn, totalOut],
-      ['', '', '', '', balance]
-    ], { origin: -1 });
-
-    // Update summary labels to align with the new column structure
-    const lastRow = XLSX.utils.decode_range(ws['!ref'] || 'A1').e.r;
-    ws[XLSX.utils.encode_cell({ r: lastRow - 1, c: 3 })] = { v: 'TOTAL', t: 's' };
-    ws[XLSX.utils.encode_cell({ r: lastRow, c: 3 })] = { v: 'BALANCE', t: 's' };
-
-    // Apply thin black borders and custom styling to all cells in the sheet
-    const borderStyle = {
-      top: { style: 'thin', color: { rgb: '000000' } },
-      bottom: { style: 'thin', color: { rgb: '000000' } },
-      left: { style: 'thin', color: { rgb: '000000' } },
-      right: { style: 'thin', color: { rgb: '000000' } }
-    };
-
-    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-    for (let R = range.s.r; R <= range.e.r; ++R) {
-      // Skip the blank separator row between transactions and totals
-      if (R === lastRow - 2) continue;
-      
-      for (let C = range.s.c; C <= range.e.c; ++C) {
-        const cell_address = XLSX.utils.encode_cell({ r: R, c: C });
-        
-        // On summary rows, we only style cells starting from column 3 (TOTAL/BALANCE labels and their values)
-        if (R >= lastRow - 1 && C < 3) {
-          continue; 
-        }
-
-        if (!ws[cell_address]) {
-          ws[cell_address] = { t: 's', v: '' };
-        }
-        
-        const cell = ws[cell_address];
-        cell.s = cell.s || {};
-        cell.s.border = borderStyle;
-        
-        // Header styling: light gray background fill and bold text
-        if (R === 0) {
-          cell.s.fill = { fgColor: { rgb: 'F2F2F2' } };
-          cell.s.font = { bold: true };
-        }
-        
-        // Summary labels and values: bold text
-        if (R >= lastRow - 1) {
-          cell.s.font = { bold: true };
-        }
-      }
-    }
+    const ws = buildTransactionsWorksheet(transactionsToExport, transactionPageMap);
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Transactions");
@@ -8808,96 +8822,215 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </button>
                   </div>
                 </div>
-              ) : (
-                <div className={cn(
-                  "grid w-full",
-                  viewMode === 'grid' 
-                    ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6" 
-                    : "grid-cols-1 gap-3"
-                )}>
-                  {filteredBooks.map((book) => (
-                    <motion.div
-                      key={book.id}
-                      initial={false}
-                      animate={
-                        justEditedBookId === book.id
-                          ? { scale: [1, 1.05, 1.05, 1], y: 0, opacity: 1 }
-                          : { opacity: 1, y: 0, scale: 1 }
-                      }
-                      transition={
-                        justEditedBookId === book.id
-                          ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
-                          : { duration: 0.2, ease: "easeOut" }
-                      }
-                      onMouseDown={() => onTouchStartBook(book.id)}
-                      onMouseUp={onTouchEndBook}
-                      onTouchStart={() => onTouchStartBook(book.id)}
-                      onTouchEnd={onTouchEndBook}
-                      onClick={() => handleBookPress(book.id)}
-                      className={cn(
-                        "group border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full",
-                        viewMode === 'list'
-                          ? "p-3 sm:p-3.5 md:p-3 md:h-[72px] border-b border-slate-100/80 dark:border-zinc-800/60"
-                          : "p-4 sm:p-5 md:p-4 md:h-[120px]",
-                        justEditedBookId === book.id
-                          ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
-                          : theme === 'dark' 
-                            ? "border-transparent bg-transparent hover:bg-zinc-900/90 hover:border-zinc-800 hover:shadow-sm" 
-                            : "border-transparent bg-transparent hover:bg-slate-100 hover:border-slate-200 hover:shadow-sm",
-                      )}
-                    >
-                      {selectedBooks.has(book.id) && (
-                        <div className="absolute top-2 right-2 z-10">
-                          <div className="bg-indigo-600 text-white rounded-full p-1 shadow-md">
-                            <Check size={12} />
+              ) : viewMode === 'grid' ? (
+                /* GRID VIEW */
+                <div className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                  {filteredBooks.map((book) => {
+                    const displayInfo = getBookDisplayInfo(book);
+                    return (
+                      <motion.div
+                        key={book.id}
+                        initial={false}
+                        animate={
+                          justEditedBookId === book.id
+                            ? { scale: [1, 1.05, 1.05, 1], y: 0, opacity: 1 }
+                            : { opacity: 1, y: 0, scale: 1 }
+                        }
+                        transition={
+                          justEditedBookId === book.id
+                            ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
+                            : { duration: 0.2, ease: "easeOut" }
+                        }
+                        onMouseDown={() => onTouchStartBook(book.id)}
+                        onMouseUp={onTouchEndBook}
+                        onTouchStart={() => onTouchStartBook(book.id)}
+                        onTouchEnd={onTouchEndBook}
+                        onClick={() => handleBookPress(book.id)}
+                        className={cn(
+                          "group border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full p-4 sm:p-5 md:p-4 md:h-[120px]",
+                          justEditedBookId === book.id
+                            ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
+                            : theme === 'dark' 
+                              ? "border-transparent bg-transparent hover:bg-zinc-900/90 hover:border-zinc-800 hover:shadow-sm" 
+                              : "border-transparent bg-transparent hover:bg-slate-100 hover:border-slate-200 hover:shadow-sm",
+                        )}
+                      >
+                        {selectedBooks.has(book.id) && (
+                          <div className="absolute top-2 right-2 z-10">
+                            <div className="bg-indigo-600 text-white rounded-full p-1 shadow-md">
+                              <Check size={12} />
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex-grow flex-1 min-w-0 flex items-center gap-2 md:gap-3 pr-1 md:pr-1.5">
+                          <div className="p-2 md:p-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl md:rounded-[14px] group-hover:scale-110 transition-transform flex-shrink-0">
+                            <BookOpen size={18} className="w-[18px] h-[18px] md:w-5 md:h-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h4 className={cn(
+                              "font-bold text-base sm:text-[17px] md:text-lg break-words whitespace-normal leading-snug line-clamp-2 transition-colors duration-300",
+                              theme === 'dark' ? "text-slate-100" : "text-slate-800"
+                            )}>{book.name}</h4>
+                            <p className={cn(
+                              "text-[9px] md:text-[10px] mt-0.5 transition-colors duration-300",
+                              theme === 'dark' ? "text-slate-500" : "text-slate-400"
+                            )}>Created on {formatDateTime12h(book.createdAt)}</p>
                           </div>
                         </div>
-                      )}
-                      <div className="flex-grow flex-1 min-w-0 flex items-center gap-2 md:gap-3 pr-1 md:pr-1.5">
-                        <div className="p-2 md:p-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl md:rounded-[14px] group-hover:scale-110 transition-transform flex-shrink-0">
-                          <BookOpen size={18} className="w-[18px] h-[18px] md:w-5 md:h-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <h4 className={cn(
-                            "font-bold text-base sm:text-[17px] md:text-lg break-words whitespace-normal leading-snug line-clamp-2 transition-colors duration-300",
-                            theme === 'dark' ? "text-slate-100" : "text-slate-800"
-                          )}>{book.name}</h4>
-                          <p className={cn(
-                            "text-[9px] md:text-[10px] mt-0.5 transition-colors duration-300",
-                            theme === 'dark' ? "text-slate-500" : "text-slate-400"
-                          )}>Created on {formatDateTime12h(book.createdAt)}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0 ml-1.5 md:ml-3">
-                        <div className="flex items-center gap-0.5 md:gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 md:pl-2.5">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); setIsEditingBook(book.id); setEditBookName(book.name); }}
-                            className="p-1 md:p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all"
-                          >
-                            <Pencil size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
-                          </button>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleDeleteBook(book.id); }}
-                            className="p-1 md:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all"
-                          >
-                            <Trash2 size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
-                          </button>
-                          <button 
-                            onClick={() => handleSelectBook(book.id)}
-                            className="p-1.5 md:p-1.5 text-indigo-800 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all ml-0.5"
-                          >
-                            <motion.div
-                              animate={{ x: [0, 3, 0] }}
-                              transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                        
+                        <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0 ml-1.5 md:ml-3">
+                          <span className={cn(
+                            "font-bold text-sm sm:text-base mr-1.5 sm:mr-2.5 select-none tracking-tight",
+                            displayInfo.isNegative 
+                              ? "text-rose-600 dark:text-rose-400" 
+                              : "text-emerald-600 dark:text-emerald-400"
+                          )}>
+                            {displayInfo.text}
+                          </span>
+                          <div className="flex items-center gap-0.5 md:gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 md:pl-2.5">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setIsEditingBook(book.id); setEditBookName(book.name); }}
+                              className="p-1 md:p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all cursor-pointer"
                             >
-                              <ArrowRight size={16} className="w-[16px] h-[16px] md:w-[18px] md:h-[18px]" />
-                            </motion.div>
-                          </button>
+                              <Pencil size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
+                            </button>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); handleDeleteBook(book.id); }}
+                              className="p-1 md:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all cursor-pointer"
+                            >
+                              <Trash2 size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
+                            </button>
+                            <button 
+                              onClick={() => handleSelectBook(book.id)}
+                              className="p-1.5 md:p-1.5 text-indigo-800 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all ml-0.5 cursor-pointer"
+                            >
+                              <motion.div
+                                animate={{ x: [0, 3, 0] }}
+                                transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                              >
+                                <ArrowRight size={16} className="w-[16px] h-[16px] md:w-[18px] md:h-[18px]" />
+                              </motion.div>
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    </motion.div>
-                  ))}
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              ) : (
+                /* LIST VIEW - EXACT REFERENCE DESIGN MATCHING USER SCREENSHOT */
+                <div className="grid w-full grid-cols-1 gap-2.5">
+                  {filteredBooks.map((book) => {
+                    const displayInfo = getBookDisplayInfo(book);
+                    return (
+                      <motion.div
+                        key={book.id}
+                        initial={false}
+                        animate={
+                          justEditedBookId === book.id
+                            ? { scale: [1, 1.02, 1.02, 1], y: 0, opacity: 1 }
+                            : { opacity: 1, y: 0, scale: 1 }
+                        }
+                        transition={
+                          justEditedBookId === book.id
+                            ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
+                            : { duration: 0.2, ease: "easeOut" }
+                        }
+                        onMouseDown={() => onTouchStartBook(book.id)}
+                        onMouseUp={onTouchEndBook}
+                        onTouchStart={() => onTouchStartBook(book.id)}
+                        onTouchEnd={onTouchEndBook}
+                        onClick={() => handleBookPress(book.id)}
+                        className={cn(
+                          "group border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full p-3 sm:p-3.5 md:p-3 md:h-[72px]",
+                          justEditedBookId === book.id
+                            ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
+                            : theme === 'dark' 
+                              ? "border-transparent bg-transparent hover:bg-zinc-900/90 hover:border-zinc-800 hover:shadow-sm" 
+                              : "border-transparent bg-transparent hover:bg-slate-100 hover:border-slate-200 hover:shadow-sm",
+                        )}
+                      >
+                        {selectedBooks.has(book.id) && (
+                          <div className="absolute top-2 right-2 z-10">
+                            <div className="bg-indigo-600 text-white rounded-full p-1 shadow-md">
+                              <Check size={12} />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Left: Book Icon + Book Name & Created on Date */}
+                        <div className="flex-grow flex-1 min-w-0 flex items-center gap-2 md:gap-3 pr-1 md:pr-1.5">
+                          <div className="p-2 md:p-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl md:rounded-[14px] group-hover:scale-110 transition-transform flex-shrink-0">
+                            <BookOpen size={18} className="w-[18px] h-[18px] md:w-5 md:h-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h4 className={cn(
+                              "font-bold text-base sm:text-[17px] md:text-lg break-words whitespace-normal leading-snug line-clamp-1 transition-colors duration-300",
+                              theme === 'dark' ? "text-slate-100" : "text-slate-800"
+                            )}>{book.name}</h4>
+                            <p className={cn(
+                              "text-[10px] md:text-xs mt-0.5 transition-colors duration-300",
+                              theme === 'dark' ? "text-slate-500" : "text-slate-400"
+                            )}>Created on {formatDateTime12h(book.createdAt)}</p>
+                          </div>
+                        </div>
+
+                        {/* Right: [Cash In / Adjusted Amount] [Pencil] [Trash2] [ArrowRight] */}
+                        <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0 ml-1.5 md:ml-3">
+                          {/* Cash In / Display Amount in green (or red if negative) */}
+                          <span className={cn(
+                            "font-bold text-sm sm:text-base mr-1.5 sm:mr-2.5 select-none tracking-tight",
+                            displayInfo.isNegative 
+                              ? "text-rose-600 dark:text-rose-400" 
+                              : "text-emerald-600 dark:text-emerald-400"
+                          )}>
+                            {displayInfo.text}
+                          </span>
+
+                          <div className="flex items-center gap-0.5 md:gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 md:pl-2.5">
+                            {/* Edit */}
+                            <button 
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                setIsEditingBook(book.id); 
+                                setEditBookName(book.name); 
+                              }}
+                              className="p-1 md:p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all cursor-pointer"
+                              title="Edit Book"
+                            >
+                              <Pencil size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
+                            </button>
+
+                            {/* Delete */}
+                            <button 
+                              onClick={(e) => { 
+                                e.stopPropagation(); 
+                                handleDeleteBook(book.id); 
+                              }}
+                              className="p-1 md:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all cursor-pointer"
+                              title="Delete Book"
+                            >
+                              <Trash2 size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
+                            </button>
+
+                            {/* Open */}
+                            <button 
+                              onClick={() => handleSelectBook(book.id)}
+                              className="p-1.5 md:p-1.5 text-indigo-800 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all ml-0.5 cursor-pointer"
+                              title="Open Cashbook"
+                            >
+                              <motion.div
+                                animate={{ x: [0, 3, 0] }}
+                                transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                              >
+                                <ArrowRight size={16} className="w-[16px] h-[16px] md:w-[18px] md:h-[18px]" />
+                              </motion.div>
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
                 </div>
               )}
             </motion.div>
@@ -10661,7 +10794,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       theme === 'dark' ? "bg-zinc-950 hover:bg-emerald-950/10 border-zinc-900" : "bg-white hover:bg-emerald-50/20 border-slate-100"
                     )}
                   >
-                    <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-xl">
+                    <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-xl shrink-0">
                       <FileSpreadsheet size={24} />
                     </div>
                     <div className="min-w-0">
@@ -10670,6 +10803,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   </div>
 
+                  {/* PDF Export Card */}
                   <div 
                     onClick={() => {
                       if (activeBook) {
@@ -10695,7 +10829,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       theme === 'dark' ? "bg-zinc-950 hover:bg-rose-950/10 border-zinc-900" : "bg-white hover:bg-rose-50/20 border-slate-100"
                     )}
                   >
-                    <div className="p-3 bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 rounded-xl">
+                    <div className="p-3 bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 rounded-xl shrink-0">
                       <FileText size={24} />
                     </div>
                     <div className="min-w-0">
