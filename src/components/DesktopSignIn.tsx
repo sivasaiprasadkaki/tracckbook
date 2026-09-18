@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Loader2, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useRunawayButton } from '../hooks/useRunawayButton';
+import TypewriterText from './TypewriterText';
 
 interface DesktopSignInProps {
   email: string;
@@ -34,6 +36,12 @@ export default function DesktopSignIn({
   navigate
 }: DesktopSignInProps) {
   const [rememberMe, setRememberMe] = useState(true);
+
+  // Validation: Check if email and password are valid
+  const isEmailValid = Boolean(email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()));
+  const isPasswordValid = Boolean(password && password.trim().length > 0);
+  const isSignInFormValid = isEmailValid && isPasswordValid;
+  const { runawayProps } = useRunawayButton(isSignInFormValid);
 
   return (
     <div className="min-h-screen bg-[#fbf8ff] text-[#1b1a23] antialiased flex flex-col justify-between selection:bg-[#4648d4]/15 selection:text-[#4648d4] font-['Inter',sans-serif]">
@@ -105,8 +113,13 @@ export default function DesktopSignIn({
                   <span className="text-[11px] font-semibold tracking-wider text-slate-300 uppercase font-['Inter',sans-serif]">
                     TOTAL EXPENSES
                   </span>
-                  <div className="text-3xl font-bold tracking-tight text-white mt-1 font-['JetBrains_Mono',monospace]">
-                    ₹12,450<span className="text-xl text-white/70">.00</span>
+                  <div className="text-3xl font-bold tracking-tight text-white mt-1 font-['Inter',sans-serif] flex items-baseline">
+                    <TypewriterText 
+                      text="₹41,800.00" 
+                      speed={85} 
+                      delay={250} 
+                      cursorClassName="w-[3px] h-[0.8em] bg-white ml-1 inline-block align-baseline rounded-full" 
+                    />
                   </div>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-[#8455ef]/30 text-[#8455ef] border border-[#8455ef]/40 flex items-center justify-center pulse-ring">
@@ -137,9 +150,9 @@ export default function DesktopSignIn({
             {/* Transaction Rows */}
             <div className="space-y-2.5 font-['Inter',sans-serif]">
               {[
-                { icon: '🛒', title: 'Groceries & Supermarket', time: 'Today, 2:30 PM', amount: '-₹3,240.00' },
-                { icon: '☁️', title: 'AWS Cloud Services', time: 'Yesterday', amount: '-₹4,500.00' },
-                { icon: '🚗', title: 'Uber Rides', time: 'Aug 12', amount: '-₹850.00' }
+                { icon: '🍲', title: 'Food For 3 members', time: 'Today, 2:30 PM', amount: '-₹4,500.00' },
+                { icon: '🏨', title: 'Accomadation for 5 Members', time: 'Yesterday', amount: '-₹35,000.00' },
+                { icon: '🚕', title: 'Taxi For 5 members', time: 'Aug 12', amount: '-₹2,300.00' }
               ].map((item, idx) => (
                 <motion.div
                   key={item.title}
@@ -152,11 +165,18 @@ export default function DesktopSignIn({
                   <div className="flex items-center gap-3">
                     <span className="text-xl">{item.icon}</span>
                     <div>
-                      <div className="text-xs font-semibold text-white">{item.title}</div>
-                      <div className="text-[10px] text-slate-400">{item.time}</div>
+                      <div className="text-xs font-semibold text-white font-['Inter',sans-serif]">{item.title}</div>
+                      <div className="text-[10px] text-slate-400 font-['Inter',sans-serif]">{item.time}</div>
                     </div>
                   </div>
-                  <span className="text-xs font-bold font-['JetBrains_Mono',monospace] text-rose-300">{item.amount}</span>
+                  <span className="text-xs font-bold font-['Inter',sans-serif] text-rose-300 flex items-center">
+                    <TypewriterText 
+                      text={item.amount} 
+                      speed={65} 
+                      delay={500 + idx * 250} 
+                      cursor={false} 
+                    />
+                  </span>
                 </motion.div>
               ))}
             </div>
@@ -289,12 +309,10 @@ export default function DesktopSignIn({
                 </label>
               </div>
 
-              {/* Sign In Submit Button */}
+              {/* Sign In Submit Button with Playful Runaway Interaction */}
               <motion.button
-                type="submit"
+                {...runawayProps}
                 disabled={loading}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.985 }}
                 className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#4648d4] to-[#6052a8] text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-[#4648d4]/25 hover:shadow-lg hover:shadow-[#4648d4]/35 hover:brightness-105 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-['Inter',sans-serif]"
               >
                 {loading ? (

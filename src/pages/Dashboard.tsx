@@ -2188,6 +2188,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           preserveAndMergeLocalCache();
         } else if (prev && !offline) {
           setShowOfflineDialog(false);
+          setShowOfflinePdfDialog(false);
           setReconnectedToast('Internet connection restored! Synced.');
           setTimeout(() => setReconnectedToast(null), 3500);
           syncManager.triggerSync().then(() => {
@@ -4351,6 +4352,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     const handleNativeOnline = () => {
       console.log('[Dashboard] Native online event detected. Syncing in background.');
       setIsOffline(false);
+      setShowOfflinePdfDialog(false);
       syncManager.network.updateState('good');
       syncManager.triggerSync().then(() => {
         fetchData(true);
@@ -15700,12 +15702,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         cashbookName={pdfQualityModalState?.cashbookName || ''}
         transactions={pdfQualityModalState?.transactions || []}
         theme={theme}
+        onShowOfflineDialog={() => setShowOfflinePdfDialog(true)}
       />
 
       {/* Offline PDF Export Blocked Dialog Modal */}
       <AnimatePresence>
         {showOfflinePdfDialog && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
             <motion.div
               initial={{ scale: 0.92, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -15719,13 +15722,27 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <WifiOff size={26} className="stroke-[2.5]" />
               </div>
               
-              <div className="space-y-2">
-                <h3 className="text-xl font-black tracking-tight">PDF Export Offline</h3>
+              <div className="space-y-3">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-xs font-bold uppercase tracking-wider">
+                  <WifiOff size={13} />
+                  Offline Mode
+                </div>
+                <h3 className="text-lg sm:text-xl font-black tracking-tight text-slate-900 dark:text-white">
+                  You are Offline
+                </h3>
+                <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-900/50 text-center">
+                  <p className="text-sm font-bold text-amber-800 dark:text-amber-300 leading-snug">
+                    PDF reports cannot be downloaded while offline.
+                  </p>
+                  <p className="text-xs text-amber-700/80 dark:text-amber-400/80 mt-1 font-medium">
+                    Please reconnect to the internet to generate and download PDF reports.
+                  </p>
+                </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
-                  Generating and downloading PDF reports requires an active internet connection to download and render receipt attachments. Please reconnect to the internet to export as PDF.
+                  Generating PDF reports requires an active internet connection to download and render receipt attachments. As soon as you are reconnected, PDF download will work normally.
                 </p>
-                <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-zinc-900 text-[11px] text-slate-600 dark:text-slate-300 font-medium">
-                  Tip: Excel (.xlsx) export is fully supported offline.
+                <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-zinc-900 text-[11px] text-slate-600 dark:text-slate-300 font-medium border border-slate-200/60 dark:border-zinc-800">
+                  💡 <span className="font-semibold text-slate-800 dark:text-slate-200">Tip:</span> Excel (.xlsx) reports are fully supported offline.
                 </div>
               </div>
 
@@ -15737,7 +15754,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     vibrate();
                     setShowOfflinePdfDialog(false);
                   }}
-                  className="w-full py-3 px-4 rounded-xl text-xs font-bold transition-all shadow-md bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
+                  className="w-full py-3 px-4 rounded-xl text-xs font-bold transition-all shadow-md bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer active:scale-98"
                 >
                   Understood
                 </button>

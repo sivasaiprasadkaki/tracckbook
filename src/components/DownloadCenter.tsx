@@ -269,6 +269,18 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
   };
 
   const handleDownload = (taskId: string) => {
+    const isOfflineNow = typeof navigator !== 'undefined' && !navigator.onLine;
+    const task = tasks.find(t => t.id === taskId);
+    if (isOfflineNow && (task?.type === 'pdf' || !task?.type)) {
+      setInAppDialog({
+        type: 'warning',
+        title: 'Offline Notice',
+        message: 'You are currently offline. PDF reports cannot be downloaded without an active internet connection. Please reconnect to the internet to download your report.',
+        confirmText: 'Understood',
+        showCancel: false
+      });
+      return;
+    }
     backgroundExportManager.downloadCompletedReport(taskId);
   };
 

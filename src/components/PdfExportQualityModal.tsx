@@ -15,6 +15,7 @@ import {
   WifiOff
 } from 'lucide-react';
 import { backgroundExportManager, ExportTask } from '../services/exportManager';
+import { syncManager } from '../services/syncManager';
 import { cn } from '../lib/utils';
 
 export interface PdfExportQualityModalProps {
@@ -24,6 +25,7 @@ export interface PdfExportQualityModalProps {
   cashbookName: string;
   transactions: any[];
   theme: 'light' | 'dark';
+  onShowOfflineDialog?: () => void;
 }
 
 type QualityOption = 'original' | 'smart_compressed';
@@ -35,7 +37,8 @@ export function PdfExportQualityModal({
   cashbookId,
   cashbookName,
   transactions,
-  theme
+  theme,
+  onShowOfflineDialog
 }: PdfExportQualityModalProps) {
   const [selectedQuality, setSelectedQuality] = useState<QualityOption>('original');
   const [state, setState] = useState<ModalState>('select');
@@ -44,7 +47,46 @@ export function PdfExportQualityModal({
   const [statusMessage, setStatusMessage] = useState<string>('Preparing your PDF...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+  const [isOffline, setIsOffline] = useState(() => 
+    (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline'
+  );
+  const [showOfflineModalWarning, setShowOfflineModalWarning] = useState(false);
+
+  const handleOfflineAttempt = () => {
+    if (typeof navigator !== 'undefined' && (navigator as any).vibrate) {
+      try { (navigator as any).vibrate([30, 50, 30]); } catch {}
+    }
+    setShowOfflineModalWarning(true);
+    if (onShowOfflineDialog) {
+      onShowOfflineDialog();
+    }
+  };
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOffline(false);
+      setShowOfflineModalWarning(false);
+      setErrorMessage(null);
+      setState(prev => prev === 'error' ? 'select' : prev);
+    };
+    const handleOffline = () => {
+      setIsOffline(true);
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    const unsubNetwork = syncManager.network.subscribe(netState => {
+      const offline = netState === 'offline' || (typeof navigator !== 'undefined' && !navigator.onLine);
+      setIsOffline(offline);
+      if (!offline) {
+        setShowOfflineModalWarning(false);
+      }
+    });
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      unsubNetwork();
+    };
+  }, []);
 
   // Calculate receipts/attachments count for dynamic feedback
   const totalReceipts = React.useMemo(() => {
@@ -59,6 +101,9 @@ export function PdfExportQualityModal({
       setProgress(0);
       setErrorMessage(null);
       setStatusMessage('Preparing your PDF...');
+      const offline = (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline';
+      setIsOffline(offline);
+      setShowOfflineModalWarning(false);
     }
   }, [isOpen]);
 
@@ -98,9 +143,9 @@ export function PdfExportQualityModal({
   }, [activeTaskId, state, totalReceipts]);
 
   const handleStartExport = async () => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      setErrorMessage('PDF download is blocked while offline. An active internet connection is required to compile and download PDF statements.');
-      setState('error');
+    const isCurrentlyOffline = isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline';
+    if (isCurrentlyOffline) {
+      handleOfflineAttempt();
       return;
     }
 
@@ -134,6 +179,11 @@ export function PdfExportQualityModal({
 
   const handleDownload = async () => {
     if (!activeTaskId) return;
+    const isCurrentlyOffline = isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline';
+    if (isCurrentlyOffline) {
+      handleOfflineAttempt();
+      return;
+    }
     try {
       await backgroundExportManager.downloadCompletedReport(activeTaskId);
     } catch (err) {
@@ -313,8 +363,8 @@ export function PdfExportQualityModal({
                   <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 flex items-start gap-2.5 text-xs font-medium">
                     <WifiOff size={16} className="shrink-0 mt-0.5 text-amber-500" />
                     <div className="leading-relaxed">
-                      <span className="font-bold">Offline PDF Download Blocked: </span>
-                      PDF report generation and download require an active internet connection to download and render receipt attachments. Please connect to the internet to export as PDF.
+                      <span className="font-bold text-amber-800 dark:text-amber-300">Offline Notice: </span>
+                      You are currently offline, so PDF reports cannot be downloaded. An active internet connection is required to compile receipts and generate PDFs. As soon as you are back online, PDF export will work normally.
                     </div>
                   </div>
                 )}
@@ -329,15 +379,14 @@ export function PdfExportQualityModal({
                   </button>
                   <motion.button
                     id="btn-export-pdf-confirm"
-                    whileHover={isOffline ? {} : { scale: 1.02 }}
-                    whileTap={isOffline ? {} : { scale: 0.98 }}
-                    disabled={isOffline}
-                    onClick={handleStartExport}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={isOffline ? handleOfflineAttempt : handleStartExport}
                     className={cn(
-                      "px-6 py-2.5 text-xs sm:text-sm font-semibold rounded-xl shadow-sm flex items-center gap-2 transition-all",
+                      "px-6 py-2.5 text-xs sm:text-sm font-semibold rounded-xl shadow-sm flex items-center gap-2 transition-all cursor-pointer",
                       isOffline
-                        ? "bg-slate-200 dark:bg-zinc-800 text-slate-400 dark:text-zinc-500 cursor-not-allowed opacity-80"
-                        : "bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
+                        ? "bg-amber-600 hover:bg-amber-700 text-white shadow-amber-500/20"
+                        : "bg-indigo-600 hover:bg-indigo-700 text-white"
                     )}
                   >
                     {isOffline ? <WifiOff size={16} /> : <Download size={16} />}
@@ -420,11 +469,16 @@ export function PdfExportQualityModal({
                     id="btn-download-pdf-ready"
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={handleDownload}
-                    className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all"
+                    onClick={isOffline ? handleOfflineAttempt : handleDownload}
+                    className={cn(
+                      "w-full py-3 px-4 rounded-xl font-semibold text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all",
+                      isOffline 
+                        ? "bg-amber-600 hover:bg-amber-700 text-white shadow-amber-500/20" 
+                        : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                    )}
                   >
-                    <Download size={18} />
-                    Download PDF
+                    {isOffline ? <WifiOff size={18} /> : <Download size={18} />}
+                    {isOffline ? 'Offline (Download Blocked)' : 'Download PDF'}
                   </motion.button>
                   <button
                     id="btn-done-pdf-modal"
@@ -471,6 +525,63 @@ export function PdfExportQualityModal({
             )}
           </div>
         </motion.div>
+
+        {/* Dedicated Offline Warning Popup Dialog */}
+        <AnimatePresence>
+          {showOfflineModalWarning && (
+            <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-fade-in">
+              <motion.div
+                initial={{ scale: 0.92, opacity: 0, y: 15 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.92, opacity: 0, y: 15 }}
+                transition={{ type: 'spring', damping: 24, stiffness: 300 }}
+                className={cn(
+                  "w-full max-w-sm p-6 rounded-3xl shadow-2xl space-y-5 text-center border transition-all duration-300",
+                  theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
+                )}
+              >
+                <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shadow-inner">
+                  <WifiOff size={26} className="stroke-[2.5]" />
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-xs font-bold uppercase tracking-wider">
+                    <WifiOff size={13} />
+                    Offline Mode
+                  </div>
+                  <h3 className="text-lg sm:text-xl font-black tracking-tight text-slate-900 dark:text-white">
+                    You are Offline
+                  </h3>
+                  <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-900/50 text-center">
+                    <p className="text-sm font-bold text-amber-800 dark:text-amber-300 leading-snug">
+                      PDF reports cannot be downloaded while offline.
+                    </p>
+                    <p className="text-xs text-amber-700/80 dark:text-amber-400/80 mt-1 font-medium">
+                      Please reconnect to the internet to generate and download PDF reports.
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                    Generating PDF reports requires an active internet connection to download and render receipt attachments. As soon as you are reconnected, PDF download will work normally.
+                  </p>
+                  <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-zinc-900 text-[11px] text-slate-600 dark:text-slate-300 font-medium border border-slate-200/60 dark:border-zinc-800">
+                    💡 <span className="font-semibold text-slate-800 dark:text-slate-200">Tip:</span> Excel (.xlsx) reports are fully supported offline.
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    id="btn-close-offline-pdf-modal-warning"
+                    onClick={() => setShowOfflineModalWarning(false)}
+                    className="w-full py-3 px-4 rounded-xl text-xs font-bold transition-all shadow-md bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer active:scale-98"
+                  >
+                    Understood
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     </AnimatePresence>
   );

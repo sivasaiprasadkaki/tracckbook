@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Loader2, Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useRunawayButton } from '../hooks/useRunawayButton';
+import TypewriterText from './TypewriterText';
 
 interface DesktopSignUpProps {
   fullName: string;
@@ -106,6 +108,20 @@ export default function DesktopSignUp({
     return 'bg-emerald-500';
   };
 
+  // Validation: Check if all required fields are correctly filled
+  const isEmailValid = Boolean(email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()));
+  const isFullNameValid = Boolean(fullName && fullName.trim().length > 0);
+  const isPasswordValid = 
+    password.length >= 6 && 
+    /[A-Z]/.test(password) && 
+    /[0-9]/.test(password) && 
+    /[^A-Za-z0-9]/.test(password) && 
+    /[a-zA-Z]/.test(password);
+  const isConfirmPasswordValid = Boolean(confirmPassword && confirmPassword === password);
+  const isSignUpFormValid = isFullNameValid && isEmailValid && isPasswordValid && isConfirmPasswordValid;
+
+  const { runawayProps } = useRunawayButton(isSignUpFormValid);
+
   return (
     <div className="min-h-screen bg-[#fbf8ff] text-[#1b1a23] antialiased flex flex-col lg:flex-row selection:bg-[#4648d4]/15 selection:text-[#4648d4] font-['Inter',sans-serif]">
       <style>{`
@@ -177,8 +193,13 @@ export default function DesktopSignUp({
 
             <div className="pt-2">
               <p className="text-xs font-semibold text-[#464554] uppercase tracking-wider font-['Inter',sans-serif]">Total Tracked Balance</p>
-              <h3 className="text-4xl font-bold text-[#4648d4] tracking-tight mt-1 font-['JetBrains_Mono',monospace]">
-                ₹42,500<span className="text-2xl text-[#4648d4]/70">.00</span>
+              <h3 className="text-4xl font-bold text-[#4648d4] tracking-tight mt-1 font-['Inter',sans-serif] flex items-baseline">
+                <TypewriterText 
+                  text="₹41,800.00" 
+                  speed={85} 
+                  delay={250} 
+                  cursorClassName="w-[3px] h-[0.8em] bg-[#4648d4] ml-1 inline-block align-baseline rounded-full" 
+                />
               </h3>
             </div>
           </motion.div>
@@ -186,9 +207,9 @@ export default function DesktopSignUp({
           {/* Staggered Expense Pills */}
           <div className="flex flex-col gap-3 relative font-['Inter',sans-serif]">
             {[
-              { icon: '✈️', title: 'Travel & Flights', amount: '-₹12,400.00', rotateClass: 'transform -rotate-1 hover:rotate-0' },
-              { icon: '💻', title: 'Software & Subscriptions', amount: '-₹8,250.00', rotateClass: 'transform translate-x-3 rotate-1 hover:translate-x-0 hover:rotate-0' },
-              { icon: '🍴', title: 'Dining & Meals', amount: '-₹4,120.00', rotateClass: 'transform -translate-x-2 -rotate-1 hover:translate-x-0 hover:rotate-0' }
+              { icon: '🍲', title: 'Food For 3 members', amount: '-₹4,500.00', rotateClass: 'transform -rotate-1 hover:rotate-0' },
+              { icon: '🏨', title: 'Accomadation for 5 Members', amount: '-₹35,000.00', rotateClass: 'transform translate-x-3 rotate-1 hover:translate-x-0 hover:rotate-0' },
+              { icon: '🚕', title: 'Taxi For 5 members', amount: '-₹2,300.00', rotateClass: 'transform -translate-x-2 -rotate-1 hover:translate-x-0 hover:rotate-0' }
             ].map((pill, idx) => (
               <motion.div
                 key={pill.title}
@@ -202,7 +223,14 @@ export default function DesktopSignUp({
                   <span className="text-lg">{pill.icon}</span>
                   <span className="text-sm font-medium text-[#1b1a23] font-['Inter',sans-serif]">{pill.title}</span>
                 </div>
-                <span className="text-sm font-semibold font-['JetBrains_Mono',monospace] text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md">{pill.amount}</span>
+                <span className="text-sm font-semibold font-['Inter',sans-serif] text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md flex items-center">
+                  <TypewriterText 
+                    text={pill.amount} 
+                    speed={65} 
+                    delay={500 + idx * 250} 
+                    cursor={false} 
+                  />
+                </span>
               </motion.div>
             ))}
           </div>
@@ -219,7 +247,7 @@ export default function DesktopSignUp({
                 <span className="material-symbols-outlined text-sm text-[#4648d4]">auto_awesome</span>
                 Expense Categorization
               </span>
-              <span className="text-[#4648d4] font-['JetBrains_Mono',monospace]">100%</span>
+              <span className="text-[#4648d4] font-semibold font-['Inter',sans-serif]">100%</span>
             </div>
             <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
               <motion.div 
@@ -442,12 +470,10 @@ export default function DesktopSignUp({
               </div>
             </div>
 
-            {/* Submit Button */}
+            {/* Submit Button with Playful Runaway Interaction */}
             <motion.button
-              type="submit"
+              {...runawayProps}
               disabled={loading}
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.985 }}
               className="w-full mt-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#4648d4] to-[#6052a8] text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-[#4648d4]/25 hover:shadow-lg hover:shadow-[#4648d4]/35 hover:brightness-105 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-['Inter',sans-serif]"
             >
               {loading ? (

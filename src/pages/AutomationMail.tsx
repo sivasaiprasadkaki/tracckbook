@@ -319,7 +319,7 @@ export default function AutomationMail({ session, theme, setTheme }: AutomationM
   const handleDownloadPDF = async () => {
     if (!selectedBook) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      alert('Offline PDF Download Blocked: Generating and downloading PDF reports requires an active internet connection. Please connect to the internet to download PDF statements.');
+      alert('You are currently offline. PDF reports cannot be downloaded without an active internet connection. Please reconnect to the internet to download your report.');
       return;
     }
     vibrate(10);

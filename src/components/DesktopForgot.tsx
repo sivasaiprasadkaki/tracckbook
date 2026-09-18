@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Loader2, AlertCircle, ArrowLeft } from 'lucide-react';
+import { useRunawayButton } from '../hooks/useRunawayButton';
 
 interface DesktopForgotProps {
   email: string;
@@ -28,6 +29,10 @@ export default function DesktopForgot({
   const handleResend = () => {
     setSuccess(null);
   };
+
+  // Validation: Check if email is valid
+  const isEmailValid = Boolean(email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()));
+  const { runawayProps } = useRunawayButton(isEmailValid);
 
   return (
     <div className="min-h-screen bg-[#fbf8ff] text-[#1b1a23] antialiased flex flex-col justify-between selection:bg-[#4648d4]/15 selection:text-[#4648d4] font-['Inter',sans-serif] relative overflow-x-hidden">
@@ -130,11 +135,10 @@ export default function DesktopForgot({
                     />
                   </div>
 
+                  {/* Send Reset Link Button with Playful Runaway Interaction */}
                   <motion.button
-                    type="submit"
+                    {...runawayProps}
                     disabled={loading}
-                    whileHover={{ scale: 1.01 }}
-                    whileTap={{ scale: 0.985 }}
                     className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#4648d4] to-[#6052a8] text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-[#4648d4]/25 hover:shadow-lg hover:shadow-[#4648d4]/35 hover:brightness-105 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-['Inter',sans-serif]"
                   >
                     {loading ? (
