@@ -41,6 +41,33 @@ class ErrorBoundary extends React.Component<Props, State> {
         window.location.reload();
       }
     }
+
+    // Auto-recover from invalid refresh token errors
+    const errMsg = error?.message || '';
+    if (
+      errMsg.includes('Invalid Refresh Token') ||
+      errMsg.includes('Refresh Token Not Found') ||
+      errMsg.includes('invalid_grant')
+    ) {
+      try {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.startsWith('sb-') || k.endsWith('-auth-token') || k === 'trackbook_cached_auth_session')) {
+            keysToRemove.push(k);
+          }
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+      } catch {}
+
+      const authReloadKey = 'last_auth_error_reload';
+      const lastAuthReload = sessionStorage.getItem(authReloadKey);
+      const now = Date.now();
+      if (!lastAuthReload || now - parseInt(lastAuthReload, 10) > 10000) {
+        sessionStorage.setItem(authReloadKey, now.toString());
+        window.location.href = '/login';
+      }
+    }
   }
 
   render() {

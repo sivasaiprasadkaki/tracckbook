@@ -2756,6 +2756,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   // Import Shared Entries states
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showImportDropdown, setShowImportDropdown] = useState(false);
+  const importDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (importDropdownRef.current && !importDropdownRef.current.contains(event.target as Node)) {
+        setShowImportDropdown(false);
+      }
+    };
+    if (showImportDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showImportDropdown]);
+
   const [importCode, setImportCode] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [importError, setImportError] = useState('');
@@ -9096,22 +9113,84 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 {/* Right actions: Import Entries + Add Member Icon (Admin Blue) + 3-Lines Menu */}
                 <div className="flex items-center gap-1 sm:gap-1.5">
                   {canAddEntries(currentUserRole) && (
-                    <button
-                      onClick={() => {
-                        vibrate();
-                        setShowImportModal(true);
-                      }}
-                      title="Import Entries"
-                      className={cn(
-                        "hidden md:flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 duration-150 whitespace-nowrap",
-                        theme === 'dark'
-                          ? "bg-amber-950/30 border-amber-900/50 text-amber-400 hover:bg-amber-950/50"
-                          : "bg-amber-50/80 border-amber-200/80 text-amber-800 hover:bg-amber-100/80"
-                      )}
-                    >
-                      <DownloadCloud size={15} className="text-amber-500 shrink-0" />
-                      <span className="font-bold">Import Entries</span>
-                    </button>
+                    <div className="relative hidden md:block" ref={importDropdownRef}>
+                      <button
+                        onClick={() => {
+                          vibrate();
+                          setShowImportDropdown(prev => !prev);
+                        }}
+                        title="Import Entries"
+                        className={cn(
+                          "flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 duration-150 whitespace-nowrap",
+                          showImportDropdown
+                            ? "bg-amber-100 border-amber-300 text-amber-900 dark:bg-amber-900/50 dark:border-amber-700 dark:text-amber-300"
+                            : theme === 'dark'
+                              ? "bg-amber-950/30 border-amber-900/50 text-amber-400 hover:bg-amber-950/50"
+                              : "bg-amber-50/80 border-amber-200/80 text-amber-800 hover:bg-amber-100/80"
+                        )}
+                      >
+                        <DownloadCloud size={15} className="text-amber-500 shrink-0" />
+                        <span className="font-bold">Import Entries</span>
+                        <ChevronDown size={13} className={cn("transition-transform duration-200", showImportDropdown ? "rotate-180 text-amber-600" : "text-amber-500")} />
+                      </button>
+
+                      {/* Dropdown Menu */}
+                      <AnimatePresence>
+                        {showImportDropdown && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 6, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 6, scale: 0.95 }}
+                            transition={{ duration: 0.12 }}
+                            className={cn(
+                              "absolute right-0 mt-1.5 w-56 rounded-2xl border shadow-xl py-1.5 z-40 backdrop-blur-md overflow-hidden",
+                              theme === 'dark'
+                                ? "bg-zinc-950/95 border-zinc-800 text-slate-200 divide-y divide-zinc-900"
+                                : "bg-white/95 border-slate-200 text-slate-800 divide-y divide-slate-100"
+                            )}
+                          >
+                            <div className="py-1">
+                              {/* Option 1: Import TrackBook Code */}
+                              <button
+                                onClick={() => {
+                                  setShowImportDropdown(false);
+                                  vibrate();
+                                  setShowImportModal(true);
+                                }}
+                                className={cn(
+                                  "w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-left transition-colors cursor-pointer",
+                                  theme === 'dark'
+                                    ? "hover:bg-amber-950/40 text-amber-300"
+                                    : "hover:bg-amber-50 text-amber-900"
+                                )}
+                              >
+                                <DownloadCloud size={15} className="text-amber-500 shrink-0" />
+                                <span>Import TrackBook Code</span>
+                              </button>
+
+                              {/* Option 2: Import an Excel */}
+                              <button
+                                onClick={() => {
+                                  setShowImportDropdown(false);
+                                  vibrate();
+                                  const slug = getBookSlug(activeBook?.name || '', activeBook?.id || '');
+                                  navigate(`/import/excel?bookSlug=${slug}&bookId=${activeBook?.id || ''}`);
+                                }}
+                                className={cn(
+                                  "w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-left transition-colors cursor-pointer",
+                                  theme === 'dark'
+                                    ? "hover:bg-emerald-950/40 text-emerald-400"
+                                    : "hover:bg-emerald-50 text-emerald-800"
+                                )}
+                              >
+                                <FileSpreadsheet size={15} className="text-emerald-500 shrink-0" />
+                                <span>Import an Excel</span>
+                              </button>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
                   )}
 
                   {/* Add Member Icon (Admin Blue, No Border, positioned right next to 3-lines menu) */}
@@ -9202,19 +9281,36 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
                         {/* Actions Section - Mobile View */}
                         <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500 mb-1 md:hidden">
-                          Book Actions
+                          Import Entries
                         </div>
                         <button 
-                          onClick={() => { setShowBookMenu(false); setShowImportModal(true); }}
+                          onClick={() => { setShowBookMenu(false); vibrate(); setShowImportModal(true); }}
                           className={cn(
-                            "w-full flex md:hidden items-center gap-3 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs",
+                            "w-full flex md:hidden items-center gap-2.5 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs mb-1",
                             theme === 'dark' 
                               ? "bg-amber-950/20 border-amber-900/40 text-amber-400 hover:bg-amber-950/45" 
                               : "bg-amber-50/50 border-amber-100/70 text-amber-800 hover:bg-amber-50"
                           )}
                         >
                           <DownloadCloud size={14} className="text-amber-500 shrink-0" />
-                          <span className="font-bold">Import Entries</span>
+                          <span className="font-bold">Import TrackBook Code</span>
+                        </button>
+                        <button 
+                          onClick={() => { 
+                            setShowBookMenu(false); 
+                            vibrate();
+                            const slug = getBookSlug(activeBook?.name || '', activeBook?.id || '');
+                            navigate(`/import/excel?bookSlug=${slug}&bookId=${activeBook?.id || ''}`); 
+                          }}
+                          className={cn(
+                            "w-full flex md:hidden items-center gap-2.5 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs",
+                            theme === 'dark' 
+                              ? "bg-emerald-950/20 border-emerald-900/40 text-emerald-400 hover:bg-emerald-950/45" 
+                              : "bg-emerald-50/50 border-emerald-100/70 text-emerald-800 hover:bg-emerald-50"
+                          )}
+                        >
+                          <FileSpreadsheet size={14} className="text-emerald-500 shrink-0" />
+                          <span className="font-bold">Import an Excel</span>
                         </button>
                       </motion.div>
                     )}

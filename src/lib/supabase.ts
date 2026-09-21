@@ -11,21 +11,27 @@ const isConfigured = (url: string | undefined, key: string | undefined) => {
 };
 
 export const clearSupabaseAuthStorage = () => {
-  if (typeof window !== 'undefined' && window.localStorage) {
+  if (typeof window !== 'undefined') {
     try {
-      const keysToRemove: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith('sb-') || key.endsWith('-auth-token'))) {
-          keysToRemove.push(key);
+      const clearFrom = (storage: Storage) => {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < storage.length; i++) {
+          const key = storage.key(i);
+          if (key && (key.startsWith('sb-') || key.endsWith('-auth-token') || key === 'trackbook_cached_auth_session')) {
+            keysToRemove.push(key);
+          }
         }
-      }
-      keysToRemove.forEach(k => {
-        localStorage.removeItem(k);
-        console.warn(`[Supabase Safety] Cleaned up corrupt session key: ${k}`);
-      });
+        keysToRemove.forEach(k => {
+          try {
+            storage.removeItem(k);
+            console.warn(`[Supabase Safety] Cleaned up session key: ${k}`);
+          } catch {}
+        });
+      };
+      if (window.localStorage) clearFrom(window.localStorage);
+      if (window.sessionStorage) clearFrom(window.sessionStorage);
     } catch (e) {
-      console.error('[Supabase Safety] Error clearing storage:', e);
+      console.warn('[Supabase Safety] Note while clearing storage:', e);
     }
   }
 };
@@ -208,6 +214,126 @@ const createWrappedSupabaseClient = () => {
       }
 
       return { data: { session: null }, error: err };
+    }
+  };
+
+  // Wrap refreshSession to gracefully catch 'Invalid Refresh Token: Refresh Token Not Found' and network errors
+  const originalRefreshSession = client.auth.refreshSession.bind(client.auth);
+  client.auth.refreshSession = async (currentSession?: any) => {
+    try {
+      const res = await originalRefreshSession(currentSession);
+      if (res?.error) {
+        const errMsg = res.error.message || '';
+        if (
+          errMsg.includes('Invalid Refresh Token') || 
+          errMsg.includes('Refresh Token Not Found') ||
+          errMsg.includes('invalid_grant') ||
+          errMsg.includes('Refresh token')
+        ) {
+          console.warn('[Supabase Auth Safety] Invalid refresh token detected in refreshSession, clearing stale storage.');
+          clearSupabaseAuthStorage();
+          return { data: { session: null, user: null }, error: null };
+        }
+
+        const isOfflineOrNetwork = (typeof navigator !== 'undefined' && !navigator.onLine) ||
+          errMsg.toLowerCase().includes('failed to fetch') ||
+          errMsg.toLowerCase().includes('network') ||
+          errMsg.toLowerCase().includes('abort');
+
+        if (isOfflineOrNetwork) {
+          const cached = getCachedLocalSession();
+          if (cached) {
+            console.log('[Supabase Auth Safety] Network error in refreshSession, preserving cached session.');
+            return { data: { session: cached, user: cached.user || null }, error: null };
+          }
+        }
+      }
+      return res;
+    } catch (err: any) {
+      console.warn('[Supabase Auth Safety] refreshSession exception:', err?.message || err);
+      const errMsg = err?.message || '';
+      if (
+        errMsg.includes('Invalid Refresh Token') || 
+        errMsg.includes('Refresh Token Not Found') ||
+        errMsg.includes('invalid_grant') ||
+        errMsg.includes('Refresh token')
+      ) {
+        clearSupabaseAuthStorage();
+        return { data: { session: null, user: null }, error: null };
+      }
+
+      const isOfflineOrNetwork = (typeof navigator !== 'undefined' && !navigator.onLine) ||
+        errMsg.toLowerCase().includes('failed to fetch') ||
+        errMsg.toLowerCase().includes('network') ||
+        errMsg.toLowerCase().includes('abort');
+
+      if (isOfflineOrNetwork) {
+        const cached = getCachedLocalSession();
+        if (cached) {
+          return { data: { session: cached, user: cached.user || null }, error: null };
+        }
+      }
+
+      return { data: { session: null, user: null }, error: null };
+    }
+  };
+
+  // Wrap getUser to prevent unhandled rejection on network drop or invalid token
+  const originalGetUser = client.auth.getUser.bind(client.auth);
+  client.auth.getUser = async (jwt?: string) => {
+    try {
+      const res = await originalGetUser(jwt);
+      if (res?.error) {
+        const errMsg = res.error.message || '';
+        if (
+          errMsg.includes('Invalid Refresh Token') || 
+          errMsg.includes('Refresh Token Not Found') ||
+          errMsg.includes('invalid_grant') ||
+          errMsg.includes('Refresh token')
+        ) {
+          clearSupabaseAuthStorage();
+          return { data: { user: null }, error: null };
+        }
+
+        const isOfflineOrNetwork = (typeof navigator !== 'undefined' && !navigator.onLine) ||
+          errMsg.toLowerCase().includes('failed to fetch') ||
+          errMsg.toLowerCase().includes('network') ||
+          errMsg.toLowerCase().includes('abort');
+
+        if (isOfflineOrNetwork) {
+          const cached = getCachedLocalSession();
+          if (cached?.user) {
+            return { data: { user: cached.user }, error: null };
+          }
+        }
+      }
+      return res;
+    } catch (err: any) {
+      console.warn('[Supabase Auth Safety] getUser exception:', err?.message || err);
+      const errMsg = err?.message || '';
+      if (
+        errMsg.includes('Invalid Refresh Token') || 
+        errMsg.includes('Refresh Token Not Found') ||
+        errMsg.includes('invalid_grant') ||
+        errMsg.includes('Refresh token')
+      ) {
+        clearSupabaseAuthStorage();
+        return { data: { user: null }, error: null };
+      }
+
+      const isOfflineOrNetwork = (typeof navigator !== 'undefined' && !navigator.onLine) ||
+        errMsg.toLowerCase().includes('failed to fetch') ||
+        errMsg.toLowerCase().includes('network') ||
+        errMsg.toLowerCase().includes('abort');
+
+      if (isOfflineOrNetwork) {
+        const cached = getCachedLocalSession();
+        if (cached?.user) {
+          return { data: { user: cached.user }, error: null };
+        }
+      }
+
+      return { data: { user: null }, error: null };
     }
   };
 

@@ -3,6 +3,54 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
+import { clearSupabaseAuthStorage } from './lib/supabase';
+
+// Global error handlers to intercept and recover from transient network drops and stale auth tokens
+if (typeof window !== 'undefined') {
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    const msg = (typeof reason === 'string' ? reason : reason?.message || reason?.name || '') + '';
+    
+    // Check for invalid refresh token or stale token errors
+    if (
+      msg.includes('Invalid Refresh Token') ||
+      msg.includes('Refresh Token Not Found') ||
+      msg.includes('invalid_grant') ||
+      msg.includes('Refresh token')
+    ) {
+      console.warn('[Global Safety] Stale refresh token detected in unhandled rejection. Clearing auth storage to recover.');
+      clearSupabaseAuthStorage();
+      event.preventDefault();
+      return;
+    }
+
+    // Check for transient network/fetch failure
+    if (
+      msg.includes('Failed to fetch') ||
+      msg.includes('NetworkError') ||
+      msg.includes('network request failed')
+    ) {
+      console.warn('[Global Safety] Suppressed unhandled network rejection:', msg);
+      event.preventDefault();
+      return;
+    }
+  });
+
+  window.addEventListener('error', (event) => {
+    const msg = event.message || '';
+    if (
+      msg.includes('Failed to fetch') ||
+      msg.includes('Invalid Refresh Token') ||
+      msg.includes('Refresh Token Not Found')
+    ) {
+      if (msg.includes('Invalid Refresh Token') || msg.includes('Refresh Token Not Found')) {
+        clearSupabaseAuthStorage();
+      }
+      console.warn('[Global Safety] Suppressed error event:', msg);
+      event.preventDefault();
+    }
+  });
+}
 
 if ('serviceWorker' in navigator) {
   if (import.meta.env.PROD) {

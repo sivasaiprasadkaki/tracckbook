@@ -34,6 +34,7 @@ const AutomationMail = lazyWithRetry(() => import('./pages/AutomationMail'));
 const AcceptInvitePage = lazyWithRetry(() => import('./pages/AcceptInvitePage'));
 const BiometricSecurity = lazyWithRetry(() => import('./pages/BiometricSecurity'));
 const WhatsAppReports = lazyWithRetry(() => import('./pages/WhatsAppReports'));
+const ImportExcel = lazyWithRetry(() => import('./pages/ImportExcel'));
 
 function NavigationHandler({ 
   session, 
@@ -423,6 +424,42 @@ export default function App() {
               element={
                 session ? (
                   <Dashboard session={session} theme={theme} setTheme={setTheme} />
+                ) : (
+                  loading ? (
+                    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
+                      <div className="flex flex-col items-center gap-4">
+                        <Loader2 className="animate-spin text-indigo-600" size={40} />
+                        <p className="text-sm font-medium text-slate-500 animate-pulse">Initializing app...</p>
+                      </div>
+                    </div>
+                  ) : <Navigate to="/login" replace />
+                )
+              } 
+            />
+
+            {/* Dedicated Excel Import Routes */}
+            <Route 
+              path="/import/excel" 
+              element={
+                session ? (
+                  <ImportExcel session={session} theme={theme} setTheme={setTheme} />
+                ) : (
+                  loading ? (
+                    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
+                      <div className="flex flex-col items-center gap-4">
+                        <Loader2 className="animate-spin text-indigo-600" size={40} />
+                        <p className="text-sm font-medium text-slate-500 animate-pulse">Initializing app...</p>
+                      </div>
+                    </div>
+                  ) : <Navigate to="/login" replace />
+                )
+              } 
+            />
+            <Route 
+              path="/cashbooks/:bookSlug/import-excel" 
+              element={
+                session ? (
+                  <ImportExcel session={session} theme={theme} setTheme={setTheme} />
                 ) : (
                   loading ? (
                     <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
