@@ -2381,7 +2381,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const setActiveBookId = (id: string | null) => {
     setActiveBookIdState(id);
     if (id) {
-      if (!entriesCache.has(id)) {
+      const book = books.find(b => b.id === id);
+      if (book && !entriesCache.has(id)) {
+        entriesCache.set(id, book.transactions || []);
+      }
+      if (!entriesCache.has(id) && (!book || !book.transactions)) {
         setIsEntriesLoading(true);
       } else {
         setIsEntriesLoading(false);
@@ -3202,7 +3206,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   // Set isEntriesLoading to true immediately on activeBookId changes only if cache is missing
   useEffect(() => {
     if (activeBookId) {
-      if (!entriesCache.has(activeBookId)) {
+      const book = books.find(b => b.id === activeBookId);
+      if (book && !entriesCache.has(activeBookId)) {
+        entriesCache.set(activeBookId, book.transactions || []);
+      }
+      if (!entriesCache.has(activeBookId) && (!book || !book.transactions)) {
         setIsEntriesLoading(true);
       } else {
         setIsEntriesLoading(false);
@@ -3210,7 +3218,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     } else {
       setIsEntriesLoading(false);
     }
-  }, [activeBookId]);
+  }, [activeBookId, books]);
 
   const handleTransactionPress = (id: string) => {
     if (selectedTransactions.size > 0) {
@@ -4542,6 +4550,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               setBooks(prev => {
                 if (prev.some(b => b.id === newRow.id)) return prev;
+                // Reconcile optimistic cashbook if matching by name
+                const matchingOptimistic = prev.find(b => 
+                  b.name.trim().toLowerCase() === newRow.name?.trim().toLowerCase() && 
+                  (b.user_id === newRow.user_id || b.user_id === currentUserId)
+                );
+                if (matchingOptimistic) {
+                  return prev.map(b => b.id === matchingOptimistic.id ? {
+                    ...b,
+                    id: newRow.id,
+                    syncStatus: 'SYNCED',
+                    is_offline: false,
+                    createdAt: newRow.created_at ? new Date(newRow.created_at) : b.createdAt
+                  } : b);
+                }
                 const formatted: Cashbook = {
                   id: newRow.id,
                   name: newRow.name,
@@ -4985,7 +5007,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   const handleCreateBook = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting) return;
     if (!newBookName.trim() || !session) return;
     
     // Prevent creating duplicate book names (case-insensitive, trimmed)
@@ -4996,22 +5017,24 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return;
     }
     
-    // Optimization: Don't show submitting overlay for simple book creation if it's too slow
-    // Or just make it very quick.
-    setIsSubmitting(true);
-    setSubmittingMessage('Creating new book...');
+    const tempId = safeUUID();
+    const bookName = newBookName.trim();
+    const now = new Date();
     
     const newBook: Cashbook = {
-      id: safeUUID(),
-      name: newBookName.trim(),
+      id: tempId,
+      name: bookName,
       transactions: [],
-      createdAt: new Date(),
-      user_id: session.user.id
+      createdAt: now,
+      user_id: session.user.id,
+      syncStatus: 'SYNCED',
+      is_offline: false
     };
 
-    // Update local state immediately for perceived speed and persist to offline cache
+    // 1. Update UI state instantly: new Cashbook appears in the list immediately
     setBooks(prev => {
       const next = [newBook, ...prev.filter(b => b.id !== newBook.id)];
+      booksRef.current = next;
       try {
         if (session?.user?.id) {
           localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
@@ -5023,92 +5046,117 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return next;
     });
 
+    // 2. Close modal and reset input immediately
     setNewBookName('');
     setCreateBookError(null);
     setIsCreatingBook(false);
     setIsSubmitting(false);
 
-    // Sync in background via direct Supabase, backend proxy endpoint, or offline queue
-    const resolvedUserName = session.user.user_metadata?.full_name || 
-                             session.user.user_metadata?.name || 
-                             session.user.email?.split('@')[0] || 'User';
+    // 3. Highlight newly created cashbook in the list
+    setJustEditedBookId(tempId);
+    setTimeout(() => {
+      setJustEditedBookId(null);
+    }, 2500);
 
-    const payload: any = { 
-      id: newBook.id, 
-      name: newBook.name, 
-      created_at: safeToISOString(newBook.createdAt),
-      user_id: session.user.id,
-      user_name: resolvedUserName,
-      user_email: session.user.email || undefined
-    };
+    // 4. Synchronize in the background silently without blocking the user
+    (async () => {
+      const resolvedUserName = session.user.user_metadata?.full_name || 
+                               session.user.user_metadata?.name || 
+                               session.user.email?.split('@')[0] || 'User';
 
-    const isOffline = typeof navigator !== 'undefined' && (!navigator.onLine || syncManager.network.state === 'offline');
-    if (isOffline) {
-      console.log('[CreateBook] Offline state detected. Book queued for background sync:', newBook.id);
-      await syncManager.saveOfflineCashbook(payload);
-      return;
-    }
+      const payload: any = { 
+        id: newBook.id, 
+        name: newBook.name, 
+        created_at: safeToISOString(newBook.createdAt),
+        user_id: session.user.id,
+        user_name: resolvedUserName,
+        user_email: session.user.email || undefined
+      };
 
-    let syncSuccess = false;
-
-    // 1. Direct Supabase insert first with user's authenticated session so it's immediately available in mobile APK
-    if (supabase) {
-      try {
-        const { error } = await supabase
-          .from('cashbooks')
-          .insert([payload]);
-        if (!error) {
-          syncSuccess = true;
-          console.log('[CreateBook] Direct Supabase insert successful:', newBook.id);
-        } else {
-          // If column mismatch error (e.g. user_email or user_name not in table schema), retry with core columns
-          if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
-            const fallbackPayload: any = {
-              id: payload.id,
-              name: payload.name,
-              created_at: payload.created_at,
-              user_id: payload.user_id
-            };
-            const { error: retryError } = await supabase
-              .from('cashbooks')
-              .insert([fallbackPayload]);
-            if (!retryError) {
-              syncSuccess = true;
-              console.log('[CreateBook] Direct Supabase insert (fallback columns) successful:', newBook.id);
-            }
-          } else {
-            console.warn('[CreateBook] Direct Supabase insert note, falling back to sync endpoint:', error.message);
-          }
-        }
-      } catch (err: any) {
-        console.warn('[CreateBook] Direct Supabase insert exception:', err?.message);
-      }
-    }
-
-    // 2. Try backend sync endpoint if direct insert was not successful
-    if (!syncSuccess) {
-      try {
-        const res = await fetch('/api/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'cashbook', ...payload })
-        });
-        if (res.ok) {
-          const json = await res.json();
-          if (json && json.success === true) {
-            syncSuccess = true;
-            console.log('[CreateBook] Book created/synced successfully via backend endpoint:', newBook.id);
-          }
-        }
-      } catch (apiErr: any) {
-        console.warn('[CreateBook] Sync API error, saving to offline queue:', apiErr?.message);
+      const isOffline = typeof navigator !== 'undefined' && (!navigator.onLine || syncManager.network.state === 'offline');
+      if (isOffline) {
+        console.log('[CreateBook] Offline state detected. Book queued for background sync:', newBook.id);
         await syncManager.saveOfflineCashbook(payload);
+        return;
       }
-    }
 
-    if (!syncSuccess) {
-      await syncManager.saveOfflineCashbook(payload);
-    }
+      let syncSuccess = false;
+
+      // Direct Supabase insert
+      if (supabase) {
+        try {
+          const { error } = await supabase
+            .from('cashbooks')
+            .insert([payload]);
+          if (!error) {
+            syncSuccess = true;
+            console.log('[CreateBook] Direct Supabase insert successful:', newBook.id);
+          } else {
+            if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
+              const fallbackPayload: any = {
+                id: payload.id,
+                name: payload.name,
+                created_at: payload.created_at,
+                user_id: payload.user_id
+              };
+              const { error: retryError } = await supabase
+                .from('cashbooks')
+                .insert([fallbackPayload]);
+              if (!retryError) {
+                syncSuccess = true;
+                console.log('[CreateBook] Direct Supabase insert (fallback columns) successful:', newBook.id);
+              }
+            } else {
+              console.warn('[CreateBook] Direct Supabase insert note, falling back to sync endpoint:', error.message);
+            }
+          }
+        } catch (err: any) {
+          console.warn('[CreateBook] Direct Supabase insert exception:', err?.message);
+        }
+      }
+
+      // Try backend sync endpoint if direct insert was not successful
+      if (!syncSuccess) {
+        try {
+          const res = await fetch('/api/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'cashbook', ...payload })
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json && json.success === true) {
+              syncSuccess = true;
+              console.log('[CreateBook] Book created/synced successfully via backend endpoint:', newBook.id);
+            }
+          }
+        } catch (apiErr: any) {
+          console.warn('[CreateBook] Sync API error, saving to offline queue:', apiErr?.message);
+          await syncManager.saveOfflineCashbook(payload);
+        }
+      }
+
+      // If online and creation failed on both direct and backend endpoint, rollback gracefully
+      if (!syncSuccess) {
+        if (!navigator.onLine) {
+          await syncManager.saveOfflineCashbook(payload);
+        } else {
+          console.error('[CreateBook] Failed to persist cashbook remotely, rolling back optimistic entry:', tempId);
+          setBooks(prev => {
+            const next = prev.filter(b => b.id !== tempId);
+            booksRef.current = next;
+            try {
+              if (session?.user?.id) {
+                localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
+                offlineDb.saveCachedCashbooks(session.user.id, next);
+              }
+            } catch (_) {}
+            return next;
+          });
+          setError("Couldn't create the cashbook. Please try again.");
+        }
+      }
+    })();
   };
 
   const handleUpdateBook = async (e: React.FormEvent) => {
@@ -5124,30 +5172,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
 
     const savedId = isEditingBook;
+    const newName = editBookName.trim();
+    const originalBook = books.find(b => b.id === savedId);
 
-    if (supabase) {
-      try {
-        const { error } = await supabase
-          .from('cashbooks')
-          .update({ name: editBookName.trim() })
-          .eq('id', isEditingBook)
-          .eq('user_id', session.user.id);
-        if (error) {
-          console.warn('[UpdateBook] Supabase update note:', error.message);
-        }
-      } catch (error: any) {
-        const isNetwork = !navigator.onLine || 
-          error?.name === 'TypeError' || 
-          error?.message?.toLowerCase().includes('failed to fetch');
-        if (isNetwork) {
-          console.log('[UpdateBook] Offline/network notice during update. Local cache updated.');
-        } else {
-          console.warn('[UpdateBook] Notice during book update:', error?.message || error);
-        }
-      }
-    }
-
-    setBooks(books.map(b => b.id === isEditingBook ? { ...b, name: editBookName.trim() } : b));
+    // 1. Instant optimistic rename in UI state
+    setBooks(prev => prev.map(b => b.id === savedId ? { ...b, name: newName } : b));
     setIsEditingBook(null);
     setEditBookName('');
     setEditBookError(null);
@@ -5156,6 +5185,38 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setTimeout(() => {
       setJustEditedBookId(null);
     }, 2000);
+
+    // 2. Persist in background silently
+    (async () => {
+      if (supabase) {
+        try {
+          const { error } = await supabase
+            .from('cashbooks')
+            .update({ name: newName })
+            .eq('id', savedId)
+            .eq('user_id', session.user.id);
+          if (error) {
+            console.warn('[UpdateBook] Supabase update note:', error.message);
+            if (navigator.onLine && error.code !== '42703') {
+              throw error;
+            }
+          }
+        } catch (error: any) {
+          const isNetwork = !navigator.onLine || 
+            error?.name === 'TypeError' || 
+            error?.message?.toLowerCase().includes('failed to fetch');
+          if (isNetwork) {
+            console.log('[UpdateBook] Offline/network notice during update. Local cache retained.');
+          } else {
+            console.error('[UpdateBook] Background update error, rolling back:', error);
+            if (originalBook) {
+              setBooks(prev => prev.map(b => b.id === savedId ? originalBook : b));
+            }
+            setError(error.message || "Couldn't rename the cashbook. Please try again.");
+          }
+        }
+      }
+    })();
   };
 
   const handleDuplicateBook = async (bookId: string) => {
@@ -5602,7 +5663,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             await supabase.from('attachments').insert(attachmentInserts);
           }
 
-          await fetchData();
+          // UI state and cache are already optimistically updated instantly.
+          // No redundant fetchData() call, preventing UI freeze and full-database refetch.
         } catch (bgErr: any) {
           const errDetail = typeof bgErr === 'object' ? JSON.stringify(bgErr) : String(bgErr || '');
           const isNetworkFailure = (typeof navigator !== 'undefined' && !navigator.onLine) || 
@@ -5890,7 +5952,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             }
           }
 
-          await fetchData();
+          // UI state and cache are already optimistically updated instantly.
+          // No redundant fetchData() call, preventing lag and full-database reload.
         } catch (bgErr: any) {
           const errStr = typeof bgErr === 'object' ? JSON.stringify(bgErr) : String(bgErr || '');
           const isNetworkFailure = (typeof navigator !== 'undefined' && !navigator.onLine) || 
@@ -5991,50 +6054,45 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     const transactionObj = activeBook?.transactions.find(t => t.id === idToDelete);
     const originalIndex = activeBook?.transactions.findIndex(t => t.id === idToDelete);
 
-    if (transactionObj) {
-      await handleStartUndoableDelete({
-        type: 'transaction',
-        data: transactionObj,
-        originalIndex,
-        parentBookId: activeBookId
-      });
-    }
-
-    // Close the confirmation modal to keep UI responsive
+    // 1. Close confirmation modal immediately to keep UI responsive
     setTransactionToDelete(null);
 
-    // Trigger delete animation
-    setAnimatingDeleteId(idToDelete);
+    // 2. Synchronously update local UI state: entry disappears immediately and totals recalculate immediately
+    setBooks(prev => prev.map(b => 
+      b.id === activeBookId 
+        ? { ...b, transactions: b.transactions.filter(t => t.id !== idToDelete) }
+        : b
+    ));
 
-    // Wait for the animation (300ms)
-    await new Promise(resolve => setTimeout(resolve, 300));
-
-    // Synchronize entries cache for the active book
     const currCached = entriesCache.get(activeBookId);
     if (currCached) {
       entriesCache.set(activeBookId, currCached.filter(t => t.id !== idToDelete));
     }
 
-    setBooks(books.map(b => 
-      b.id === activeBookId 
-        ? { ...b, transactions: b.transactions.filter(t => t.id !== idToDelete) }
-        : b
-    ));
     setSelectedTransactions(prev => {
       const next = new Set(prev);
       next.delete(idToDelete);
       return next;
     });
-    setAnimatingDeleteId(null);
+
+    // 3. Register undoable delete in background
+    if (transactionObj) {
+      handleStartUndoableDelete({
+        type: 'transaction',
+        data: transactionObj,
+        originalIndex,
+        parentBookId: activeBookId
+      }).catch(err => console.error('[confirmDeleteTransaction] Undoable delete registration notice:', err));
+    }
   };
 
   const handleBulkDelete = async () => {
     if (!activeBookId || selectedTransactions.size === 0 || !session) return;
 
-    // Get transactions list to back up before deleting from local state
     const activeBook = books.find(b => b.id === activeBookId);
     if (!activeBook) return;
 
+    const idsSet = new Set(selectedTransactions);
     const txsToDelete = Array.from(selectedTransactions).map(id => {
       return activeBook.transactions.find(t => t.id === id);
     }).filter(t => t !== undefined);
@@ -6043,28 +6101,29 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return activeBook.transactions.findIndex(t => t.id === id);
     });
 
-    await handleStartUndoableDelete({
-      type: 'bulk_transactions',
-      data: txsToDelete,
-      originalIndexes,
-      parentBookId: activeBookId
-    });
+    // 1. Close modal and reset selection immediately
+    setSelectedTransactions(new Set());
+    setShowBulkTransactionDeleteConfirm(false);
 
-    // Local filter and state updates
-    const idsSet = new Set(selectedTransactions);
-    const currCached = entriesCache.get(activeBookId);
-    if (currCached) {
-      entriesCache.set(activeBookId, currCached.filter(t => !idsSet.has(t.id)));
-    }
-
-    setBooks(books.map(b => 
+    // 2. Synchronously update UI state: entries disappear immediately and totals recalculate immediately
+    setBooks(prev => prev.map(b => 
       b.id === activeBookId 
         ? { ...b, transactions: b.transactions.filter(t => !idsSet.has(t.id)) }
         : b
     ));
 
-    setSelectedTransactions(new Set());
-    setShowBulkTransactionDeleteConfirm(false);
+    const currCached = entriesCache.get(activeBookId);
+    if (currCached) {
+      entriesCache.set(activeBookId, currCached.filter(t => !idsSet.has(t.id)));
+    }
+
+    // 3. Register undoable delete in background
+    handleStartUndoableDelete({
+      type: 'bulk_transactions',
+      data: txsToDelete,
+      originalIndexes,
+      parentBookId: activeBookId
+    }).catch(err => console.error('[handleBulkDelete] Undoable delete registration notice:', err));
   };
 
   const openMergeDialog = () => {
@@ -6213,9 +6272,30 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const { error: deleteError } = await supabase.from('entries').delete().in('id', selectedIds);
       if (deleteError) throw deleteError;
 
+      const mergedTx: Transaction = {
+        id: newId,
+        amount: totalAmount,
+        type: mergeType,
+        description: mergeDescription || 'Merged Transactions',
+        category: mergeCategory,
+        mode: 'Online',
+        date: new Date(),
+        images: (oldAtts || []).map(a => a.file_url),
+        source: 'Manual',
+        user_name: resolvedUser.name,
+        created_at: new Date().toISOString(),
+        syncStatus: 'SYNCED'
+      };
+
+      setBooks(prev => prev.map(b => b.id === activeBookId ? {
+        ...b,
+        transactions: [mergedTx, ...b.transactions.filter(t => !selectedIds.includes(t.id))]
+      } : b));
+      const currCache = entriesCache.get(activeBookId) || [];
+      entriesCache.set(activeBookId, [mergedTx, ...currCache.filter(t => !selectedIds.includes(t.id))]);
+
       setSelectedTransactions(new Set());
       setShowMergeConfirmDialog(false);
-      await fetchData();
     } catch (err: any) {
       console.error('[Merge Transactions Error]:', err);
       setError(err.message || 'Failed to merge transactions');
@@ -14741,45 +14821,26 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
       <AnimatePresence>
         {isSubmitting && (
-          <div className={cn(
-            "fixed inset-0 z-[200] flex items-center justify-center p-4 backdrop-blur-md transition-colors duration-300",
-            theme === 'dark' ? "bg-black/80" : "bg-slate-900/40"
-          )}>
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className={cn(
-                "rounded-3xl p-8 shadow-2xl text-center space-y-6 max-w-xs w-full border transition-colors duration-300",
-                theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
-              )}
-            >
-              <div className="relative w-20 h-20 mx-auto">
-                <div className={cn(
-                  "absolute inset-0 border-4 rounded-full transition-colors duration-300",
-                  theme === 'dark' ? "border-indigo-900/30" : "border-indigo-100"
-                )} />
-                <motion.div 
-                  animate={{ rotate: 360 }}
-                  transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-                  className="absolute inset-0 border-4 border-indigo-600 border-t-transparent rounded-full"
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Sparkles className="text-indigo-600 animate-pulse" size={32} />
-                </div>
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ duration: 0.15 }}
+            className="fixed bottom-6 right-6 z-[200] pointer-events-none"
+          >
+            <div className={cn(
+              "flex items-center gap-3 px-4 py-3 rounded-2xl shadow-xl border backdrop-blur-md",
+              theme === 'dark' ? "bg-zinc-900/95 border-zinc-800 text-white" : "bg-white/95 border-slate-200 text-slate-800"
+            )}>
+              <div className="relative w-5 h-5 shrink-0">
+                <div className="absolute inset-0 border-2 border-indigo-600/30 rounded-full" />
+                <div className="absolute inset-0 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
               </div>
-              <div className="space-y-2">
-                <h3 className={cn(
-                  "text-xl font-black transition-colors duration-300",
-                  theme === 'dark' ? "text-white" : "text-black"
-                )}>{submitAndAddNew ? "Your entry is being saved..." : (submittingMessage || "Saving your entry...")}</h3>
-                <p className={cn(
-                  "text-sm font-medium transition-colors duration-300",
-                  theme === 'dark' ? "text-slate-400" : "text-slate-600"
-                )}>Please wait a moment...</p>
-              </div>
-            </motion.div>
-          </div>
+              <span className="text-xs font-semibold tracking-wide">
+                {submitAndAddNew ? "Saving & preparing next entry..." : (submittingMessage || "Saving changes...")}
+              </span>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
