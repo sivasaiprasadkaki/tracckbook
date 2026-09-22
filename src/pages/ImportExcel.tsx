@@ -20,7 +20,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
-  FileText
+  FileText,
+  Trash2,
+  RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../lib/supabase';
@@ -82,6 +84,13 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
   const [previewFilter, setPreviewFilter] = useState<'all' | 'valid' | 'invalid'>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 50;
+
+  // Row deletion and selection for preview
+  const [deletedRowNumbers, setDeletedRowNumbers] = useState<Set<number>>(new Set());
+  const [selectedRowNumbers, setSelectedRowNumbers] = useState<Set<number>>(new Set());
+  const [undoToast, setUndoToast] = useState<{ message: string; rows: ParsedEntry[] } | null>(null);
+  const [showMissingMandatoryPopup, setShowMissingMandatoryPopup] = useState(false);
+  const selectAllRef = useRef<HTMLInputElement>(null);
 
   // Import Execution state
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -263,6 +272,17 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
       const autoMap = autoDetectColumnMapping(headers);
       setColumnMapping(autoMap);
       setCurrentPage(1);
+
+      // Reset row deletions & selections for the new sheet/file
+      setDeletedRowNumbers(new Set());
+      setSelectedRowNumbers(new Set());
+      setUndoToast(null);
+
+      // Check if any mandatory fields are missing and show clean, compact popup
+      const status = checkMandatoryColumns(headers, autoMap);
+      if (!status.isAllMandatoryMapped) {
+        setShowMissingMandatoryPopup(true);
+      }
     } catch (err: any) {
       console.error('[ImportExcel] Sheet parse error:', err);
       setParsingError(err?.message || 'Error parsing sheet data.');
@@ -322,12 +342,18 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
   }, [sheetData, columnMapping]);
 
   // 4. Build parsed entries from current sheet & mapping
-  const parsedEntries = useMemo<ParsedEntry[]>(() => {
+  const allParsedEntries = useMemo<ParsedEntry[]>(() => {
     if (!sheetData) return [];
     return buildEntriesFromSheet(sheetData, columnMapping, defaultMode);
   }, [sheetData, columnMapping, defaultMode]);
 
-  // Counts
+  // Active parsed entries (excluding rows deleted by the user from preview)
+  const parsedEntries = useMemo<ParsedEntry[]>(() => {
+    if (deletedRowNumbers.size === 0) return allParsedEntries;
+    return allParsedEntries.filter(e => !deletedRowNumbers.has(e.rowNumber));
+  }, [allParsedEntries, deletedRowNumbers]);
+
+  // Counts dynamically recalculate when rows are removed
   const counts = useMemo(() => {
     const total = parsedEntries.length;
     let valid = 0;
@@ -365,6 +391,111 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
 
   const totalPages = Math.max(1, Math.ceil(filteredEntries.length / rowsPerPage));
 
+  // Auto-adjust page if current page exceeds total pages after deletion
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  // Auto-dismiss undo toast
+  useEffect(() => {
+    if (!undoToast) return;
+    const timer = setTimeout(() => {
+      setUndoToast(null);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [undoToast]);
+
+  // Row selection helpers
+  const isAllFilteredSelected = filteredEntries.length > 0 && filteredEntries.every(e => selectedRowNumbers.has(e.rowNumber));
+  const isSomeFilteredSelected = filteredEntries.some(e => selectedRowNumbers.has(e.rowNumber)) && !isAllFilteredSelected;
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = isSomeFilteredSelected;
+    }
+  }, [isSomeFilteredSelected]);
+
+  const toggleSelectAll = () => {
+    if (isAllFilteredSelected) {
+      setSelectedRowNumbers(prev => {
+        const next = new Set(prev);
+        filteredEntries.forEach(e => next.delete(e.rowNumber));
+        return next;
+      });
+    } else {
+      setSelectedRowNumbers(prev => {
+        const next = new Set(prev);
+        filteredEntries.forEach(e => next.add(e.rowNumber));
+        return next;
+      });
+    }
+  };
+
+  const toggleSelectRow = (rowNumber: number) => {
+    setSelectedRowNumbers(prev => {
+      const next = new Set(prev);
+      if (next.has(rowNumber)) {
+        next.delete(rowNumber);
+      } else {
+        next.add(rowNumber);
+      }
+      return next;
+    });
+  };
+
+  // Row deletion from preview (Does NOT modify original Excel file)
+  const handleDeleteRow = (entry: ParsedEntry) => {
+    vibrate(10);
+    setDeletedRowNumbers(prev => {
+      const next = new Set(prev);
+      next.add(entry.rowNumber);
+      return next;
+    });
+    setSelectedRowNumbers(prev => {
+      if (!prev.has(entry.rowNumber)) return prev;
+      const next = new Set(prev);
+      next.delete(entry.rowNumber);
+      return next;
+    });
+    setUndoToast({
+      message: 'Row removed',
+      rows: [entry]
+    });
+  };
+
+  // Bulk row deletion from preview
+  const handleDeleteSelectedRows = () => {
+    if (selectedRowNumbers.size === 0) return;
+    vibrate(15);
+    const count = selectedRowNumbers.size;
+    const deletedEntries = parsedEntries.filter(e => selectedRowNumbers.has(e.rowNumber));
+    setDeletedRowNumbers(prev => {
+      const next = new Set(prev);
+      selectedRowNumbers.forEach(n => next.add(n));
+      return next;
+    });
+    setSelectedRowNumbers(new Set());
+    setUndoToast({
+      message: `${count} ${count === 1 ? 'row' : 'rows'} removed`,
+      rows: deletedEntries
+    });
+  };
+
+  // Undo delete
+  const handleUndoDelete = () => {
+    if (!undoToast || undoToast.rows.length === 0) return;
+    vibrate(10);
+    const rowsToRestore = undoToast.rows.map(r => r.rowNumber);
+    setDeletedRowNumbers(prev => {
+      const next = new Set(prev);
+      rowsToRestore.forEach(n => next.delete(n));
+      return next;
+    });
+    setUndoToast(null);
+  };
+
   // Reset all and upload another
   const handleReset = () => {
     setFile(null);
@@ -374,6 +505,10 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
     setSheetData(null);
     setParsingError(null);
     setColumnMapping({});
+    setDeletedRowNumbers(new Set());
+    setSelectedRowNumbers(new Set());
+    setUndoToast(null);
+    setShowMissingMandatoryPopup(false);
     setImportCompleted(false);
     setImportResult(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -813,80 +948,18 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                     </button>
                   </div>
 
-                  {/* Mandatory TrackBook Fields Mapping Status */}
-                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5">
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                        Mandatory TrackBook Fields (All 5 Required for Import)
+                  {/* Compact note if mandatory fields are missing */}
+                  {!mandatoryStatus.isAllMandatoryMapped && (
+                    <div className="flex items-center justify-between text-xs px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-300">
+                      <span className="font-semibold flex items-center gap-1.5">
+                        <AlertTriangle size={14} className="text-amber-600 shrink-0" />
+                        Mandatory fields required: Date, Description, Category, Amount, Type
                       </span>
-                      <span className={cn(
-                        "text-xs font-bold px-2.5 py-0.5 rounded-md flex items-center gap-1",
-                        mandatoryStatus.isAllMandatoryMapped
-                          ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300"
-                          : "bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300"
-                      )}>
-                        {mandatoryStatus.isAllMandatoryMapped ? <Check size={12} /> : <X size={12} />}
-                        {mandatoryStatus.isAllMandatoryMapped ? "All 5 Mandatory Fields Mapped" : `${mandatoryStatus.missingFields.length} Mandatory Field(s) Missing`}
+                      <span className="font-bold text-amber-700 dark:text-amber-400 whitespace-nowrap">
+                        Missing: {mandatoryStatus.missingFields.join(', ')}
                       </span>
                     </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 text-xs">
-                      {/* Date */}
-                      <div className={cn("p-2 rounded-lg border", mandatoryStatus.date.isMapped ? "bg-white dark:bg-zinc-950 border-emerald-300 dark:border-emerald-800 text-slate-800 dark:text-slate-200" : "bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-900 text-rose-700 dark:text-rose-400")}>
-                        <div className="flex items-center justify-between text-[11px] font-bold">
-                          <span>1. Date</span>
-                          {mandatoryStatus.date.isMapped ? <span className="text-emerald-600 font-bold">✓ Mapped</span> : <span className="text-rose-600 font-bold">❌ NOT FOUND</span>}
-                        </div>
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                          {mandatoryStatus.date.isMapped ? `"${mandatoryStatus.date.columnName}"` : "Missing mandatory field"}
-                        </p>
-                      </div>
-
-                      {/* Description */}
-                      <div className={cn("p-2 rounded-lg border", mandatoryStatus.description.isMapped ? "bg-white dark:bg-zinc-950 border-emerald-300 dark:border-emerald-800 text-slate-800 dark:text-slate-200" : "bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-900 text-rose-700 dark:text-rose-400")}>
-                        <div className="flex items-center justify-between text-[11px] font-bold">
-                          <span>2. Description</span>
-                          {mandatoryStatus.description.isMapped ? <span className="text-emerald-600 font-bold">✓ Mapped</span> : <span className="text-rose-600 font-bold">❌ NOT FOUND</span>}
-                        </div>
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                          {mandatoryStatus.description.isMapped ? `"${mandatoryStatus.description.columnName}"` : "Missing mandatory field"}
-                        </p>
-                      </div>
-
-                      {/* Category */}
-                      <div className={cn("p-2 rounded-lg border", mandatoryStatus.category.isMapped ? "bg-white dark:bg-zinc-950 border-emerald-300 dark:border-emerald-800 text-slate-800 dark:text-slate-200" : "bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-900 text-rose-700 dark:text-rose-400")}>
-                        <div className="flex items-center justify-between text-[11px] font-bold">
-                          <span>3. Category</span>
-                          {mandatoryStatus.category.isMapped ? <span className="text-emerald-600 font-bold">✓ Mapped</span> : <span className="text-rose-600 font-bold">❌ NOT FOUND</span>}
-                        </div>
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                          {mandatoryStatus.category.isMapped ? `"${mandatoryStatus.category.columnName}"` : "Missing mandatory field"}
-                        </p>
-                      </div>
-
-                      {/* Amount */}
-                      <div className={cn("p-2 rounded-lg border", mandatoryStatus.amount.isMapped ? "bg-white dark:bg-zinc-950 border-emerald-300 dark:border-emerald-800 text-slate-800 dark:text-slate-200" : "bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-900 text-rose-700 dark:text-rose-400")}>
-                        <div className="flex items-center justify-between text-[11px] font-bold">
-                          <span>4. Amount</span>
-                          {mandatoryStatus.amount.isMapped ? <span className="text-emerald-600 font-bold">✓ {mandatoryStatus.amount.isDerived ? "Derived" : "Mapped"}</span> : <span className="text-rose-600 font-bold">❌ NOT FOUND</span>}
-                        </div>
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                          {mandatoryStatus.amount.isMapped ? `"${mandatoryStatus.amount.columnName}"` : "Missing mandatory field"}
-                        </p>
-                      </div>
-
-                      {/* Type */}
-                      <div className={cn("p-2 rounded-lg border", mandatoryStatus.type.isMapped ? "bg-white dark:bg-zinc-950 border-emerald-300 dark:border-emerald-800 text-slate-800 dark:text-slate-200" : "bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-900 text-rose-700 dark:text-rose-400")}>
-                        <div className="flex items-center justify-between text-[11px] font-bold">
-                          <span>5. Type</span>
-                          {mandatoryStatus.type.isMapped ? <span className="text-emerald-600 font-bold">✓ {mandatoryStatus.type.isDerived ? "Derived" : "Mapped"}</span> : <span className="text-rose-600 font-bold">❌ NOT FOUND</span>}
-                        </div>
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                          {mandatoryStatus.type.isMapped ? (mandatoryStatus.type.isDerived ? mandatoryStatus.type.columnName : `"${mandatoryStatus.type.columnName}"`) : "Missing mandatory field"}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
                     {sheetData.headers.map((colHeader, colIdx) => {
@@ -962,61 +1035,6 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
               )}
             </AnimatePresence>
 
-            {/* Prominent Warning Message for Missing Mandatory Information */}
-            {(!mandatoryStatus.isAllMandatoryMapped || counts.invalid > 0) && (
-              <motion.div
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border-2 border-rose-300 dark:border-rose-900 text-rose-900 dark:text-rose-200 shadow-sm space-y-3"
-              >
-                <div className="flex items-start gap-3.5">
-                  <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-900/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 mt-0.5">
-                    <AlertTriangle size={22} />
-                  </div>
-                  <div className="flex-1 space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h4 className="text-base font-black text-rose-900 dark:text-rose-100 flex items-center gap-2">
-                        <span>⚠ Some entries cannot be imported</span>
-                        <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-rose-200 dark:bg-rose-900 text-rose-800 dark:text-rose-200 tracking-wider">
-                          Import Blocked
-                        </span>
-                      </h4>
-                      <span className="text-xs font-black text-rose-700 dark:text-rose-300 px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 border border-rose-200 dark:border-rose-800">
-                        Status: ❌ Import unavailable
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-rose-800 dark:text-rose-300 leading-relaxed font-medium">
-                      This Excel file is missing mandatory information. Required fields: <strong>Date</strong>, <strong>Description</strong>, <strong>Category</strong>, <strong>Amount</strong>, and <strong>Type</strong>.
-                    </p>
-
-                    {mandatoryStatus.missingFields.length > 0 && (
-                      <div className="p-3.5 rounded-xl bg-white dark:bg-zinc-900 border border-rose-200 dark:border-rose-800/80 space-y-1.5 shadow-xs">
-                        <p className="text-xs font-bold text-rose-700 dark:text-rose-300 flex items-center gap-1.5">
-                          <AlertCircle size={15} className="text-rose-600 shrink-0" />
-                          <span>Missing mandatory column{mandatoryStatus.missingFields.length > 1 ? 's' : ''}: <strong className="underline text-rose-800 dark:text-rose-200">{mandatoryStatus.missingFields.join(', ')}</strong></span>
-                        </p>
-                        <p className="text-xs text-slate-600 dark:text-slate-400">
-                          {mandatoryStatus.missingFields.includes('Category') ? (
-                            <span>Category is missing from the uploaded Excel file. Please add the missing Category values to the Excel file and upload it again, or use Column Mapping if your file uses an alternate column name. </span>
-                          ) : (
-                            <span>Please ensure all mandatory columns are present in your Excel file or mapped properly. </span>
-                          )}
-                          All five mandatory fields must be present and valid before entries can be imported.
-                        </p>
-                      </div>
-                    )}
-
-                    {mandatoryStatus.missingFields.length === 0 && counts.invalid > 0 && (
-                      <p className="text-xs font-semibold text-rose-700 dark:text-rose-300">
-                        {counts.invalid} {counts.invalid === 1 ? 'row has' : 'rows have'} missing or invalid mandatory values. All mandatory fields must be present in every row before entries can be imported.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            )}
-
             {/* Counts Bar & Filtering */}
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               {/* Counts */}
@@ -1037,18 +1055,16 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                   </span>
                 )}
 
-                {mandatoryStatus.missingFields.length > 0 && (
-                  <span className="font-bold px-3 py-1.5 rounded-xl bg-rose-100 dark:bg-rose-950/80 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 flex items-center gap-1">
-                    <X size={13} />
-                    Missing: <strong>{mandatoryStatus.missingFields.join(', ')}</strong>
-                  </span>
-                )}
-
-                {counts.warnings > 0 && (
-                  <span className="font-bold px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-amber-700 dark:text-amber-400 flex items-center gap-1">
-                    <AlertTriangle size={13} />
-                    Warnings: <strong>{counts.warnings}</strong>
-                  </span>
+                {/* Batch delete action when rows are selected */}
+                {selectedRowNumbers.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteSelectedRows}
+                    className="px-3 py-1.5 rounded-xl bg-rose-100 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 font-bold text-xs flex items-center gap-1.5 hover:bg-rose-200 dark:hover:bg-rose-900/80 transition-colors cursor-pointer active:scale-95 shadow-xs"
+                  >
+                    <Trash2 size={13} />
+                    <span>Delete Selected ({selectedRowNumbers.size})</span>
+                  </button>
                 )}
               </div>
 
@@ -1107,7 +1123,18 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                       : "bg-slate-100/95 border-slate-200 text-slate-600 backdrop-blur-sm"
                   )}>
                     <tr>
-                      <th className="py-3 px-3 w-12 text-center">#</th>
+                      <th className="py-3 px-3 w-10 text-center">
+                        <input
+                          ref={selectAllRef}
+                          type="checkbox"
+                          checked={isAllFilteredSelected}
+                          onChange={toggleSelectAll}
+                          className="rounded accent-emerald-600 cursor-pointer w-4 h-4"
+                          title="Select all rows"
+                          aria-label="Select all rows"
+                        />
+                      </th>
+                      <th className="py-3 px-2 w-12 text-center">#</th>
                       <th className="py-3 px-3 w-24">Status</th>
                       <th className="py-3 px-3 w-32">Date</th>
                       <th className="py-3 px-4 min-w-[180px]">Description</th>
@@ -1115,14 +1142,15 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                       <th className="py-3 px-3 w-28 text-right">Amount</th>
                       <th className="py-3 px-3 w-24 text-center">Type</th>
                       <th className="py-3 px-3 w-24">Mode</th>
-                      <th className="py-3 px-3 w-28">Reference</th>
+                      <th className="py-3 px-3 w-24">Reference</th>
+                      <th className="py-3 px-3 w-16 text-center">Action</th>
                     </tr>
                   </thead>
 
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-900 font-medium">
                     {paginatedEntries.length === 0 ? (
                       <tr>
-                        <td colSpan={9} className="py-12 text-center text-slate-400">
+                        <td colSpan={11} className="py-12 text-center text-slate-400">
                           No entries found for this filter.
                         </td>
                       </tr>
@@ -1132,15 +1160,28 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                           key={entry.rowNumber}
                           className={cn(
                             "transition-colors",
-                            !entry.isValid
-                              ? "bg-rose-50/40 dark:bg-rose-950/20 hover:bg-rose-50/80 dark:hover:bg-rose-950/30"
-                              : theme === 'dark'
-                                ? "hover:bg-zinc-900/60"
-                                : "hover:bg-slate-50"
+                            selectedRowNumbers.has(entry.rowNumber)
+                              ? "bg-indigo-50/60 dark:bg-indigo-950/40"
+                              : !entry.isValid
+                                ? "bg-rose-50/40 dark:bg-rose-950/20 hover:bg-rose-50/80 dark:hover:bg-rose-950/30"
+                                : theme === 'dark'
+                                  ? "hover:bg-zinc-900/60"
+                                  : "hover:bg-slate-50"
                           )}
                         >
+                          {/* Selection Checkbox */}
+                          <td className="py-2.5 px-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedRowNumbers.has(entry.rowNumber)}
+                              onChange={() => toggleSelectRow(entry.rowNumber)}
+                              className="rounded accent-emerald-600 cursor-pointer w-4 h-4"
+                              aria-label={`Select row ${entry.rowNumber}`}
+                            />
+                          </td>
+
                           {/* Row Number */}
-                          <td className="py-2.5 px-3 text-center text-slate-400 font-mono text-[11px]">
+                          <td className="py-2.5 px-2 text-center text-slate-400 font-mono text-[11px]">
                             {entry.rowNumber}
                           </td>
 
@@ -1251,6 +1292,19 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                           {/* Reference */}
                           <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400 text-[11px] truncate max-w-[120px]">
                             {entry.reference || '—'}
+                          </td>
+
+                          {/* Action (Row Delete) */}
+                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRow(entry)}
+                              title={`Remove row ${entry.rowNumber}`}
+                              aria-label={`Remove row ${entry.rowNumber}`}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer active:scale-90"
+                            >
+                              <Trash2 size={14} />
+                            </button>
                           </td>
                         </tr>
                       ))
@@ -1508,6 +1562,78 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Missing Mandatory Fields Compact Popup Notification */}
+      <AnimatePresence>
+        {showMissingMandatoryPopup && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 8 }}
+              className={cn(
+                "w-full max-w-sm rounded-2xl p-5 shadow-2xl space-y-4 border transition-colors",
+                theme === 'dark' 
+                  ? "bg-zinc-950 border-zinc-800 text-white" 
+                  : "bg-white border-slate-200 text-slate-900"
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+                  <AlertTriangle size={20} />
+                </div>
+                <div className="space-y-1 min-w-0">
+                  <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                    Mandatory fields required
+                  </h4>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-medium">
+                    Some required fields are missing. Date, Description, Category, Amount and Type are required for import.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowMissingMandatoryPopup(false)}
+                  className="px-5 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-black hover:opacity-90 transition-all cursor-pointer shadow-sm active:scale-95"
+                >
+                  OK
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Undo Toast for Deleted Rows */}
+      <AnimatePresence>
+        {undoToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-20 sm:bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-slate-900/95 text-white dark:bg-white/95 dark:text-slate-950 shadow-2xl backdrop-blur-md text-xs font-bold border border-slate-800 dark:border-slate-200"
+          >
+            <span>{undoToast.message}</span>
+            <button
+              type="button"
+              onClick={handleUndoDelete}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-black transition-colors cursor-pointer active:scale-95"
+            >
+              <RotateCcw size={12} />
+              <span>Undo</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setUndoToast(null)}
+              className="p-1 text-slate-400 hover:text-white dark:hover:text-slate-900 cursor-pointer"
+            >
+              <X size={14} />
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
 
