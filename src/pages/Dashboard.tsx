@@ -2594,6 +2594,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   showFormRef.current = showForm;
   const saveTransactionRef = useRef<(() => void) | null>(null);
   const currentUserRoleRef = useRef<Role>('Primary Admin');
+  const optimisticCashbooksRef = useRef<Map<string, { book: Cashbook; timestamp: number }>>(new Map());
+  const optimisticEntriesRef = useRef<Map<string, { entry: Transaction; cashbookId: string; timestamp: number }>>(new Map());
   const [detailsError, setDetailsError] = useState(false);
   const [amountError, setAmountError] = useState(false);
   const [partyName, setPartyName] = useState('');
@@ -4274,6 +4276,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             }
           }
 
+          // Merge in-flight optimistic entries for this cashbook so they appear instantly and never disappear or flicker while saving
+          const nowOpt = Date.now();
+          const existingEntryIds = new Set(entryList.map(e => e.id));
+          for (const [optEntryId, optData] of optimisticEntriesRef.current.entries()) {
+            if (optData.cashbookId === cb.id) {
+              if (existingEntryIds.has(optEntryId)) {
+                optimisticEntriesRef.current.delete(optEntryId);
+              } else if (nowOpt - optData.timestamp < 60000) {
+                entryList.unshift(optData.entry);
+                existingEntryIds.add(optEntryId);
+              } else {
+                optimisticEntriesRef.current.delete(optEntryId);
+              }
+            }
+          }
+
           // Update memory cache
           if (entryList.length > 0) {
             entriesCache.set(cb.id, entryList);
@@ -4391,11 +4409,34 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           });
         } catch (e) {}
 
+        // 3. Preserve in-flight optimistic cashbooks so newly created cashbooks appear instantly with 0ms delay and never disappear
+        const nowBooks = Date.now();
+        for (const [optId, { book: optBook, timestamp }] of optimisticCashbooksRef.current.entries()) {
+          if (deletedIds.has(optId)) {
+            optimisticCashbooksRef.current.delete(optId);
+            continue;
+          }
+          const matchingServerBook = cleanServerBooks.find(b => 
+            b.id === optId || 
+            (b.name.trim().toLowerCase() === optBook.name.trim().toLowerCase() && (b.user_id === optBook.user_id || (b as any).userId === optBook.user_id))
+          );
+          if (matchingServerBook) {
+            optimisticCashbooksRef.current.delete(optId);
+          } else if (nowBooks - timestamp < 60000) {
+            if (!finalMap.has(optId)) {
+              finalMap.set(optId, optBook);
+            }
+          } else {
+            optimisticCashbooksRef.current.delete(optId);
+          }
+        }
+
         // NO RESURRECTION OF DELETED BOOKS:
         // Do NOT re-add books from booksRef.current! If a book is missing from Supabase, it is deleted!
 
         const finalMergedList = sortCashbooksLatestFirst(Array.from(finalMap.values()));
         setBooks(finalMergedList);
+        booksRef.current = finalMergedList;
         try {
           if (session?.user?.id) {
             localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(finalMergedList));
@@ -5031,7 +5072,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       is_offline: false
     };
 
-    // 1. Update UI state instantly: new Cashbook appears in the list immediately
+    // Store in optimistic ref so background fetches do not wipe it
+    optimisticCashbooksRef.current.set(tempId, { book: newBook, timestamp: Date.now() });
+
+    // 1. Update UI state instantly: new Cashbook appears in the list immediately (0ms delay)
     setBooks(prev => {
       const next = [newBook, ...prev.filter(b => b.id !== newBook.id)];
       booksRef.current = next;
@@ -5141,6 +5185,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         if (!navigator.onLine) {
           await syncManager.saveOfflineCashbook(payload);
         } else {
+          optimisticCashbooksRef.current.delete(tempId);
           console.error('[CreateBook] Failed to persist cashbook remotely, rolling back optimistic entry:', tempId);
           setBooks(prev => {
             const next = prev.filter(b => b.id !== tempId);
@@ -5155,6 +5200,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           });
           setError("Couldn't create the cashbook. Please try again.");
         }
+      } else {
+        optimisticCashbooksRef.current.delete(tempId);
       }
     })();
   };
@@ -5784,9 +5831,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         return;
       }
 
-      // 1. OPTIMISTIC UPDATE: Add transaction to UI state instantly
+      // 1. OPTIMISTIC UPDATE: Add transaction to UI state instantly (0ms delay)
       const optimisticTx: Transaction = {
         id: tempId,
+        clientEntryId: tempId,
         amount: amountNum,
         type: currentShowForm as 'in' | 'out',
         description: currentDescription,
@@ -5796,31 +5844,39 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         images: currentSelectedImages,
         imageLayout: currentImageLayout,
         source: 'Manual',
-        user_name: resolvedName
+        user_name: resolvedName,
+        syncStatus: 'SYNCED',
+        is_offline: false,
+        created_at: new Date().toISOString()
       };
 
-      setBooks(prev => prev.map(b => b.id === activeBookId ? {
-        ...b,
-        transactions: [optimisticTx, ...b.transactions]
-      } : b));
+      optimisticEntriesRef.current.set(tempId, {
+        entry: optimisticTx,
+        cashbookId: activeBookId,
+        timestamp: Date.now()
+      });
+
+      setBooks(prev => {
+        const next = prev.map(b => b.id === activeBookId ? {
+          ...b,
+          transactions: [optimisticTx, ...(b.transactions || []).filter(t => t.id !== tempId)]
+        } : b);
+        booksRef.current = next;
+        try {
+          if (session?.user?.id) {
+            localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
+            offlineDb.saveCachedCashbooks(session.user.id, next);
+          }
+        } catch (_) {}
+        return next;
+      });
 
       const prevCached = entriesCache.get(activeBookId) || [];
-      entriesCache.set(activeBookId, [{
-        id: tempId,
-        amount: amountNum,
-        type: currentShowForm,
-        description: currentDescription,
-        category: currentCategory,
-        mode: currentMode,
-        date: dateObj,
-        image_layout: currentImageLayout,
-        user_id: session.user.id,
-        cashbook_id: activeBookId
-      }, ...prevCached]);
+      entriesCache.set(activeBookId, [optimisticTx, ...prevCached.filter(t => t.id !== tempId)]);
 
       attachmentCache.set(tempId, { images: currentSelectedImages, isAi: false });
 
-      // 2. CLOSE FORM IMMEDIATELY
+      // 2. CLOSE FORM IMMEDIATELY (0ms delay)
       setShowForm(null);
       resetForm();
       setIsSubmitting(false);
@@ -5954,7 +6010,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
           // UI state and cache are already optimistically updated instantly.
           // No redundant fetchData() call, preventing lag and full-database reload.
+          optimisticEntriesRef.current.delete(tempId);
         } catch (bgErr: any) {
+          optimisticEntriesRef.current.delete(tempId);
           const errStr = typeof bgErr === 'object' ? JSON.stringify(bgErr) : String(bgErr || '');
           const isNetworkFailure = (typeof navigator !== 'undefined' && !navigator.onLine) || 
             syncManager.network.state === 'offline' ||
@@ -5992,18 +6050,26 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               images: [],
               is_offline: true
             });
-            setBooks(prev => prev.map(b => b.id === activeBookId ? {
-              ...b,
-              transactions: b.transactions.map(t => t.id === tempId ? { ...t, syncStatus: 'PENDING', is_offline: true } : t)
-            } : b));
+            setBooks(prev => {
+              const next = prev.map(b => b.id === activeBookId ? {
+                ...b,
+                transactions: b.transactions.map(t => t.id === tempId ? { ...t, syncStatus: 'PENDING' as const, is_offline: true } : t)
+              } : b);
+              booksRef.current = next;
+              return next;
+            });
             return;
           }
 
           console.error('[Instant Save] Background sync error:', bgErr);
-          setBooks(prev => prev.map(b => b.id === activeBookId ? {
-            ...b,
-            transactions: b.transactions.filter(t => t.id !== tempId)
-          } : b));
+          setBooks(prev => {
+            const next = prev.map(b => b.id === activeBookId ? {
+              ...b,
+              transactions: b.transactions.filter(t => t.id !== tempId)
+            } : b);
+            booksRef.current = next;
+            return next;
+          });
           entriesCache.set(activeBookId, prevCached);
           setError(bgErr.message || 'Failed to save entry. Please check your connection.');
         }
@@ -6031,11 +6097,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return;
     }
 
-    if (!activeBookId || !showForm || !session || !supabase) return;
+    if (!activeBookId || !showForm || !session) return;
 
-    setIsSubmitting(true);
     setError(null);
-    await saveTransaction();
+    saveTransaction();
   };
 
   const handleDeleteTransaction = (id: string) => {
@@ -12423,7 +12488,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <h3 className={cn(
                   "text-xl font-bold transition-colors duration-300",
                   theme === 'dark' ? "text-white" : "text-black"
-                )}>Create New Book</h3>
+                )}>Create New Cashbook</h3>
                 <button onClick={() => { setIsCreatingBook(false); setCreateBookError(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
                   <X size={20} className="text-slate-400" />
                 </button>
@@ -12471,7 +12536,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
                   )}
                 >
-                  Create Book
+                  Create Cashbook
                 </button>
               </form>
             </motion.div>

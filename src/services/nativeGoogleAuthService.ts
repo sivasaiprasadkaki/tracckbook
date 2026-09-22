@@ -10,7 +10,8 @@
  */
 
 import { supabase } from '../lib/supabase';
-import { markSessionUnlocked } from './mpinSecurityService';
+import { markSessionUnlocked, clearSessionUnlocked } from './mpinSecurityService';
+import { checkUserAccountStatus } from './userStatusService';
 
 export interface NativeGoogleAuthResult {
   success: boolean;
@@ -179,6 +180,29 @@ export async function performNativeGoogleSignIn(): Promise<NativeGoogleAuthResul
         if (data?.session && data?.user) {
           console.log('[NativeGoogleAuth] Successfully signed in user:', data.user.email);
           
+          // Check TrackBook user account status - SINGLE SOURCE OF TRUTH
+          const statusRes = await checkUserAccountStatus({
+            userId: data.user.id,
+            email: data.user.email,
+          });
+
+          if (statusRes.status === 'blocked') {
+            console.warn('[NativeGoogleAuth] Authenticated Google user is blocked in TrackBook. Terminating session.');
+            try {
+              await supabase.auth.signOut();
+            } catch {}
+            clearSessionUnlocked();
+            try {
+              localStorage.setItem('trackbook_explicit_logout', 'true');
+            } catch {}
+
+            finish({
+              success: false,
+              error: 'User blocked'
+            });
+            return;
+          }
+
           // Mark session unlocked in MPIN manager
           if (data.user.id) {
             markSessionUnlocked(data.user.id);

@@ -26,6 +26,7 @@ import {
   handleSaveCashbookEntry
 } from "./api/rbac.ts";
 import syncHandler, { handleSyncOfflineEntry, handleBatchSyncOfflineEntries, handleSyncCashbook, handleDeleteCashbook } from "./api/sync.ts";
+import { handleCheckUserStatus, handleGetAdminUsers, handleSetUserStatus } from "./api/user-status.ts";
 
 const envConfig = dotenv.config();
 if (envConfig.parsed) {
@@ -111,6 +112,11 @@ app.post("/api/sync/batch", handleBatchSyncOfflineEntries);
 app.delete("/api/rbac/members", handleRemoveMember);
 app.get("/api/rbac/members", handleGetMembers);
 app.post("/api/rbac/revoke-invitation", handleRevokeInvitation);
+
+// User Account Status & Admin Management Endpoints
+app.post("/api/auth/check-status", handleCheckUserStatus);
+app.get("/api/admin/users", handleGetAdminUsers);
+app.post("/api/admin/user-status", handleSetUserStatus);
 
 // AI Ask Endpoint
 app.post("/api/gemini/ask", async (req, res) => {

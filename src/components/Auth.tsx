@@ -20,7 +20,9 @@ import {
 import { cn } from '../lib/utils';
 import { CountryCodePicker, COUNTRIES, Country } from './CountryCodePicker';
 import { PhoneComingSoonModal } from './PhoneComingSoonModal';
-import { markSessionUnlocked } from '../services/mpinSecurityService';
+import { markSessionUnlocked, clearSessionUnlocked } from '../services/mpinSecurityService';
+import { checkUserAccountStatus } from '../services/userStatusService';
+import { InAppDialog } from './InAppDialog';
 import DesktopSignIn from './DesktopSignIn';
 import DesktopSignUp from './DesktopSignUp';
 import DesktopForgot from './DesktopForgot';
@@ -55,6 +57,7 @@ export default function Auth({
   };
   const [loginMethod, setLoginMethod] = useState<'email' | 'phone'>('email');
   const [showPhoneComingSoon, setShowPhoneComingSoon] = useState(false);
+  const [showBlockedDialog, setShowBlockedDialog] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<Country>(COUNTRIES[0]);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [phoneOtp, setPhoneOtp] = useState('');
@@ -116,6 +119,14 @@ export default function Auth({
     if (reason === 'inactivity') {
       setError('You were logged out due to inactivity.');
       sessionStorage.removeItem('logout_reason');
+    }
+
+    // Check if user was blocked
+    const blockedNotice = sessionStorage.getItem('auth_blocked_notice') || (location.state as any)?.error;
+    if (blockedNotice === 'User blocked') {
+      sessionStorage.removeItem('auth_blocked_notice');
+      setError('User blocked');
+      setShowBlockedDialog(true);
     }
 
     // Check if user just completed password reset
@@ -285,7 +296,8 @@ export default function Auth({
       console.warn('Phone OTP verification notice:', err?.message || err);
       const lower = (err?.message || '').toLowerCase();
       if (lower.includes('banned') || lower.includes('user is banned') || err?.code === 'user_banned' || lower.includes('blocked')) {
-        setError("You're Blocked please contact administrator");
+        setError('User blocked');
+        setShowBlockedDialog(true);
       } else if (lower.includes('failed to fetch') || lower.includes('network')) {
         setError('Unable to connect to the server. Please check your internet connection and try again.');
       } else {
@@ -309,7 +321,28 @@ export default function Auth({
         setError(null);
         setSuccess(null);
       },
-      onSuccess: (session) => {
+      onSuccess: async (session) => {
+        if (session?.user) {
+          const statusRes = await checkUserAccountStatus({
+            userId: session.user.id,
+            email: session.user.email,
+          });
+
+          if (statusRes.status === 'blocked') {
+            setLoading(false);
+            try {
+              await supabase?.auth.signOut();
+            } catch {}
+            clearSessionUnlocked();
+            try {
+              localStorage.setItem('trackbook_explicit_logout', 'true');
+            } catch {}
+            setError('User blocked');
+            setShowBlockedDialog(true);
+            return;
+          }
+        }
+
         setLoading(false);
         setSuccess('Logged in successfully with Google!');
         if (session?.user?.id) {
@@ -321,7 +354,8 @@ export default function Auth({
         setLoading(false);
         const lower = (errorMessage || '').toLowerCase();
         if (lower.includes('banned') || lower.includes('user is banned') || lower.includes('blocked')) {
-          setError("You're Blocked please contact administrator");
+          setError('User blocked');
+          setShowBlockedDialog(true);
         } else {
           setError(errorMessage || 'Google Sign-In failed.');
         }
@@ -573,7 +607,8 @@ export default function Auth({
             lowerMsg.includes('blocked')
           ) {
             console.warn('[Auth] Sign up blocked: banned account');
-            setError("You're Blocked please contact administrator");
+            setError('User blocked');
+            setShowBlockedDialog(true);
             return;
           }
 
@@ -647,7 +682,8 @@ export default function Auth({
             lowerMsg.includes('blocked')
           ) {
             console.warn('[Auth] Sign in blocked: banned account');
-            setError("You're Blocked please contact administrator");
+            setError('User blocked');
+            setShowBlockedDialog(true);
             return;
           }
 
@@ -684,11 +720,40 @@ export default function Auth({
           return;
         }
 
-        if (data?.user?.id) {
+        // Verify account status immediately upon authentication success
+        if (data?.user) {
+          const statusRes = await checkUserAccountStatus({
+            userId: data.user.id,
+            email: data.user.email,
+          });
+
+          if (statusRes.status === 'blocked') {
+            console.warn('[Auth] Sign in: User is blocked in TrackBook. Terminating session.');
+            try {
+              await supabase.auth.signOut();
+            } catch {}
+            clearSessionUnlocked();
+            try {
+              localStorage.setItem('trackbook_explicit_logout', 'true');
+            } catch {}
+            setError('User blocked');
+            setShowBlockedDialog(true);
+            return;
+          }
+
           markSessionUnlocked(data.user.id);
         }
         console.log('SignIn Success:', data);
       } else if (mode === 'forgot') {
+        // Single source of truth verification before initiating reset password
+        const statusRes = await checkUserAccountStatus({ email });
+        if (statusRes.status === 'blocked') {
+          console.warn('[Auth] Password reset rejected: User is blocked in TrackBook.');
+          setError('User blocked');
+          setShowBlockedDialog(true);
+          return;
+        }
+
         const isAndroid = isNativeAndroidApp();
         const redirectTo = isAndroid 
           ? 'trackbook://reset-password' 
@@ -711,7 +776,8 @@ export default function Auth({
             lower.includes('blocked')
           ) {
             console.warn('[Auth] Password reset blocked: banned account');
-            setError("You're Blocked please contact administrator");
+            setError('User blocked');
+            setShowBlockedDialog(true);
             return;
           }
 
@@ -744,7 +810,8 @@ export default function Auth({
         lower.includes('blocked')
       ) {
         console.warn('[Auth] Account blocked or banned');
-        setError("You're Blocked please contact administrator");
+        setError('User blocked');
+        setShowBlockedDialog(true);
       } else if (
         lower.includes('failed to fetch') ||
         lower.includes('networkerror') ||
@@ -1318,6 +1385,20 @@ export default function Auth({
           />
         )}
       </AnimatePresence>
+
+      {/* Blocked User Dialog */}
+      <InAppDialog
+        isOpen={showBlockedDialog}
+        options={{
+          title: 'User blocked',
+          message: 'Your TrackBook account has been blocked.',
+          type: 'error',
+          confirmText: 'OK',
+          onConfirm: () => setShowBlockedDialog(false),
+        }}
+        onClose={() => setShowBlockedDialog(false)}
+        theme={theme as any}
+      />
     </div>
   );
 }

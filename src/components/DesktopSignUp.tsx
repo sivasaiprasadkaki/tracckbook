@@ -330,7 +330,7 @@ export default function DesktopSignUp({
                 <AlertCircle className="w-5 h-5 shrink-0 text-rose-600 mt-0.5" />
                 <div className="flex-1 whitespace-pre-line">
                   {error.toLowerCase().includes('banned') || error.toLowerCase().includes('blocked')
-                    ? "You're Blocked please contact administrator"
+                    ? "User blocked"
                     : error.toLowerCase().includes('failed to fetch') || error.toLowerCase().includes('network')
                     ? "Unable to connect to the server. Please check your internet connection and try again."
                     : error}

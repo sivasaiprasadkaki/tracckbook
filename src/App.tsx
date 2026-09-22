@@ -8,6 +8,7 @@ import SmartUpdateManager from './components/SmartUpdateManager';
 import AutoLogoutManager from './components/AutoLogoutManager';
 import MpinManager from './components/MpinManager';
 import { markSessionUnlocked, clearSessionUnlocked } from './services/mpinSecurityService';
+import { checkUserAccountStatus } from './services/userStatusService';
 
 function lazyWithRetry(componentImport: () => Promise<any>) {
   return lazy(() =>
@@ -74,6 +75,40 @@ function NavigationHandler({
       return { isResetPath, hasRecoveryHash, hasRecoverySearch, hasRecoveryError, isRecovery: isResetPath || hasRecoveryHash || hasRecoverySearch || hasRecoveryError };
     };
 
+    // Helper to verify user account status (Single source of truth)
+    const verifyAccountAllowed = async (user: any): Promise<boolean> => {
+      if (!user) return true;
+      try {
+        const statusRes = await checkUserAccountStatus({
+          userId: user.id,
+          email: user.email,
+        });
+
+        if (statusRes.status === 'blocked') {
+          console.warn('[App Auth] User account status is BLOCKED in TrackBook. Terminating session...');
+          try {
+            sessionStorage.setItem('auth_blocked_notice', 'User blocked');
+            localStorage.setItem('trackbook_explicit_logout', 'true');
+          } catch {}
+
+          if (typeof window !== 'undefined' && (window.location.hash.includes('access_token') || window.location.search.includes('code='))) {
+            window.history.replaceState({}, document.title, '/login');
+          }
+
+          try {
+            await supabase?.auth.signOut();
+          } catch {}
+          clearSessionUnlocked();
+          setSession(null);
+          navigate('/login', { replace: true, state: { error: 'User blocked' } });
+          return false;
+        }
+      } catch (err) {
+        console.warn('[App Auth] Account status verification note:', err);
+      }
+      return true;
+    };
+
     // If initial load has recovery parameters in hash/query and not yet on /reset-password, route immediately
     const initialRecovery = checkRecoveryContext();
     if (initialRecovery.isRecovery && !initialRecovery.isResetPath) {
@@ -88,12 +123,15 @@ function NavigationHandler({
       setLoading(false);
     }, 4000); // Safety net
 
-    supabase.auth.getSession().then((res) => {
+    supabase.auth.getSession().then(async (res) => {
       clearTimeout(sessionTimeout);
       const sessionVal = res?.data?.session || null;
       if (sessionVal) {
-        setSession(sessionVal);
-        console.log('[DEBUG] SESSION REFRESHED');
+        const isAllowed = await verifyAccountAllowed(sessionVal.user);
+        if (isAllowed) {
+          setSession(sessionVal);
+          console.log('[DEBUG] SESSION REFRESHED');
+        }
       } else {
         const isExplicit = typeof localStorage !== 'undefined' && localStorage.getItem('trackbook_explicit_logout') === 'true';
         if (isExplicit) {
@@ -123,8 +161,15 @@ function NavigationHandler({
     });
 
     // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, sessionVal) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, sessionVal) => {
       console.log(`[DEBUG] AUTH STATE CHANGED: ${event}`);
+      if (sessionVal?.user) {
+        const isAllowed = await verifyAccountAllowed(sessionVal.user);
+        if (!isAllowed) {
+          return;
+        }
+      }
+
       if (event === 'SIGNED_OUT') {
         const isExplicit = typeof localStorage !== 'undefined' && localStorage.getItem('trackbook_explicit_logout') === 'true';
 
@@ -179,7 +224,25 @@ function NavigationHandler({
       }
     });
 
-    return () => subscription.unsubscribe();
+    // Active session protection: periodically re-verify user account status
+    const interval = setInterval(() => {
+      if (session?.user) {
+        verifyAccountAllowed(session.user);
+      }
+    }, 25000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && session?.user) {
+        verifyAccountAllowed(session.user);
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('visibilitychange', handleVisibility);
+      subscription.unsubscribe();
+    };
   }, [navigate, setSession, setLoading]);
 
   return null;
