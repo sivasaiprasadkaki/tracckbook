@@ -660,17 +660,17 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
 
   return (
     <div className={cn(
-      "min-h-screen transition-colors duration-300 pb-24",
+      "min-h-screen transition-colors duration-300 pb-16 w-full",
       theme === 'dark' ? "bg-black text-slate-100" : "bg-slate-50 text-slate-900"
     )}>
       {/* Top Sticky Header */}
       <header className={cn(
-        "sticky top-0 z-30 border-b backdrop-blur-md px-4 sm:px-6 py-3.5 transition-colors duration-300",
+        "sticky top-0 z-30 border-b backdrop-blur-md px-4 sm:px-6 md:px-8 lg:px-10 py-3.5 transition-colors duration-300 w-full",
         theme === 'dark' 
           ? "bg-zinc-950/80 border-zinc-800/80 text-white" 
           : "bg-white/80 border-slate-200/80 text-slate-900"
       )}>
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+        <div className="w-full flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <button
               onClick={() => {
@@ -733,7 +733,7 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
       </header>
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="w-full px-4 sm:px-6 md:px-8 lg:px-10 py-5 space-y-5">
 
         {/* Hero Banner when no file is uploaded yet */}
         {!file && (
@@ -834,11 +834,11 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
 
         {/* STEP 2: File Details & Preview Table */}
         {file && !importCompleted && (
-          <div className="space-y-6">
+          <div className="w-full space-y-4 sm:space-y-5">
             
             {/* File & Sheet Info Bar */}
             <div className={cn(
-              "rounded-2xl border p-4 sm:p-5 transition-colors duration-300 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4",
+              "w-full rounded-2xl border p-4 sm:p-5 transition-colors duration-300 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4",
               theme === 'dark' ? "bg-zinc-950 border-zinc-800" : "bg-white border-slate-200"
             )}>
               <div className="flex items-center gap-3.5 min-w-0">
@@ -961,7 +961,7 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3.5">
                     {sheetData.headers.map((colHeader, colIdx) => {
                       const currentField = columnMapping[colIdx] || 'ignore';
                       return (
@@ -1036,7 +1036,7 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
             </AnimatePresence>
 
             {/* Counts Bar & Filtering */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="w-full flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               {/* Counts */}
               <div className="flex items-center gap-2 flex-wrap text-xs">
                 <span className="font-bold px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
@@ -1110,11 +1110,11 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
 
             {/* PREVIEW TABLE (Preserves Exact Row Order, Sticky Header, Scrollable) */}
             <div className={cn(
-              "rounded-2xl border shadow-sm overflow-hidden transition-colors duration-300 relative",
+              "w-full rounded-2xl border shadow-sm overflow-hidden transition-colors duration-300 relative",
               theme === 'dark' ? "bg-zinc-950 border-zinc-800" : "bg-white border-slate-200"
             )}>
-              <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-                <table className="w-full text-left text-xs border-collapse">
+              <div className="w-full overflow-x-auto max-h-[620px] overflow-y-auto">
+                <table className="w-full min-w-[1020px] text-left text-xs border-collapse">
                   {/* Sticky Table Header */}
                   <thead className={cn(
                     "sticky top-0 z-20 font-black uppercase text-[10px] tracking-wider border-b transition-colors",
@@ -1135,15 +1135,15 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                         />
                       </th>
                       <th className="py-3 px-2 w-12 text-center">#</th>
-                      <th className="py-3 px-3 w-24">Status</th>
-                      <th className="py-3 px-3 w-32">Date</th>
-                      <th className="py-3 px-4 min-w-[180px]">Description</th>
-                      <th className="py-3 px-3 w-28">Category</th>
-                      <th className="py-3 px-3 w-28 text-right">Amount</th>
-                      <th className="py-3 px-3 w-24 text-center">Type</th>
-                      <th className="py-3 px-3 w-24">Mode</th>
-                      <th className="py-3 px-3 w-24">Reference</th>
-                      <th className="py-3 px-3 w-16 text-center">Action</th>
+                      <th className="py-3 px-3 w-24 whitespace-nowrap">Status</th>
+                      <th className="py-3 px-3 w-28 whitespace-nowrap">Date</th>
+                      <th className="py-3 px-4 min-w-[280px]">Description</th>
+                      <th className="py-3 px-3 w-32 whitespace-nowrap">Category</th>
+                      <th className="py-3 px-3 w-32 text-right whitespace-nowrap">Amount</th>
+                      <th className="py-3 px-3 w-24 text-center whitespace-nowrap">Type</th>
+                      <th className="py-3 px-3 w-24 whitespace-nowrap">Mode</th>
+                      <th className="py-3 px-3 w-36 whitespace-nowrap">Reference</th>
+                      <th className="py-3 px-3 w-16 text-center whitespace-nowrap">Action</th>
                     </tr>
                   </thead>
 
@@ -1170,7 +1170,7 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                           )}
                         >
                           {/* Selection Checkbox */}
-                          <td className="py-2.5 px-3 text-center">
+                          <td className="py-2.5 px-3 w-10 text-center">
                             <input
                               type="checkbox"
                               checked={selectedRowNumbers.has(entry.rowNumber)}
@@ -1181,12 +1181,12 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                           </td>
 
                           {/* Row Number */}
-                          <td className="py-2.5 px-2 text-center text-slate-400 font-mono text-[11px]">
+                          <td className="py-2.5 px-2 w-12 text-center text-slate-400 font-mono text-[11px]">
                             {entry.rowNumber}
                           </td>
 
                           {/* Status */}
-                          <td className="py-2.5 px-3">
+                          <td className="py-2.5 px-3 w-24 whitespace-nowrap">
                             {entry.isValid ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold border border-emerald-200 dark:border-emerald-900/50">
                                 <Check size={10} /> Valid
@@ -1202,12 +1202,12 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                           </td>
 
                           {/* Date */}
-                          <td className="py-2.5 px-3 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                          <td className="py-2.5 px-3 w-28 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">
                             {entry.dateFormatted}
                           </td>
 
                           {/* Description */}
-                          <td className="py-2.5 px-4 text-slate-900 dark:text-slate-100 max-w-xs">
+                          <td className="py-2.5 px-4 text-slate-900 dark:text-slate-100 min-w-[280px]">
                             {entry.description ? (
                               <span title={entry.description} className="block truncate font-medium">{entry.description}</span>
                             ) : (
@@ -1236,7 +1236,7 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                           </td>
 
                           {/* Category */}
-                          <td className="py-2.5 px-3 whitespace-nowrap">
+                          <td className="py-2.5 px-3 w-32 whitespace-nowrap">
                             {entry.category ? (
                               <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 text-[11px] font-bold">
                                 {entry.category}
@@ -1250,7 +1250,7 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
 
                           {/* Amount */}
                           <td className={cn(
-                            "py-2.5 px-3 text-right font-black font-mono text-xs whitespace-nowrap",
+                            "py-2.5 px-3 w-32 text-right font-black font-mono text-xs whitespace-nowrap",
                             entry.amount > 0 && entry.type === 'in'
                               ? "text-emerald-600 dark:text-emerald-400"
                               : entry.amount > 0
@@ -1265,7 +1265,7 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                           </td>
 
                           {/* Type */}
-                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <td className="py-2.5 px-3 w-24 text-center whitespace-nowrap">
                             {entry.errors.some(e => e.toLowerCase().includes('type')) ? (
                               <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
                                 Missing ❌
@@ -1283,19 +1283,19 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
                           </td>
 
                           {/* Mode */}
-                          <td className="py-2.5 px-3 whitespace-nowrap">
+                          <td className="py-2.5 px-3 w-24 whitespace-nowrap">
                             <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 text-[11px] font-semibold">
                               {entry.mode}
                             </span>
                           </td>
 
                           {/* Reference */}
-                          <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400 text-[11px] truncate max-w-[120px]">
+                          <td className="py-2.5 px-3 w-36 text-slate-500 dark:text-slate-400 text-[11px] truncate max-w-[240px]">
                             {entry.reference || '—'}
                           </td>
 
                           {/* Action (Row Delete) */}
-                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <td className="py-2.5 px-3 w-16 text-center whitespace-nowrap">
                             <button
                               type="button"
                               onClick={() => handleDeleteRow(entry)}
@@ -1347,7 +1347,7 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
 
             {/* Sticky Bottom Action Bar */}
             <div className={cn(
-              "sticky bottom-4 z-20 rounded-2xl border p-4 shadow-xl backdrop-blur-md flex items-center justify-between gap-4 transition-colors",
+              "sticky bottom-4 z-20 w-full rounded-2xl border p-4 shadow-xl backdrop-blur-md flex items-center justify-between gap-4 transition-colors",
               theme === 'dark' ? "bg-zinc-950/95 border-zinc-800 text-white" : "bg-white/95 border-slate-200 text-slate-900"
             )}>
               <button
