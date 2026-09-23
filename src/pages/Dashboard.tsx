@@ -462,11 +462,20 @@ function persistAttachmentCacheToStorage() {
   }
 }
 
+const bookDisplayInfoCache = new Map<string, { sig: string; result: { text: string; isNegative: boolean } }>();
+
 function getBookDisplayInfo(book: any): { text: string; isNegative: boolean } {
   if (!book) return { text: '0', isNegative: false };
   const txs: any[] = (Array.isArray(book.transactions) && book.transactions.length > 0)
     ? book.transactions
     : (entriesCache.get(book.id) || []);
+
+  const sig = `${txs.length}_${txs[0]?.id || ''}_${txs[0]?.amount || ''}_${txs[txs.length - 1]?.id || ''}`;
+  const cached = bookDisplayInfoCache.get(book.id);
+  if (cached && cached.sig === sig) {
+    return cached.result;
+  }
+
   let cashIn = 0;
   let cashOut = 0;
   for (let i = 0; i < txs.length; i++) {
@@ -493,19 +502,16 @@ function getBookDisplayInfo(book: any): { text: string; isNegative: boolean } {
     return absVal.toLocaleString('en-IN');
   };
 
-  // If net balance is negative, display with minus sign and red color
-  if (net < 0) {
-    return {
-      text: `-${formatAmt(net)}`,
-      isNegative: true,
-    };
-  }
-
-  // If net balance is positive or zero, display formatted net amount in emerald green
-  return {
+  const res = net < 0 ? {
+    text: `-${formatAmt(net)}`,
+    isNegative: true,
+  } : {
     text: formatAmt(net),
     isNegative: false,
   };
+
+  bookDisplayInfoCache.set(book.id, { sig, result: res });
+  return res;
 }
 
 /**
@@ -814,8 +820,8 @@ function useVirtualWindow({
 
   const { startIndex, endIndex, paddingTop, paddingBottom } = useMemo(() => {
     const el = containerRef.current;
-    if (!el || itemsCount === 0) {
-      return { startIndex: 0, endIndex: Math.min(itemsCount - 1, 10), paddingTop: 0, paddingBottom: 0 };
+    if (!el || itemsCount === 0 || itemsCount <= 40) {
+      return { startIndex: 0, endIndex: Math.max(0, itemsCount - 1), paddingTop: 0, paddingBottom: 0 };
     }
 
     const rect = el.getBoundingClientRect();
@@ -937,6 +943,21 @@ const AttachmentCell = React.memo(({
 });
 AttachmentCell.displayName = 'AttachmentCell';
 
+function areTransactionRowPropsEqual(prevProps: any, nextProps: any): boolean {
+  return (
+    prevProps.t === nextProps.t &&
+    prevProps.runningBalance === nextProps.runningBalance &&
+    prevProps.selected === nextProps.selected &&
+    prevProps.isCurrentlyDeleting === nextProps.isCurrentlyDeleting &&
+    prevProps.isJustEdited === nextProps.isJustEdited &&
+    prevProps.theme === nextProps.theme &&
+    prevProps.canEdit === nextProps.canEdit &&
+    prevProps.canDelete === nextProps.canDelete &&
+    prevProps.canSelect === nextProps.canSelect &&
+    prevProps.uploadStatuses === nextProps.uploadStatuses
+  );
+}
+
 const MobileTransactionRow = React.memo(({
   t,
   runningBalance,
@@ -976,7 +997,7 @@ const MobileTransactionRow = React.memo(({
   handleEditTransaction: (t: Transaction) => void;
   handleDeleteTransaction: (id: string) => void;
   theme: string;
-  index: number;
+  index?: number;
   isJustEdited?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
@@ -1209,7 +1230,7 @@ const MobileTransactionRow = React.memo(({
       </div>
     </motion.div>
   );
-});
+}, areTransactionRowPropsEqual);
 MobileTransactionRow.displayName = 'MobileTransactionRow';
 
 const DesktopTransactionRow = React.memo(({
@@ -1247,7 +1268,7 @@ const DesktopTransactionRow = React.memo(({
   setPreviewRotation: (deg: number) => void;
   setPreviewZoom: (zoom: number) => void;
   theme: string;
-  index: number;
+  index?: number;
   isJustEdited?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
@@ -1424,8 +1445,283 @@ const DesktopTransactionRow = React.memo(({
       </td>
     </motion.tr>
   );
-});
+}, areTransactionRowPropsEqual);
 DesktopTransactionRow.displayName = 'DesktopTransactionRow';
+
+function areCashbookCardPropsEqual(prev: any, next: any): boolean {
+  return (
+    prev.book === next.book &&
+    prev.displayInfo.text === next.displayInfo.text &&
+    prev.displayInfo.isNegative === next.displayInfo.isNegative &&
+    prev.selected === next.selected &&
+    prev.justEdited === next.justEdited &&
+    prev.theme === next.theme &&
+    prev.canDelete === next.canDelete
+  );
+}
+
+const CashbookGridCard = React.memo(({
+  book,
+  displayInfo,
+  selected,
+  justEdited,
+  theme,
+  canDelete = true,
+  onTouchStart,
+  onTouchEnd,
+  onPress,
+  onEdit,
+  onDelete,
+  onOpen
+}: {
+  book: Cashbook;
+  displayInfo: { text: string; isNegative: boolean };
+  selected: boolean;
+  justEdited: boolean;
+  theme: string;
+  canDelete?: boolean;
+  onTouchStart: (id: string) => void;
+  onTouchEnd: () => void;
+  onPress: (id: string) => void;
+  onEdit: (book: Cashbook, e: React.MouseEvent) => void;
+  onDelete: (id: string, e: React.MouseEvent) => void;
+  onOpen: (id: string) => void;
+}) => {
+  return (
+    <motion.div
+      key={book.id}
+      initial={false}
+      animate={
+        justEdited
+          ? { scale: [1, 1.05, 1.05, 1], y: 0, opacity: 1 }
+          : { opacity: 1, y: 0, scale: 1 }
+      }
+      transition={
+        justEdited
+          ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
+          : { duration: 0.2, ease: "easeOut" }
+      }
+      onMouseDown={() => onTouchStart(book.id)}
+      onMouseUp={onTouchEnd}
+      onTouchStart={() => onTouchStart(book.id)}
+      onTouchEnd={onTouchEnd}
+      onClick={() => onPress(book.id)}
+      className={cn(
+        "group border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full p-4 sm:p-5 md:p-4 min-h-[96px] md:min-h-[110px] min-w-0",
+        justEdited
+          ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
+          : theme === 'dark' 
+            ? "border-transparent bg-transparent hover:bg-zinc-900/90 hover:border-zinc-800 hover:shadow-sm" 
+            : "border-transparent bg-transparent hover:bg-slate-100 hover:border-slate-200 hover:shadow-sm",
+      )}
+    >
+      {selected && (
+        <div className="absolute top-2 right-2 z-10">
+          <div className="bg-indigo-600 text-white rounded-full p-1 shadow-md">
+            <Check size={12} />
+          </div>
+        </div>
+      )}
+      <div className="flex-grow flex-1 min-w-0 flex items-center gap-2 md:gap-3 pr-1 md:pr-1.5">
+        <div className="p-2 md:p-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl md:rounded-[14px] group-hover:scale-110 transition-transform shrink-0">
+          <BookOpen size={18} className="w-[18px] h-[18px] md:w-5 md:h-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h4 
+            title={book.name}
+            className={cn(
+              "font-bold text-base sm:text-[17px] md:text-lg leading-snug break-normal line-clamp-2 transition-colors duration-300",
+              theme === 'dark' ? "text-slate-100" : "text-slate-800"
+            )}
+          >
+            {book.name}
+          </h4>
+          <p className={cn(
+            "text-[9px] md:text-[10px] mt-0.5 transition-colors duration-300 whitespace-nowrap truncate",
+            theme === 'dark' ? "text-slate-500" : "text-slate-400"
+          )}>
+            Created on {formatDateTime12h(book.createdAt)}
+          </p>
+        </div>
+      </div>
+      
+      <div className="flex items-center gap-1.5 md:gap-2 shrink-0 ml-1.5 md:ml-3">
+        <span className={cn(
+          "font-bold text-sm sm:text-base mr-1.5 sm:mr-2.5 select-none tracking-tight whitespace-nowrap",
+          displayInfo.isNegative 
+            ? "text-rose-600 dark:text-rose-400" 
+            : "text-emerald-600 dark:text-emerald-400"
+        )}>
+          {displayInfo.text}
+        </span>
+        <div className="flex items-center gap-0.5 md:gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 md:pl-2.5 shrink-0">
+          <button 
+            onClick={(e) => onEdit(book, e)}
+            className="p-1 md:p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all cursor-pointer"
+            title="Edit Book"
+          >
+            <Pencil size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
+          </button>
+          {canDelete && (
+            <button 
+              onClick={(e) => onDelete(book.id, e)}
+              className="p-1 md:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all cursor-pointer"
+              title="Delete Book"
+            >
+              <Trash2 size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
+            </button>
+          )}
+          <button 
+            onClick={() => onOpen(book.id)}
+            className="p-1.5 md:p-1.5 text-indigo-800 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all ml-0.5 cursor-pointer"
+            title="Open Cashbook"
+          >
+            <motion.div
+              animate={{ x: [0, 3, 0] }}
+              transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+            >
+              <ArrowRight size={16} className="w-[16px] h-[16px] md:w-[18px] md:h-[18px]" />
+            </motion.div>
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}, areCashbookCardPropsEqual);
+CashbookGridCard.displayName = 'CashbookGridCard';
+
+const CashbookListCard = React.memo(({
+  book,
+  displayInfo,
+  selected,
+  justEdited,
+  theme,
+  canDelete = true,
+  onTouchStart,
+  onTouchEnd,
+  onPress,
+  onEdit,
+  onDelete,
+  onOpen
+}: {
+  book: Cashbook;
+  displayInfo: { text: string; isNegative: boolean };
+  selected: boolean;
+  justEdited: boolean;
+  theme: string;
+  canDelete?: boolean;
+  onTouchStart: (id: string) => void;
+  onTouchEnd: () => void;
+  onPress: (id: string) => void;
+  onEdit: (book: Cashbook, e: React.MouseEvent) => void;
+  onDelete: (id: string, e: React.MouseEvent) => void;
+  onOpen: (id: string) => void;
+}) => {
+  return (
+    <motion.div
+      key={book.id}
+      initial={false}
+      animate={
+        justEdited
+          ? { scale: [1, 1.02, 1.02, 1], y: 0, opacity: 1 }
+          : { opacity: 1, y: 0, scale: 1 }
+      }
+      transition={
+        justEdited
+          ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
+          : { duration: 0.2, ease: "easeOut" }
+      }
+      onMouseDown={() => onTouchStart(book.id)}
+      onMouseUp={onTouchEnd}
+      onTouchStart={() => onTouchStart(book.id)}
+      onTouchEnd={onTouchEnd}
+      onClick={() => onPress(book.id)}
+      className={cn(
+        "group border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full p-3 sm:p-3.5 md:p-3 min-h-[64px] md:h-[72px] min-w-0",
+        justEdited
+          ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
+          : theme === 'dark' 
+            ? "border-transparent bg-transparent hover:bg-zinc-900/90 hover:border-zinc-800 hover:shadow-sm" 
+            : "border-transparent bg-transparent hover:bg-slate-100 hover:border-slate-200 hover:shadow-sm",
+      )}
+    >
+      {selected && (
+        <div className="absolute top-2 right-2 z-10">
+          <div className="bg-indigo-600 text-white rounded-full p-1 shadow-md">
+            <Check size={12} />
+          </div>
+        </div>
+      )}
+
+      {/* Left: Book Icon + Book Name & Created on Date */}
+      <div className="flex-grow flex-1 min-w-0 flex items-center gap-2 md:gap-3 pr-1 md:pr-1.5">
+        <div className="p-2 md:p-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl md:rounded-[14px] group-hover:scale-110 transition-transform shrink-0">
+          <BookOpen size={18} className="w-[18px] h-[18px] md:w-5 md:h-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h4 
+            title={book.name}
+            className={cn(
+              "font-bold text-sm sm:text-base md:text-lg leading-snug break-normal line-clamp-2 transition-colors duration-300",
+              theme === 'dark' ? "text-slate-100" : "text-slate-800"
+            )}
+          >
+            {book.name}
+          </h4>
+          <p className={cn(
+            "text-[9px] md:text-[10px] mt-0.5 transition-colors duration-300 whitespace-nowrap truncate",
+            theme === 'dark' ? "text-slate-500" : "text-slate-400"
+          )}>
+            Created on {formatDateTime12h(book.createdAt)}
+          </p>
+        </div>
+      </div>
+
+      {/* Right: Net Balance + Actions */}
+      <div className="flex items-center gap-1.5 md:gap-2 shrink-0 ml-1.5 md:ml-3">
+        <span className={cn(
+          "font-bold text-xs sm:text-sm md:text-base mr-1.5 sm:mr-2.5 select-none tracking-tight whitespace-nowrap",
+          displayInfo.isNegative 
+            ? "text-rose-600 dark:text-rose-400" 
+            : "text-emerald-600 dark:text-emerald-400"
+        )}>
+          {displayInfo.text}
+        </span>
+        <div className="flex items-center gap-0.5 md:gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 md:pl-2.5 shrink-0">
+          <button 
+            onClick={(e) => onEdit(book, e)}
+            className="p-1 md:p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all cursor-pointer"
+            title="Edit Book"
+          >
+            <Pencil size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
+          </button>
+          {canDelete && (
+            <button 
+              onClick={(e) => onDelete(book.id, e)}
+              className="p-1 md:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all cursor-pointer"
+              title="Delete Book"
+            >
+              <Trash2 size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
+            </button>
+          )}
+          <button 
+            onClick={() => onOpen(book.id)}
+            className="p-1.5 md:p-1.5 text-indigo-800 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all ml-0.5 cursor-pointer"
+            title="Open Cashbook"
+          >
+            <motion.div
+              animate={{ x: [0, 3, 0] }}
+              transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+            >
+              <ArrowRight size={16} className="w-[16px] h-[16px] md:w-[18px] md:h-[18px]" />
+            </motion.div>
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}, areCashbookCardPropsEqual);
+CashbookListCard.displayName = 'CashbookListCard';
 
 const SummaryCards = React.memo(({ totals, theme }: { totals: { in: number; out: number; net: number }; theme: string }) => {
   return (
@@ -2233,6 +2529,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
     return null;
   });
+  const activeBookIdRef = useRef<string | null>(activeBookId);
+  useEffect(() => {
+    activeBookIdRef.current = activeBookId;
+  }, [activeBookId]);
   const [isEntriesLoading, setIsEntriesLoading] = useState(false);
   const [showOfflineDialog, setShowOfflineDialog] = useState(false);
   const [showOfflinePdfDialog, setShowOfflinePdfDialog] = useState(false);
@@ -2380,12 +2680,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   const setActiveBookId = (id: string | null) => {
     setActiveBookIdState(id);
+    activeBookIdRef.current = id;
     if (id) {
-      const book = books.find(b => b.id === id);
+      const book = booksRef.current.find(b => b.id === id);
       if (book && !entriesCache.has(id)) {
         entriesCache.set(id, book.transactions || []);
       }
-      if (!entriesCache.has(id) && (!book || !book.transactions)) {
+      const cached = entriesCache.get(id);
+      const hasEntries = (cached && cached.length > 0) || (book && book.transactions && book.transactions.length > 0);
+      if (!hasEntries && !entriesCache.has(id)) {
         setIsEntriesLoading(true);
       } else {
         setIsEntriesLoading(false);
@@ -2398,12 +2701,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [searchQueryInput, setSearchQueryInput] = useState('');
 
   // Routing synchronization wrapper
-  const handleSelectBook = (id: string | null) => {
+  const handleSelectBook = useCallback((id: string | null) => {
     setActiveBookId(id);
     if (id === null) {
       navigate('/cashbooks');
     } else {
-      const book = books.find(b => b.id === id);
+      const book = booksRef.current.find(b => b.id === id);
       if (book) {
         const slug = getBookSlug(book.name, book.id);
         navigate(`/cashbooks/${slug}/entries`);
@@ -2411,7 +2714,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         navigate('/cashbooks');
       }
     }
-  };
+  }, [navigate]);
 
   // Synchronize route with activeBookId & tabName
   useEffect(() => {
@@ -2431,12 +2734,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       if (activeBookId !== null) {
         setActiveBookId(null);
       }
-      // Redirect home root / to /cashbooks if authenticated
-      if (location.pathname === '/') {
-        navigate('/cashbooks', { replace: true });
-      }
     }
-  }, [bookSlug, books, activeBookId, isLoading, location.pathname]);
+  }, [bookSlug, books, activeBookId, isLoading, navigate]);
 
   // Performance timers
   const lastBookOpenStart = useRef<number | null>(null);
@@ -3121,7 +3420,98 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [showBookMenu, setShowBookMenu] = useState(false);
   const bookMenuRef = useRef<HTMLDivElement>(null);
   const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
+  const selectedTransactionsRef = useRef(selectedTransactions);
+  useEffect(() => {
+    selectedTransactionsRef.current = selectedTransactions;
+  }, [selectedTransactions]);
+
   const [selectedBooks, setSelectedBooks] = useState<Set<string>>(new Set());
+  const selectedBooksRef = useRef(selectedBooks);
+  useEffect(() => {
+    selectedBooksRef.current = selectedBooks;
+  }, [selectedBooks]);
+
+  // Mobile selected-entry bottom toolbar scroll-aware hide/show state
+  const [isMobileView, setIsMobileView] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+  const [isMobileToolbarHidden, setIsMobileToolbarHidden] = useState(false);
+  const isMobileToolbarHiddenRef = useRef(false);
+  isMobileToolbarHiddenRef.current = isMobileToolbarHidden;
+  const lastScrollYRef = useRef(0);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileView(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize, { passive: true });
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (selectedTransactions.size === 0) {
+      setIsMobileToolbarHidden(false);
+      return;
+    }
+
+    // Reset toolbar to visible when selection changes
+    setIsMobileToolbarHidden(false);
+    lastScrollYRef.current = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+
+    const SCROLL_THRESHOLD = 8;
+    let rafId: number | null = null;
+
+    const handleScroll = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+
+        // Apply ONLY to mobile screens (< 768px); tablet and desktop remain unchanged
+        if (window.innerWidth >= 768) {
+          if (isMobileToolbarHiddenRef.current) {
+            setIsMobileToolbarHidden(false);
+          }
+          return;
+        }
+
+        const currentScrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+
+        // If near top of page, keep toolbar visible
+        if (currentScrollY <= 20) {
+          if (isMobileToolbarHiddenRef.current) {
+            setIsMobileToolbarHidden(false);
+          }
+          lastScrollYRef.current = currentScrollY;
+          return;
+        }
+
+        const diff = currentScrollY - lastScrollYRef.current;
+
+        // Ignore small jitter below threshold (approx 8px) to avoid flickering
+        if (Math.abs(diff) < SCROLL_THRESHOLD) {
+          return;
+        }
+
+        if (diff > 0 && !isMobileToolbarHiddenRef.current) {
+          // Scrolled down -> slide toolbar down and hide
+          setIsMobileToolbarHidden(true);
+        } else if (diff < 0 && isMobileToolbarHiddenRef.current) {
+          // Scrolled up -> slide toolbar back up into view
+          setIsMobileToolbarHidden(false);
+        }
+
+        lastScrollYRef.current = currentScrollY;
+      });
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    document.addEventListener('scroll', handleScroll, { passive: true, capture: true });
+    return () => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+      }
+      window.removeEventListener('scroll', handleScroll);
+      document.removeEventListener('scroll', handleScroll, { capture: true });
+    };
+  }, [selectedTransactions]);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [showDuplicateAiWarning, setShowDuplicateAiWarning] = useState<{ onConfirm: () => void; onCancel: () => void } | null>(null);
@@ -3205,14 +3595,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     vibrate(30);
   };
 
-  // Set isEntriesLoading to true immediately on activeBookId changes only if cache is missing
+  // Set isEntriesLoading only when explicitly switching to a cashbook with no cached entries
   useEffect(() => {
     if (activeBookId) {
-      const book = books.find(b => b.id === activeBookId);
-      if (book && !entriesCache.has(activeBookId)) {
-        entriesCache.set(activeBookId, book.transactions || []);
-      }
-      if (!entriesCache.has(activeBookId) && (!book || !book.transactions)) {
+      const cached = entriesCache.get(activeBookId);
+      const book = booksRef.current.find(b => b.id === activeBookId);
+      const hasEntries = (cached && cached.length > 0) || (book && book.transactions && book.transactions.length > 0);
+      if (!hasEntries && !entriesCache.has(activeBookId)) {
         setIsEntriesLoading(true);
       } else {
         setIsEntriesLoading(false);
@@ -3220,69 +3609,88 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     } else {
       setIsEntriesLoading(false);
     }
-  }, [activeBookId, books]);
+  }, [activeBookId]);
 
-  const handleTransactionPress = (id: string) => {
-    if (selectedTransactions.size > 0) {
-      toggleSelectTransaction(id);
+  const handleTransactionPress = useCallback((id: string) => {
+    if (selectedTransactionsRef.current.size > 0) {
+      setSelectedTransactions(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
     }
-  };
+  }, []);
 
-  const handleTransactionLongPress = (id: string) => {
-    if (selectedTransactions.size === 0) {
-      toggleSelectTransaction(id);
-      vibrate(50);
-    }
-  };
+  const handleTransactionLongPress = useCallback((id: string) => {
+    setSelectedTransactions(prev => {
+      if (prev.size === 0) {
+        vibrate(50);
+        return new Set([id]);
+      }
+      return prev;
+    });
+  }, []);
 
-  const onTouchStart = (id: string) => {
+  const onTouchStart = useCallback((id: string) => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
     longPressTimer.current = setTimeout(() => {
       handleTransactionLongPress(id);
     }, 1200); // 1.2 seconds (or 1200ms) for long press on mobile/touch devices
-  };
+  }, [handleTransactionLongPress]);
 
-  const onTouchEnd = () => {
+  const onTouchEnd = useCallback(() => {
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
     }
-  };
+  }, []);
 
-  const toggleSelectBook = (id: string) => {
-    const newSelected = new Set(selectedBooks);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedBooks(newSelected);
-  };
+  const toggleSelectBook = useCallback((id: string) => {
+    setSelectedBooks(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
-  const handleBookPress = (id: string) => {
-    if (selectedBooks.size > 0) {
-      toggleSelectBook(id);
+  const handleBookPress = useCallback((id: string) => {
+    if (selectedBooksRef.current.size > 0) {
+      setSelectedBooks(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
     } else {
       handleSelectBook(id);
     }
-  };
+  }, [handleSelectBook]);
 
-  const handleBookLongPress = (id: string) => {
-    if (selectedBooks.size === 0) {
-      toggleSelectBook(id);
-      vibrate(50);
-    }
-  };
+  const handleBookLongPress = useCallback((id: string) => {
+    setSelectedBooks(prev => {
+      if (prev.size === 0) {
+        vibrate(50);
+        return new Set([id]);
+      }
+      return prev;
+    });
+  }, []);
 
-  const onTouchStartBook = (id: string) => {
+  const onTouchStartBook = useCallback((id: string) => {
+    if (bookLongPressTimer.current) clearTimeout(bookLongPressTimer.current);
     bookLongPressTimer.current = setTimeout(() => {
       handleBookLongPress(id);
     }, 500);
-  };
+  }, [handleBookLongPress]);
 
-  const onTouchEndBook = () => {
+  const onTouchEndBook = useCallback(() => {
     if (bookLongPressTimer.current) {
       clearTimeout(bookLongPressTimer.current);
+      bookLongPressTimer.current = null;
     }
-  };
+  }, []);
 
   // Keyboard Shortcuts
   useEffect(() => {
@@ -4006,6 +4414,68 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
   }, [session]);
 
+  function areEntriesEqual(a: any[], b: any[]): boolean {
+    if (a === b) return true;
+    if (!a || !b) return a === b;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      const itemA = a[i];
+      const itemB = b[i];
+      if (itemA === itemB) continue;
+      if (
+        itemA.id !== itemB.id ||
+        itemA.amount !== itemB.amount ||
+        itemA.type !== itemB.type ||
+        itemA.description !== itemB.description ||
+        itemA.category !== itemB.category ||
+        itemA.mode !== itemB.mode ||
+        itemA.date !== itemB.date ||
+        itemA.syncStatus !== itemB.syncStatus ||
+        itemA.is_offline !== itemB.is_offline
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function reconcileBooks(prevBooks: Cashbook[], newBooks: Cashbook[]): Cashbook[] {
+    if (prevBooks === newBooks) return prevBooks;
+    if (prevBooks.length !== newBooks.length) return newBooks;
+
+    let anyChanged = false;
+    const result: Cashbook[] = [];
+
+    for (let i = 0; i < newBooks.length; i++) {
+      const prev = prevBooks[i];
+      const next = newBooks[i];
+
+      if (!prev || prev.id !== next.id) {
+        anyChanged = true;
+        result.push(next);
+        continue;
+      }
+
+      const txsEqual = areEntriesEqual(prev.transactions || [], next.transactions || []);
+      const metadataEqual =
+        prev.name === next.name &&
+        prev.syncStatus === next.syncStatus &&
+        prev.is_offline === next.is_offline &&
+        prev.user_id === next.user_id &&
+        (prev as any).role === (next as any).role &&
+        (prev as any).userRole === (next as any).userRole;
+
+      if (metadataEqual && txsEqual) {
+        result.push(prev);
+      } else {
+        anyChanged = true;
+        result.push(next);
+      }
+    }
+
+    return anyChanged ? result : prevBooks;
+  }
+
   // Stable component-level data fetch and sync function
   const fetchData = useCallback(async (force: boolean = false) => {
     if (!session || !supabase) {
@@ -4435,8 +4905,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         // Do NOT re-add books from booksRef.current! If a book is missing from Supabase, it is deleted!
 
         const finalMergedList = sortCashbooksLatestFirst(Array.from(finalMap.values()));
-        setBooks(finalMergedList);
-        booksRef.current = finalMergedList;
+        setBooks(prev => {
+          const reconciled = reconcileBooks(prev, finalMergedList);
+          booksRef.current = reconciled;
+          return reconciled;
+        });
         try {
           if (session?.user?.id) {
             localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(finalMergedList));
@@ -4567,7 +5040,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               setBooks(prev => prev.filter(b => b.id !== deletedId));
               booksRef.current = booksRef.current.filter(b => b.id !== deletedId);
               entriesCache.delete(deletedId);
-              if (activeBookId === deletedId) {
+              if (activeBookIdRef.current === deletedId) {
                 handleSelectBook(null);
               }
               try {
@@ -4636,7 +5109,156 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, session?.user?.id, session?.user?.email, activeBookId]);
+  }, [supabase, session?.user?.id, session?.user?.email]);
+
+  // Real-time synchronization: listen to changes in entries table (INSERT, UPDATE, DELETE)
+  // Debounces rapid bursts and updates ONLY the affected cashbook's transactions list
+  useEffect(() => {
+    if (!supabase || !session?.user?.id) return;
+
+    let pendingUpdates: any[] = [];
+    let flushTimer: NodeJS.Timeout | null = null;
+
+    const flushQueue = () => {
+      if (pendingUpdates.length === 0) return;
+      const updatesToProcess = [...pendingUpdates];
+      pendingUpdates = [];
+
+      setBooks(prev => {
+        let changed = false;
+        let nextBooks = [...prev];
+
+        for (const update of updatesToProcess) {
+          const { eventType, new: newRow, old: oldRow } = update;
+          const bookId = newRow?.cashbook_id || oldRow?.cashbook_id;
+          if (!bookId) continue;
+
+          const bookIndex = nextBooks.findIndex(b => b.id === bookId);
+          if (bookIndex === -1) continue;
+
+          const targetBook = nextBooks[bookIndex];
+          const currentTxs = targetBook.transactions || entriesCache.get(bookId) || [];
+
+          if (eventType === 'DELETE') {
+            const deletedEntryId = oldRow?.id;
+            if (deletedEntryId && currentTxs.some(t => t.id === deletedEntryId)) {
+              const updatedTxs = currentTxs.filter(t => t.id !== deletedEntryId);
+              nextBooks[bookIndex] = {
+                ...targetBook,
+                transactions: updatedTxs
+              };
+              entriesCache.set(bookId, updatedTxs);
+              changed = true;
+            }
+          } else if (eventType === 'INSERT') {
+            if (!newRow || !newRow.id) continue;
+            // Check if already in list (e.g. from optimistic insertion)
+            const alreadyExists = currentTxs.some(t => t.id === newRow.id);
+            if (alreadyExists) {
+              const updatedTxs = currentTxs.map(t => t.id === newRow.id ? {
+                ...t,
+                syncStatus: 'SYNCED' as const,
+                is_offline: false
+              } : t);
+              nextBooks[bookIndex] = {
+                ...targetBook,
+                transactions: updatedTxs
+              };
+              entriesCache.set(bookId, updatedTxs);
+              changed = true;
+            } else {
+              const optIndex = currentTxs.findIndex(t => 
+                (t.syncStatus === 'PENDING' || t.is_offline) &&
+                Number(t.amount) === Number(newRow.amount) &&
+                t.type === newRow.type &&
+                t.category === newRow.category
+              );
+
+              const formattedNewEntry: Transaction = {
+                id: newRow.id,
+                amount: Number(newRow.amount) || 0,
+                type: (newRow.type === 'in' || newRow.type === 'out') ? newRow.type : 'in',
+                category: newRow.category || 'General',
+                mode: newRow.mode || 'Cash',
+                date: newRow.date ? new Date(newRow.date) : (newRow.created_at ? new Date(newRow.created_at) : new Date()),
+                created_at: newRow.created_at || new Date().toISOString(),
+                description: newRow.description || '',
+                images: Array.isArray(newRow.attachments) ? newRow.attachments : (Array.isArray(newRow.images) ? newRow.images : []),
+                imageLayout: newRow.image_layout || 'split',
+                syncStatus: 'SYNCED',
+                is_offline: false
+              };
+
+              let updatedTxs: Transaction[];
+              if (optIndex !== -1) {
+                updatedTxs = [...currentTxs];
+                updatedTxs[optIndex] = formattedNewEntry;
+              } else {
+                updatedTxs = [formattedNewEntry, ...currentTxs];
+              }
+
+              nextBooks[bookIndex] = {
+                ...targetBook,
+                transactions: updatedTxs
+              };
+              entriesCache.set(bookId, updatedTxs);
+              changed = true;
+            }
+          } else if (eventType === 'UPDATE') {
+            if (!newRow || !newRow.id) continue;
+            const updatedTxs = currentTxs.map(t => {
+              if (t.id === newRow.id) {
+                return {
+                  ...t,
+                  amount: Number(newRow.amount) || t.amount,
+                  type: (newRow.type === 'in' || newRow.type === 'out') ? newRow.type : t.type,
+                  category: newRow.category || t.category,
+                  mode: newRow.mode || t.mode,
+                  description: newRow.description !== undefined ? newRow.description : t.description,
+                  date: newRow.date ? new Date(newRow.date) : t.date,
+                  images: Array.isArray(newRow.attachments) ? newRow.attachments : (Array.isArray(newRow.images) ? newRow.images : t.images),
+                  imageLayout: newRow.image_layout || t.imageLayout,
+                  syncStatus: 'SYNCED' as const,
+                  is_offline: false
+                };
+              }
+              return t;
+            });
+            nextBooks[bookIndex] = {
+              ...targetBook,
+              transactions: updatedTxs
+            };
+            entriesCache.set(bookId, updatedTxs);
+            changed = true;
+          }
+        }
+
+        if (changed) {
+          booksRef.current = nextBooks;
+          return nextBooks;
+        }
+        return prev;
+      });
+    };
+
+    const channel = supabase
+      .channel(`realtime_entries_sync_${session.user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'entries' },
+        (payload: any) => {
+          pendingUpdates.push(payload);
+          if (flushTimer) clearTimeout(flushTimer);
+          flushTimer = setTimeout(flushQueue, 35);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (flushTimer) clearTimeout(flushTimer);
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, session?.user?.id]);
 
   // Automatic migration utility for legacy base64 images in database tables
   useEffect(() => {
@@ -4816,19 +5438,30 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const lastActiveBookRef = useRef<any>(undefined);
   const activeBook = useMemo(() => {
     const found = books.find(b => b.id === activeBookId);
-    if (!found) return undefined;
+    if (!found) {
+      lastActiveBookRef.current = undefined;
+      return undefined;
+    }
+    const last = lastActiveBookRef.current;
+    if (last && last.id === found.id && last._sourceBook === found) {
+      return last;
+    }
     const uniques = new Map<string, typeof found.transactions[0]>();
     (found.transactions || []).forEach(t => {
       if (t && t.id && !uniques.has(t.id)) {
         uniques.set(t.id, t);
       }
     });
-    return {
+    const result = {
       ...found,
-      transactions: Array.from(uniques.values())
+      transactions: Array.from(uniques.values()),
+      _sourceBook: found
     };
+    lastActiveBookRef.current = result;
+    return result;
   }, [books, activeBookId]);
 
   const currentUserRole: Role = useMemo(() => {
@@ -6103,11 +6736,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     saveTransaction();
   };
 
-  const handleDeleteTransaction = (id: string) => {
+  const handleDeleteTransaction = useCallback((id: string) => {
     vibrate(50);
     setTransactionToDelete(id);
     setDeleteConfirmed(false);
-  };
+  }, []);
 
   const confirmDeleteTransaction = async () => {
     if (!activeBookId || !transactionToDelete || !session) return;
@@ -6369,7 +7002,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
   };
 
-  const handleEditTransaction = (t: Transaction) => {
+  const handleEditTransaction = useCallback((t: Transaction) => {
     setEditingTransaction(t);
     setShowForm(t.type);
     setAmount(t.amount.toString());
@@ -6390,16 +7023,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setTransactionDate(safeToDateTimeLocal(t.date));
     setSelectedImages(t.images || []);
     setImageLayout(t.imageLayout || 'split');
-  };
+  }, []);
 
-  function toggleSelectTransaction(id: string) {
+  const toggleSelectTransaction = useCallback((id: string) => {
     setSelectedTransactions(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }
+  }, []);
 
   function toggleSelectAll() {
     if (selectedTransactions.size === filteredTransactions.length) {
@@ -8845,7 +9478,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       )}
 
       {/* Main Content Area */}
-      <main className="w-full px-6 md:px-8 py-6 sm:py-8 overflow-x-clip">
+      <main className="w-full max-w-none px-4 sm:px-6 md:px-8 py-6 sm:py-8 overflow-x-hidden min-w-0">
         {!activeBookId ? (
           /* PAGE 1: HOME / BOOKS LIST */
           <motion.div
@@ -8853,7 +9486,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: -8 }}
             animate={{ opacity: 1, x: 0 }}
             transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.16, ease: "easeOut" }}
-            className="space-y-6"
+            className="w-full space-y-6 min-w-0"
           >
               {isOffline && (
                 <div className={cn(
@@ -8870,8 +9503,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               )}
 
               {/* User Welcome Section */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="space-y-0.5 sm:space-y-1">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full min-w-0">
+                <div className="space-y-0.5 sm:space-y-1 min-w-0">
                   <h2 className={cn(
                     "text-xl sm:text-2xl lg:text-[clamp(1.35rem,2vw,1.75rem)] font-bold transition-colors duration-300 flex items-center gap-2 flex-wrap",
                     theme === 'dark' ? "text-slate-100" : "text-slate-800"
@@ -8889,7 +9522,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   )}>Welcome back to your financial dashboard.</p>
                 </div>
 
-                <div className="flex items-center gap-3 sm:gap-4">
+                <div className="flex items-center gap-3 sm:gap-4 shrink-0">
                   {selectedBooks.size > 0 ? (
                     <button
                       onClick={() => { vibrate(); setShowBulkDeleteConfirm(true); setDeleteConfirmed(false); }}
@@ -8920,7 +9553,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   )}
 
                   <div className={cn(
-                    "hidden sm:flex items-center gap-2 p-1 rounded-xl border shadow-sm transition-colors duration-300",
+                    "hidden sm:flex items-center gap-2 p-1 rounded-xl border shadow-sm transition-colors duration-300 shrink-0",
                     theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
                   )}>
                     <button 
@@ -8985,212 +9618,69 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   </div>
                 </div>
               ) : viewMode === 'grid' ? (
-                /* GRID VIEW */
-                <div className="grid w-full grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                /* GRID VIEW - FLUID RESPONSIVE AUTO-FILL GRID */
+                <div 
+                  className="grid w-full gap-4 sm:gap-5 md:gap-6 min-w-0"
+                  style={{
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))'
+                  }}
+                >
                   {filteredBooks.map((book) => {
                     const displayInfo = getBookDisplayInfo(book);
                     return (
-                      <motion.div
+                      <CashbookGridCard
                         key={book.id}
-                        initial={false}
-                        animate={
-                          justEditedBookId === book.id
-                            ? { scale: [1, 1.05, 1.05, 1], y: 0, opacity: 1 }
-                            : { opacity: 1, y: 0, scale: 1 }
-                        }
-                        transition={
-                          justEditedBookId === book.id
-                            ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
-                            : { duration: 0.2, ease: "easeOut" }
-                        }
-                        onMouseDown={() => onTouchStartBook(book.id)}
-                        onMouseUp={onTouchEndBook}
-                        onTouchStart={() => onTouchStartBook(book.id)}
+                        book={book}
+                        displayInfo={displayInfo}
+                        selected={selectedBooks.has(book.id)}
+                        justEdited={justEditedBookId === book.id}
+                        theme={theme}
+                        canDelete={(book as any).role !== 'Viewer'}
+                        onTouchStart={onTouchStartBook}
                         onTouchEnd={onTouchEndBook}
-                        onClick={() => handleBookPress(book.id)}
-                        className={cn(
-                          "group border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full p-4 sm:p-5 md:p-4 md:h-[120px]",
-                          justEditedBookId === book.id
-                            ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
-                            : theme === 'dark' 
-                              ? "border-transparent bg-transparent hover:bg-zinc-900/90 hover:border-zinc-800 hover:shadow-sm" 
-                              : "border-transparent bg-transparent hover:bg-slate-100 hover:border-slate-200 hover:shadow-sm",
-                        )}
-                      >
-                        {selectedBooks.has(book.id) && (
-                          <div className="absolute top-2 right-2 z-10">
-                            <div className="bg-indigo-600 text-white rounded-full p-1 shadow-md">
-                              <Check size={12} />
-                            </div>
-                          </div>
-                        )}
-                        <div className="flex-grow flex-1 min-w-0 flex items-center gap-2 md:gap-3 pr-1 md:pr-1.5">
-                          <div className="p-2 md:p-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl md:rounded-[14px] group-hover:scale-110 transition-transform flex-shrink-0">
-                            <BookOpen size={18} className="w-[18px] h-[18px] md:w-5 md:h-5" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <h4 className={cn(
-                              "font-bold text-base sm:text-[17px] md:text-lg break-words whitespace-normal leading-snug line-clamp-2 transition-colors duration-300",
-                              theme === 'dark' ? "text-slate-100" : "text-slate-800"
-                            )}>{book.name}</h4>
-                            <p className={cn(
-                              "text-[9px] md:text-[10px] mt-0.5 transition-colors duration-300",
-                              theme === 'dark' ? "text-slate-500" : "text-slate-400"
-                            )}>Created on {formatDateTime12h(book.createdAt)}</p>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0 ml-1.5 md:ml-3">
-                          <span className={cn(
-                            "font-bold text-sm sm:text-base mr-1.5 sm:mr-2.5 select-none tracking-tight",
-                            displayInfo.isNegative 
-                              ? "text-rose-600 dark:text-rose-400" 
-                              : "text-emerald-600 dark:text-emerald-400"
-                          )}>
-                            {displayInfo.text}
-                          </span>
-                          <div className="flex items-center gap-0.5 md:gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 md:pl-2.5">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setIsEditingBook(book.id); setEditBookName(book.name); }}
-                              className="p-1 md:p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all cursor-pointer"
-                            >
-                              <Pencil size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); handleDeleteBook(book.id); }}
-                              className="p-1 md:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all cursor-pointer"
-                            >
-                              <Trash2 size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
-                            </button>
-                            <button 
-                              onClick={() => handleSelectBook(book.id)}
-                              className="p-1.5 md:p-1.5 text-indigo-800 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all ml-0.5 cursor-pointer"
-                            >
-                              <motion.div
-                                animate={{ x: [0, 3, 0] }}
-                                transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
-                              >
-                                <ArrowRight size={16} className="w-[16px] h-[16px] md:w-[18px] md:h-[18px]" />
-                              </motion.div>
-                            </button>
-                          </div>
-                        </div>
-                      </motion.div>
+                        onPress={handleBookPress}
+                        onEdit={(b, e) => {
+                          e.stopPropagation();
+                          setIsEditingBook(b.id);
+                          setEditBookName(b.name);
+                        }}
+                        onDelete={(id, e) => {
+                          e.stopPropagation();
+                          handleDeleteBook(id);
+                        }}
+                        onOpen={handleSelectBook}
+                      />
                     );
                   })}
                 </div>
               ) : (
                 /* LIST VIEW - EXACT REFERENCE DESIGN MATCHING USER SCREENSHOT */
-                <div className="grid w-full grid-cols-1 gap-2.5">
+                <div className="grid w-full grid-cols-1 gap-2.5 min-w-0">
                   {filteredBooks.map((book) => {
                     const displayInfo = getBookDisplayInfo(book);
                     return (
-                      <motion.div
+                      <CashbookListCard
                         key={book.id}
-                        initial={false}
-                        animate={
-                          justEditedBookId === book.id
-                            ? { scale: [1, 1.02, 1.02, 1], y: 0, opacity: 1 }
-                            : { opacity: 1, y: 0, scale: 1 }
-                        }
-                        transition={
-                          justEditedBookId === book.id
-                            ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
-                            : { duration: 0.2, ease: "easeOut" }
-                        }
-                        onMouseDown={() => onTouchStartBook(book.id)}
-                        onMouseUp={onTouchEndBook}
-                        onTouchStart={() => onTouchStartBook(book.id)}
+                        book={book}
+                        displayInfo={displayInfo}
+                        selected={selectedBooks.has(book.id)}
+                        justEdited={justEditedBookId === book.id}
+                        theme={theme}
+                        canDelete={(book as any).role !== 'Viewer'}
+                        onTouchStart={onTouchStartBook}
                         onTouchEnd={onTouchEndBook}
-                        onClick={() => handleBookPress(book.id)}
-                        className={cn(
-                          "group border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full p-3 sm:p-3.5 md:p-3 md:h-[72px]",
-                          justEditedBookId === book.id
-                            ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
-                            : theme === 'dark' 
-                              ? "border-transparent bg-transparent hover:bg-zinc-900/90 hover:border-zinc-800 hover:shadow-sm" 
-                              : "border-transparent bg-transparent hover:bg-slate-100 hover:border-slate-200 hover:shadow-sm",
-                        )}
-                      >
-                        {selectedBooks.has(book.id) && (
-                          <div className="absolute top-2 right-2 z-10">
-                            <div className="bg-indigo-600 text-white rounded-full p-1 shadow-md">
-                              <Check size={12} />
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Left: Book Icon + Book Name & Created on Date */}
-                        <div className="flex-grow flex-1 min-w-0 flex items-center gap-2 md:gap-3 pr-1 md:pr-1.5">
-                          <div className="p-2 md:p-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl md:rounded-[14px] group-hover:scale-110 transition-transform flex-shrink-0">
-                            <BookOpen size={18} className="w-[18px] h-[18px] md:w-5 md:h-5" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <h4 className={cn(
-                              "font-bold text-base sm:text-[17px] md:text-lg break-words whitespace-normal leading-snug line-clamp-1 transition-colors duration-300",
-                              theme === 'dark' ? "text-slate-100" : "text-slate-800"
-                            )}>{book.name}</h4>
-                            <p className={cn(
-                              "text-[10px] md:text-xs mt-0.5 transition-colors duration-300",
-                              theme === 'dark' ? "text-slate-500" : "text-slate-400"
-                            )}>Created on {formatDateTime12h(book.createdAt)}</p>
-                          </div>
-                        </div>
-
-                        {/* Right: [Cash In / Adjusted Amount] [Pencil] [Trash2] [ArrowRight] */}
-                        <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0 ml-1.5 md:ml-3">
-                          {/* Cash In / Display Amount in green (or red if negative) */}
-                          <span className={cn(
-                            "font-bold text-sm sm:text-base mr-1.5 sm:mr-2.5 select-none tracking-tight",
-                            displayInfo.isNegative 
-                              ? "text-rose-600 dark:text-rose-400" 
-                              : "text-emerald-600 dark:text-emerald-400"
-                          )}>
-                            {displayInfo.text}
-                          </span>
-
-                          <div className="flex items-center gap-0.5 md:gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 md:pl-2.5">
-                            {/* Edit */}
-                            <button 
-                              onClick={(e) => { 
-                                e.stopPropagation(); 
-                                setIsEditingBook(book.id); 
-                                setEditBookName(book.name); 
-                              }}
-                              className="p-1 md:p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all cursor-pointer"
-                              title="Edit Book"
-                            >
-                              <Pencil size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
-                            </button>
-
-                            {/* Delete */}
-                            <button 
-                              onClick={(e) => { 
-                                e.stopPropagation(); 
-                                handleDeleteBook(book.id); 
-                              }}
-                              className="p-1 md:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all cursor-pointer"
-                              title="Delete Book"
-                            >
-                              <Trash2 size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
-                            </button>
-
-                            {/* Open */}
-                            <button 
-                              onClick={() => handleSelectBook(book.id)}
-                              className="p-1.5 md:p-1.5 text-indigo-800 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all ml-0.5 cursor-pointer"
-                              title="Open Cashbook"
-                            >
-                              <motion.div
-                                animate={{ x: [0, 3, 0] }}
-                                transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
-                              >
-                                <ArrowRight size={16} className="w-[16px] h-[16px] md:w-[18px] md:h-[18px]" />
-                              </motion.div>
-                            </button>
-                          </div>
-                        </div>
-                      </motion.div>
+                        onPress={handleBookPress}
+                        onEdit={(b, e) => {
+                          e.stopPropagation();
+                          setIsEditingBook(b.id);
+                          setEditBookName(b.name);
+                        }}
+                        onDelete={(id, e) => {
+                          e.stopPropagation();
+                          handleDeleteBook(id);
+                        }}
+                        onOpen={handleSelectBook}
+                      />
                     );
                   })}
                 </div>
@@ -15453,17 +15943,29 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       <AnimatePresence>
         {selectedTransactions.size > 0 && activeBookId && (
           <motion.div
-            initial={{ y: "150%", opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: "150%", opacity: 0 }}
-            transition={{ type: "spring", damping: 28, stiffness: 300 }}
+            initial={{ y: "100%", opacity: 0 }}
+            animate={{ 
+              y: isMobileView && isMobileToolbarHidden ? "100%" : 0, 
+              opacity: isMobileView && isMobileToolbarHidden ? 0 : 1 
+            }}
+            exit={{ y: "100%", opacity: 0 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
             className={cn(
-              "lg:hidden fixed bottom-6 left-4 right-4 max-w-sm mx-auto rounded-[24px] p-4.5 pb-5 backdrop-blur-xl border z-[100] transition-colors duration-300 shadow-[0_16px_50px_rgba(0,0,0,0.3)]",
+              "lg:hidden fixed bottom-0 left-0 right-0 max-w-md mx-auto rounded-t-[24px] rounded-b-none border-b-0 p-4 pt-2.5 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] md:bottom-6 md:left-4 md:right-4 md:max-w-sm md:rounded-[24px] md:border-b md:p-4.5 md:pb-5 backdrop-blur-xl border z-[100] transition-colors duration-300 shadow-[0_16px_50px_rgba(0,0,0,0.3)]",
+              isMobileView && isMobileToolbarHidden && "pointer-events-none",
               theme === 'dark' 
                 ? "bg-zinc-950/85 border-zinc-800/80 text-white" 
                 : "bg-white/90 border-slate-200/60 text-slate-900"
             )}
           >
+            {/* Center Handle / Mark (Mobile Only) */}
+            <div className="flex justify-center -mt-0.5 mb-2 md:hidden" aria-hidden="true">
+              <div className={cn(
+                "w-9 h-1 rounded-full transition-colors",
+                theme === 'dark' ? "bg-zinc-700/80" : "bg-slate-300"
+              )} />
+            </div>
+
             <div className="flex items-center justify-between pb-3 border-b border-slate-100/80 dark:border-zinc-900/60 mb-3">
               <span className={cn(
                 "text-[10px] font-extrabold tracking-widest uppercase",
