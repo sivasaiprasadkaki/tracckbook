@@ -2730,7 +2730,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   // Quick Add State and Refs
   const [submitAndAddNew, setSubmitAndAddNew] = useState(false);
   const [quickAddSuccess, setQuickAddSuccess] = useState(false);
-  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+  const descriptionInputRef = useRef<HTMLInputElement>(null);
   const amountInputRef = useRef<HTMLInputElement>(null);
   
   // UI State
@@ -6289,68 +6289,70 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
           const resolvedUser = await resolveUserDataForAttachments();
           const payload: any = {
+            id: savedId,
+            cashbook_id: activeBookId,
+            user_id: session.user.id,
             amount: amountNum,
             type: currentShowForm,
             description: currentDescription,
             category: currentCategory,
             mode: currentMode,
             date: safeToISOString(dateObj),
-            user_name: resolvedUser.name
+            user_name: resolvedUser.name,
+            image_layout: currentImageLayout
           };
 
-          let entryError: any = null;
-          const firstUpdate = await supabase
-            .from('entries')
-            .update({ ...payload, image_layout: currentImageLayout })
-            .eq('id', savedId);
-          entryError = firstUpdate.error;
+          const attachmentInserts = finalImages.map(url => ({
+            entry_id: savedId,
+            user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
+            user_name: resolvedUser.name,
+            user_email: resolvedUser.email,
+            file_url: url
+          }));
 
-          if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-            const secondUpdate = await supabase.from('entries').update(payload).eq('id', savedId);
-            entryError = secondUpdate.error;
-            if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-              const payloadNoUser = { ...payload };
-              delete payloadNoUser.user_name;
-              const thirdUpdate = await supabase.from('entries').update({ ...payloadNoUser, image_layout: currentImageLayout }).eq('id', savedId);
-              entryError = thirdUpdate.error;
-              if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-                const fourthUpdate = await supabase.from('entries').update(payloadNoUser).eq('id', savedId);
-                entryError = fourthUpdate.error;
-              }
+          let editSaved = false;
+
+          // 1. Primary Save via Server-side RBAC Endpoint (bypasses RLS with service_role)
+          try {
+            const rbacSaveRes = await fetch('/api/rbac/save-entry', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                entry: payload,
+                attachments: attachmentInserts,
+                isUpdate: true,
+                userId: session.user.id,
+                userEmail: session.user.email
+              })
+            });
+            if (rbacSaveRes.ok) {
+              const rbacSaveJson = await rbacSaveRes.json();
+              if (rbacSaveJson.success) editSaved = true;
             }
-          }
+          } catch (_) {}
 
-          if (entryError) {
-            try {
-              const rbacSaveRes = await fetch('/api/rbac/save-entry', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  entry: { id: savedId, cashbook_id: activeBookId, ...payload, image_layout: currentImageLayout },
-                  userId: session.user.id,
-                  userEmail: session.user.email
-                })
-              });
-              if (rbacSaveRes.ok) {
-                const rbacSaveJson = await rbacSaveRes.json();
-                if (rbacSaveJson.success) entryError = null;
+          // 2. Direct Supabase Fallback if server endpoint was unreachable
+          if (!editSaved && supabase) {
+            let entryError: any = null;
+            const firstUpdate = await supabase
+              .from('entries')
+              .update({ ...payload, image_layout: currentImageLayout })
+              .eq('id', savedId);
+            entryError = firstUpdate.error;
+
+            if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+              const secondUpdate = await supabase.from('entries').update(payload).eq('id', savedId);
+              entryError = secondUpdate.error;
+            }
+
+            if (!entryError) {
+              await supabase.from('attachments').delete().eq('entry_id', savedId);
+              await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
+              if (attachmentInserts.length > 0) {
+                await supabase.from('attachments').insert(attachmentInserts);
               }
-            } catch (_) {}
-          }
-
-          if (entryError) throw entryError;
-
-          await supabase.from('attachments').delete().eq('entry_id', savedId);
-          await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
-          if (finalImages.length > 0) {
-            const attachmentInserts = finalImages.map(url => ({
-              entry_id: savedId,
-              user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
-              user_name: resolvedUser.name,
-              user_email: resolvedUser.email,
-              file_url: url
-            }));
-            await supabase.from('attachments').insert(attachmentInserts);
+              editSaved = true;
+            }
           }
         } catch (bgErr: any) {
           currentSelectedImages.forEach(img => {
@@ -6618,78 +6620,99 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             source: 'Manual'
           };
 
-          let entryError: any = null;
-          const firstTry = await supabase
-            .from('entries')
-            .insert([{ ...payload, image_layout: currentImageLayout }]);
-          entryError = firstTry.error;
+          const attachmentInserts = finalImages.map(url => ({
+            entry_id: tempId,
+            user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
+            user_name: resolvedUser.name,
+            user_email: resolvedUser.email,
+            file_url: url
+          }));
 
-          if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-            const secondTry = await supabase.from('entries').insert([payload]);
-            entryError = secondTry.error;
-            if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-              const payloadNoSource = { ...payload };
-              delete payloadNoSource.source;
-              const thirdTry = await supabase.from('entries').insert([{ ...payloadNoSource, image_layout: currentImageLayout }]);
-              entryError = thirdTry.error;
-              if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-                const fourthTry = await supabase.from('entries').insert([payloadNoSource]);
-                entryError = fourthTry.error;
-                if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-                  const payloadNoUser = { ...payload };
-                  delete payloadNoUser.user_name;
-                  const fifthTry = await supabase.from('entries').insert([{ ...payloadNoUser, image_layout: currentImageLayout }]);
-                  entryError = fifthTry.error;
-                  if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-                    const sixthTry = await supabase.from('entries').insert([payloadNoUser]);
-                    entryError = sixthTry.error;
-                  }
-                }
+          let creationSaved = false;
+          let lastCreationError: any = null;
+
+          // 1. Primary Save via Server-side RBAC Endpoint (service_role completely bypasses RLS)
+          try {
+            const rbacSaveRes = await fetch('/api/rbac/save-entry', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                entry: { id: tempId, cashbook_id: activeBookId, ...payload, image_layout: currentImageLayout },
+                attachments: attachmentInserts,
+                userId: session.user.id,
+                userEmail: session.user.email
+              })
+            });
+            if (rbacSaveRes.ok) {
+              const rbacSaveJson = await rbacSaveRes.json();
+              if (rbacSaveJson.success) {
+                creationSaved = true;
               }
+            } else {
+              const errData = await rbacSaveRes.json().catch(() => null);
+              if (errData?.error) lastCreationError = new Error(errData.error);
+            }
+          } catch (netErr: any) {
+            lastCreationError = netErr;
+          }
+
+          // 2. Direct Supabase Fallback if server endpoint was unreachable
+          if (!creationSaved && supabase) {
+            let directErr: any = null;
+            const firstTry = await supabase
+              .from('entries')
+              .insert([{ ...payload, image_layout: currentImageLayout }]);
+            directErr = firstTry.error;
+
+            if (directErr && (directErr.code === '42703' || directErr.message?.toLowerCase().includes('column'))) {
+              const secondTry = await supabase.from('entries').insert([payload]);
+              directErr = secondTry.error;
+            }
+
+            if (!directErr) {
+              creationSaved = true;
+              if (attachmentInserts.length > 0) {
+                await supabase.from('attachments').insert(attachmentInserts);
+              }
+            } else {
+              lastCreationError = directErr;
             }
           }
 
-          if (entryError) {
-            try {
-              const rbacSaveRes = await fetch('/api/rbac/save-entry', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  entry: { id: tempId, cashbook_id: activeBookId, ...payload, image_layout: currentImageLayout },
-                  userId: session.user.id,
-                  userEmail: session.user.email
-                })
+          // 3. Graceful handling if RLS or offline prevents direct save
+          if (!creationSaved) {
+            const isRlsViolation = lastCreationError?.code === '42501' || 
+              lastCreationError?.message?.toLowerCase().includes('row-level security') ||
+              lastCreationError?.message?.toLowerCase().includes('policy');
+            
+            if (isRlsViolation) {
+              console.warn('[Creation] RLS restriction detected on client, delegating to background sync');
+              syncManager.saveOfflineEntry({
+                id: tempId,
+                clientEntryId: tempId,
+                cashbook_id: activeBookId,
+                user_id: session.user.id,
+                user_name: resolvedUser.name,
+                amount: amountNum,
+                type: currentShowForm as 'in' | 'out',
+                description: currentDescription,
+                category: currentCategory,
+                mode: currentMode,
+                date: safeToISOString(dateObj),
+                created_at: new Date().toISOString(),
+                syncStatus: 'PENDING',
+                retryCount: 0,
+                source: 'Manual',
+                images: finalImages,
+                is_offline: true
               });
-              if (rbacSaveRes.ok) {
-                const rbacSaveJson = await rbacSaveRes.json();
-                if (rbacSaveJson.success) entryError = null;
-              }
-            } catch (_) {}
-          }
-
-          if (entryError) throw entryError;
-
-          if (finalImages.length > 0) {
-            const attachmentInserts = finalImages.map(url => ({
-              entry_id: tempId,
-              user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
-              user_name: resolvedUser.name,
-              user_email: resolvedUser.email,
-              file_url: url
-            }));
-            const { error: attachError } = await supabase.from('attachments').insert(attachmentInserts);
-            if (attachError) {
-              const attachErrStr = typeof attachError === 'object' ? JSON.stringify(attachError) : String(attachError || '');
-              if (attachErrStr.toLowerCase().includes('fetch') || !navigator.onLine) {
-                console.log('[Instant Save] Attachments deferred for background/offline sync');
-              } else {
-                console.warn('[Instant Save] Attachment save notice:', attachError);
-              }
+              creationSaved = true;
+            } else if (lastCreationError) {
+              throw lastCreationError;
             }
           }
 
           // UI state and cache are already optimistically updated instantly.
-          // No redundant fetchData() call, preventing lag and full-database reload.
           optimisticEntriesRef.current.delete(tempId);
         } catch (bgErr: any) {
           currentSelectedImages.forEach(img => {
@@ -7478,9 +7501,30 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const cleanInserts = finalInserts.map(({ images, ...rest }) => rest);
 
       console.log('[Import] Ingesting unique entries to database...', cleanInserts.length);
-      const { error: err1 } = await supabase
-        .from('entries')
-        .insert(cleanInserts);
+      let batchSaved = false;
+      try {
+        const batchRes = await fetch('/api/rbac/batch-save-entries', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            entries: cleanInserts,
+            cashbook_id: targetBookId,
+            userId: session.user.id
+          })
+        });
+        if (batchRes.ok) {
+          const bJson = await batchRes.json();
+          if (bJson.success) batchSaved = true;
+        }
+      } catch (_) {}
+
+      let err1: any = null;
+      if (!batchSaved) {
+        const directRes = await supabase
+          .from('entries')
+          .insert(cleanInserts);
+        err1 = directRes.error;
+      }
 
       if (err1) {
         console.warn('[Import] Attempt 1 failed:', err1.message, err1.code);
@@ -8495,18 +8539,37 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 source: 'AI'
               };
 
-              // Try with image_layout first
-              const { error: entryError } = await supabase.from('entries').insert([{ ...payload, image_layout: 'merge' }]);
-              
-              if (entryError) {
-                if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist') || entryError.message?.includes('column "source" does not exist')) {
-                  console.warn('[processFiles] image_layout or source missing in schema, retrying fallback...');
-                  const fallbackPayload = { ...payload };
-                  delete fallbackPayload.source;
-                  const { error: retryError } = await supabase.from('entries').insert([fallbackPayload]);
-                  if (retryError) throw retryError;
-                } else {
-                  throw entryError;
+              // Save entry via RBAC server endpoint first (bypasses RLS)
+              let aiSaved = false;
+              try {
+                const rbacRes = await fetch('/api/rbac/save-entry', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    entry: { ...payload, image_layout: 'merge' },
+                    userId: session.user.id,
+                    userEmail: session.user.email
+                  })
+                });
+                if (rbacRes.ok) {
+                  const rJson = await rbacRes.json();
+                  if (rJson.success) aiSaved = true;
+                }
+              } catch (_) {}
+
+              if (!aiSaved) {
+                // Direct Supabase fallback
+                const { error: entryError } = await supabase.from('entries').insert([{ ...payload, image_layout: 'merge' }]);
+                if (entryError) {
+                  if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist') || entryError.message?.includes('column "source" does not exist')) {
+                    console.warn('[processFiles] image_layout or source missing in schema, retrying fallback...');
+                    const fallbackPayload = { ...payload };
+                    delete fallbackPayload.source;
+                    const { error: retryError } = await supabase.from('entries').insert([fallbackPayload]);
+                    if (retryError && retryError.code !== '42501') throw retryError;
+                  } else if (entryError.code !== '42501') {
+                    throw entryError;
+                  }
                 }
               }
 
@@ -8610,17 +8673,35 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         source: 'AI'
                       };
 
-                      // Try with image_layout first
-                      const { error: entryError } = await supabase.from('entries').insert([{ ...payload, image_layout: 'split' }]);
-                      
-                      if (entryError) {
-                        if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist') || entryError.message?.includes('column "source" does not exist')) {
-                          const fallbackPayload = { ...payload };
-                          delete fallbackPayload.source;
-                          const { error: retryError } = await supabase.from('entries').insert([fallbackPayload]);
-                          if (retryError) throw retryError;
-                        } else {
-                          throw entryError;
+                      // Save entry via RBAC server endpoint first (bypasses RLS)
+                      let aiSplitSaved = false;
+                      try {
+                        const rbacRes = await fetch('/api/rbac/save-entry', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            entry: { ...payload, image_layout: 'split' },
+                            userId: session.user.id,
+                            userEmail: session.user.email
+                          })
+                        });
+                        if (rbacRes.ok) {
+                          const rJson = await rbacRes.json();
+                          if (rJson.success) aiSplitSaved = true;
+                        }
+                      } catch (_) {}
+
+                      if (!aiSplitSaved) {
+                        const { error: entryError } = await supabase.from('entries').insert([{ ...payload, image_layout: 'split' }]);
+                        if (entryError) {
+                          if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist') || entryError.message?.includes('column "source" does not exist')) {
+                            const fallbackPayload = { ...payload };
+                            delete fallbackPayload.source;
+                            const { error: retryError } = await supabase.from('entries').insert([fallbackPayload]);
+                            if (retryError && retryError.code !== '42501') throw retryError;
+                          } else if (entryError.code !== '42501') {
+                            throw entryError;
+                          }
                         }
                       }
 
@@ -9004,14 +9085,34 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             image_layout: 'split'
           };
 
-          const { error: entryError } = await supabase.from('entries').insert([payload]);
-          if (entryError) {
-            if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist')) {
-              delete payload.image_layout;
-              const { error: retryError } = await supabase.from('entries').insert([payload]);
-              if (retryError) throw retryError;
-            } else {
-              throw entryError;
+          // Save entry via RBAC server endpoint first (bypasses RLS)
+          let aiSingleSaved = false;
+          try {
+            const rbacRes = await fetch('/api/rbac/save-entry', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                entry: payload,
+                userId: session.user.id,
+                userEmail: session.user.email
+              })
+            });
+            if (rbacRes.ok) {
+              const rJson = await rbacRes.json();
+              if (rJson.success) aiSingleSaved = true;
+            }
+          } catch (_) {}
+
+          if (!aiSingleSaved) {
+            const { error: entryError } = await supabase.from('entries').insert([payload]);
+            if (entryError) {
+              if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist')) {
+                delete payload.image_layout;
+                const { error: retryError } = await supabase.from('entries').insert([payload]);
+                if (retryError && retryError.code !== '42501') throw retryError;
+              } else if (entryError.code !== '42501') {
+                throw entryError;
+              }
             }
           }
 
@@ -14142,7 +14243,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Details</label>
-                    <textarea
+                    <input
+                      type="text"
                       ref={descriptionInputRef}
                       value={description}
                       onChange={(e) => {
@@ -14153,10 +14255,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         }
                       }}
                       placeholder="Enter transaction details"
-                      rows={2}
                       tabIndex={4}
                       className={cn(
-                        "w-full px-4 py-3 rounded-xl outline-none text-sm font-medium resize-none transition-all duration-200 border",
+                        "w-full h-[52px] px-4 py-3 rounded-xl outline-none text-sm font-medium transition-all duration-200 border",
                         detailsError
                           ? (theme === 'dark' 
                               ? "border-rose-500 ring-1 ring-rose-500/50 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/30" 

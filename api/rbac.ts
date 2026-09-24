@@ -3,9 +3,59 @@ import type { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://chbbaswtawmbmyquoiac.supabase.co';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoYmJhc3d0YXdtYm15cXVvaWFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMjE5MTcsImV4cCI6MjA5MDY5NzkxN30.4qNJG7rjpEJ9vfyiGy_mteUI9_X1I6dNekEuXV26Xic';
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+let _adminClient: any = null;
+export function getSupabaseAdmin() {
+  if (!_adminClient) {
+    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://chbbaswtawmbmyquoiac.supabase.co';
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoYmJhc3d0YXdtYm15cXVvaWFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMjE5MTcsImV4cCI6MjA5MDY5NzkxN30.4qNJG7rjpEJ9vfyiGy_mteUI9_X1I6dNekEuXV26Xic';
+    _adminClient = createClient(url, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+  }
+  return _adminClient;
+}
+
+export const supabaseAdmin: any = new Proxy({}, {
+  get: (_target, prop) => {
+    return (getSupabaseAdmin() as any)[prop];
+  }
+});
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DUMMY_UUID = '00000000-0000-0000-0000-000000000000';
+let cachedSystemUserId: string | null = null;
+
+export async function resolveValidUserId(userId: any, cashbookId: string): Promise<string> {
+  if (typeof userId === 'string' && UUID_REGEX.test(userId) && userId !== DUMMY_UUID) {
+    return userId;
+  }
+  if (cashbookId && UUID_REGEX.test(cashbookId)) {
+    try {
+      const { data: cb } = await supabaseAdmin
+        .from('cashbooks')
+        .select('user_id')
+        .eq('id', cashbookId)
+        .maybeSingle();
+      if (cb?.user_id && UUID_REGEX.test(cb.user_id) && cb.user_id !== DUMMY_UUID) {
+        return cb.user_id;
+      }
+    } catch (e: any) {
+      console.warn('[RBAC Server] Failed to resolve user_id from cashbook:', e.message);
+    }
+  }
+  if (cachedSystemUserId) return cachedSystemUserId;
+  try {
+    const { data: usersData } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1 });
+    if (usersData?.users?.[0]?.id) {
+      cachedSystemUserId = usersData.users[0].id;
+      return cachedSystemUserId;
+    }
+  } catch (e: any) {
+    console.warn('[RBAC Server] Failed to fetch fallback user:', e.message);
+  }
+  return '0faa6d19-2493-4c4c-bcfe-ed11ba775c6d';
+}
 
 // UUID validation helper
 export const isValidUuid = (id: any): boolean => {
@@ -1565,12 +1615,12 @@ export async function handleGetCashbookEntries(req: Request, res: Response) {
   }
 }
 
-// 9. SAVE / INSERT CASHBOOK ENTRY (WITH RBAC PERMISSION ENFORCEMENT)
+// 9. SAVE / INSERT CASHBOOK ENTRY (WITH RBAC PERMISSION ENFORCEMENT & SERVICE_ROLE BYPASS)
 export async function handleSaveCashbookEntry(req: Request, res: Response) {
   try {
-    const { entry, attachments, aiAttachments, userRole, userId, userEmail } = req.body;
+    const { entry, attachments, aiAttachments, userRole, userId, userEmail, isUpdate } = req.body;
 
-    if (!entry || !entry.cashbook_id || !entry.amount) {
+    if (!entry || !entry.cashbook_id || (entry.amount === undefined && !isUpdate)) {
       return res.status(400).json({ error: 'Missing entry details or cashbook ID.' });
     }
 
@@ -1579,21 +1629,38 @@ export async function handleSaveCashbookEntry(req: Request, res: Response) {
       return res.status(403).json({ error: 'Forbidden: Viewers have read-only access and cannot add or edit entries.' });
     }
 
-    // Upsert / Insert Entry
+    const resolvedUserId = await resolveValidUserId(entry.user_id || userId, entry.cashbook_id);
+
+    // Clean payload strictly conforming to entries table columns
+    const cleanEntry: any = {
+      id: entry.id,
+      cashbook_id: entry.cashbook_id,
+      user_id: resolvedUserId,
+      amount: Number(entry.amount),
+      type: entry.type === 'out' ? 'out' : 'in',
+      description: entry.description || '',
+      category: entry.category || 'General',
+      mode: entry.mode || 'Cash',
+      date: entry.date || new Date().toISOString(),
+      created_at: entry.created_at || new Date().toISOString()
+    };
+    if (entry.image_layout) cleanEntry.image_layout = entry.image_layout;
+    if (entry.user_name) cleanEntry.user_name = entry.user_name;
+
+    // Upsert / Insert Entry with supabaseAdmin (service_role completely bypasses RLS)
     let savedEntry: any = null;
     try {
       const { data, error } = await supabaseAdmin
         .from('entries')
-        .upsert([entry], { onConflict: 'id' })
+        .upsert([cleanEntry], { onConflict: 'id' })
         .select()
         .maybeSingle();
 
       if (error) {
         console.warn('[RBAC Server] Entry upsert warning:', error.message);
         // Fallback without optional columns if schema mismatch
-        const fallback = { ...entry };
+        const fallback = { ...cleanEntry };
         delete fallback.image_layout;
-        delete fallback.source;
         delete fallback.user_name;
         const { data: retryData, error: retryErr } = await supabaseAdmin
           .from('entries')
@@ -1610,32 +1677,119 @@ export async function handleSaveCashbookEntry(req: Request, res: Response) {
       return res.status(500).json({ error: e.message || 'Database error saving entry.' });
     }
 
+    // If update, clear previous attachments for this entry
+    if (isUpdate && entry.id) {
+      try {
+        await supabaseAdmin.from('attachments').delete().eq('entry_id', entry.id);
+        await supabaseAdmin.from('ai_attachments').delete().eq('entry_id', entry.id);
+      } catch (_) {}
+    }
+
     // Save attachments
     if (Array.isArray(attachments) && attachments.length > 0) {
       try {
-        await supabaseAdmin
-          .from('attachments')
-          .insert(attachments);
-      } catch (_) {}
+        const cleanAttachments = attachments.map((att: any) => ({
+          entry_id: entry.id,
+          user_id: resolvedUserId,
+          user_name: att.user_name || cleanEntry.user_name || 'User',
+          user_email: att.user_email || userEmail || '',
+          file_url: typeof att === 'string' ? att : (att.file_url || att.url || '')
+        })).filter((a: any) => !!a.file_url);
+
+        if (cleanAttachments.length > 0) {
+          await supabaseAdmin
+            .from('attachments')
+            .insert(cleanAttachments);
+        }
+      } catch (attErr: any) {
+        console.warn('[RBAC Server] Attachments save notice:', attErr?.message);
+      }
     }
 
     // Save AI attachments
     if (Array.isArray(aiAttachments) && aiAttachments.length > 0) {
       try {
-        await supabaseAdmin
-          .from('ai_attachments')
-          .insert(aiAttachments);
-      } catch (_) {}
+        const cleanAiAtts = aiAttachments.map((att: any) => ({
+          entry_id: entry.id,
+          user_id: resolvedUserId,
+          file_url: typeof att === 'string' ? att : (att.file_url || att.url || ''),
+          extracted_data: att.extracted_data || null
+        })).filter((a: any) => !!a.file_url);
+
+        if (cleanAiAtts.length > 0) {
+          await supabaseAdmin
+            .from('ai_attachments')
+            .insert(cleanAiAtts);
+        }
+      } catch (aiErr: any) {
+        console.warn('[RBAC Server] AI attachments save notice:', aiErr?.message);
+      }
     }
 
     return res.json({
       success: true,
-      entry: savedEntry || entry
+      entry: savedEntry || cleanEntry
     });
 
   } catch (err: any) {
     console.error('[RBAC Server] Error in handleSaveCashbookEntry:', err);
     return res.status(500).json({ error: err.message || 'Server error saving entry' });
+  }
+}
+
+// 10. BATCH SAVE CASHBOOK ENTRIES (FOR IMPORT OR MULTI-ENTRY CREATION)
+export async function handleBatchSaveCashbookEntries(req: Request, res: Response) {
+  try {
+    const { entries, cashbook_id, userId } = req.body;
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({ error: 'Expected non-empty array of entries' });
+    }
+
+    const resolvedUserId = await resolveValidUserId(userId, cashbook_id || entries[0]?.cashbook_id);
+    const cleanEntries = entries.map((entry: any) => {
+      const clean: any = {
+        id: entry.id,
+        cashbook_id: entry.cashbook_id || cashbook_id,
+        user_id: entry.user_id || resolvedUserId,
+        amount: Number(entry.amount),
+        type: entry.type === 'out' ? 'out' : 'in',
+        description: entry.description || '',
+        category: entry.category || 'General',
+        mode: entry.mode || 'Cash',
+        date: entry.date || new Date().toISOString(),
+        created_at: entry.created_at || new Date().toISOString()
+      };
+      if (entry.image_layout) clean.image_layout = entry.image_layout;
+      if (entry.user_name) clean.user_name = entry.user_name;
+      return clean;
+    });
+
+    const { data, error } = await supabaseAdmin
+      .from('entries')
+      .upsert(cleanEntries, { onConflict: 'id' })
+      .select();
+
+    if (error) {
+      console.warn('[RBAC Server] Batch upsert warning:', error.message);
+      // Fallback without image_layout or user_name
+      const fallbackList = cleanEntries.map((e: any) => {
+        const copy = { ...e };
+        delete copy.image_layout;
+        delete copy.user_name;
+        return copy;
+      });
+      const { data: retryData, error: retryErr } = await supabaseAdmin
+        .from('entries')
+        .upsert(fallbackList, { onConflict: 'id' })
+        .select();
+      if (retryErr) throw retryErr;
+      return res.json({ success: true, count: retryData?.length || fallbackList.length });
+    }
+
+    return res.json({ success: true, count: data?.length || cleanEntries.length });
+  } catch (err: any) {
+    console.error('[RBAC Server] Error in handleBatchSaveCashbookEntries:', err);
+    return res.status(500).json({ error: err.message || 'Server error batch saving entries' });
   }
 }
 

@@ -1,3 +1,4 @@
+import "dotenv/config";
 import fs from "fs";
 import express from "express";
 import path from "path";
@@ -24,7 +25,8 @@ import {
   handleRevokeInvitation,
   handleGetMembers,
   handleGetCashbookEntries,
-  handleSaveCashbookEntry
+  handleSaveCashbookEntry,
+  handleBatchSaveCashbookEntries
 } from "./api/rbac.ts";
 import syncHandler, { handleSyncOfflineEntry, handleBatchSyncOfflineEntries, handleSyncCashbook, handleDeleteCashbook } from "./api/sync.ts";
 import { handleCheckUserStatus, handleGetAdminUsers, handleSetUserStatus } from "./api/user-status.ts";
@@ -105,6 +107,7 @@ app.get("/api/rbac/user-cashbooks", handleGetUserCashbooks);
 app.get("/api/rbac/cashbook-entries", handleGetCashbookEntries);
 app.post("/api/rbac/cashbook-entries", handleGetCashbookEntries);
 app.post("/api/rbac/save-entry", handleSaveCashbookEntry);
+app.post("/api/rbac/batch-save-entries", handleBatchSaveCashbookEntries);
 app.all("/api/sync", syncHandler);
 app.post("/api/sync/offline-entry", handleSyncOfflineEntry);
 app.post("/api/sync/cashbook", handleSyncCashbook);
