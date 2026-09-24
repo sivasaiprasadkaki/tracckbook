@@ -1,6 +1,7 @@
 import fs from "fs";
 import express from "express";
 import path from "path";
+import { fileURLToPath } from "url";
 // Vite is dynamically loaded in development mode only
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
@@ -55,7 +56,7 @@ if (geminiApiKey !== "") {
 }
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Health check endpoint (for container health checks and platform monitoring)
 app.get("/api/health", (req, res) => {
@@ -274,7 +275,15 @@ app.use((req, res, next) => {
   next();
 });
 
-if (process.env.NODE_ENV !== "production") {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const distPath = path.resolve(__dirname, "dist");
+
+const isDevMode = process.argv.includes("--dev");
+const hasDistBuild = fs.existsSync(path.join(distPath, "index.html"));
+const isProduction = !isDevMode && (process.env.NODE_ENV === "production" || Boolean(process.env.PORT && process.env.PORT !== "3000") || hasDistBuild);
+
+if (!isProduction) {
   console.log("[Server] Initializing Vite Dev Middleware...");
   viteInitPromise = import("vite").then(({ createServer: createViteServer }) => {
     return createViteServer({
@@ -302,8 +311,7 @@ if (process.env.NODE_ENV !== "production") {
     }
   });
 } else {
-  console.log("[Server] Configuring production static asset server...");
-  const distPath = path.join(process.cwd(), "dist");
+  console.log("[Server] Configuring production static asset server from:", distPath);
   app.use(express.static(distPath));
   app.get("*", (req, res) => {
     res.sendFile(path.join(distPath, "index.html"));
@@ -311,7 +319,7 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 const server = app.listen(PORT, "0.0.0.0", () => {
-  console.log(`[Express] Running on http://0.0.0.0:${PORT} (NODE_ENV: ${process.env.NODE_ENV || "development"})`);
+  console.log(`[Express] Running on http://0.0.0.0:${PORT} (Mode: ${isProduction ? "production" : "development"}, NODE_ENV: ${process.env.NODE_ENV || "unset"})`);
 });
 
 const handleShutdown = () => {

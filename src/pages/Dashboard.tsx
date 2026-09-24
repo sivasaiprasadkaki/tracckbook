@@ -1460,136 +1460,6 @@ function areCashbookCardPropsEqual(prev: any, next: any): boolean {
   );
 }
 
-const CashbookGridCard = React.memo(({
-  book,
-  displayInfo,
-  selected,
-  justEdited,
-  theme,
-  canDelete = true,
-  onTouchStart,
-  onTouchEnd,
-  onPress,
-  onEdit,
-  onDelete,
-  onOpen
-}: {
-  book: Cashbook;
-  displayInfo: { text: string; isNegative: boolean };
-  selected: boolean;
-  justEdited: boolean;
-  theme: string;
-  canDelete?: boolean;
-  onTouchStart: (id: string) => void;
-  onTouchEnd: () => void;
-  onPress: (id: string) => void;
-  onEdit: (book: Cashbook, e: React.MouseEvent) => void;
-  onDelete: (id: string, e: React.MouseEvent) => void;
-  onOpen: (id: string) => void;
-}) => {
-  return (
-    <motion.div
-      key={book.id}
-      initial={false}
-      animate={
-        justEdited
-          ? { scale: [1, 1.05, 1.05, 1], y: 0, opacity: 1 }
-          : { opacity: 1, y: 0, scale: 1 }
-      }
-      transition={
-        justEdited
-          ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
-          : { duration: 0.2, ease: "easeOut" }
-      }
-      onMouseDown={() => onTouchStart(book.id)}
-      onMouseUp={onTouchEnd}
-      onTouchStart={() => onTouchStart(book.id)}
-      onTouchEnd={onTouchEnd}
-      onClick={() => onPress(book.id)}
-      className={cn(
-        "group border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full p-4 sm:p-5 md:p-4 min-h-[96px] md:min-h-[110px] min-w-0",
-        justEdited
-          ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
-          : theme === 'dark' 
-            ? "border-transparent bg-transparent hover:bg-zinc-900/90 hover:border-zinc-800 hover:shadow-sm" 
-            : "border-transparent bg-transparent hover:bg-slate-100 hover:border-slate-200 hover:shadow-sm",
-      )}
-    >
-      {selected && (
-        <div className="absolute top-2 right-2 z-10">
-          <div className="bg-indigo-600 text-white rounded-full p-1 shadow-md">
-            <Check size={12} />
-          </div>
-        </div>
-      )}
-      <div className="flex-grow flex-1 min-w-0 flex items-center gap-2 md:gap-3 pr-1 md:pr-1.5">
-        <div className="p-2 md:p-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl md:rounded-[14px] group-hover:scale-110 transition-transform shrink-0">
-          <BookOpen size={18} className="w-[18px] h-[18px] md:w-5 md:h-5" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h4 
-            title={book.name}
-            className={cn(
-              "font-bold text-base sm:text-[17px] md:text-lg leading-snug break-normal line-clamp-2 transition-colors duration-300",
-              theme === 'dark' ? "text-slate-100" : "text-slate-800"
-            )}
-          >
-            {book.name}
-          </h4>
-          <p className={cn(
-            "text-[9px] md:text-[10px] mt-0.5 transition-colors duration-300 whitespace-nowrap truncate",
-            theme === 'dark' ? "text-slate-500" : "text-slate-400"
-          )}>
-            Created on {formatDateTime12h(book.createdAt)}
-          </p>
-        </div>
-      </div>
-      
-      <div className="flex items-center gap-1.5 md:gap-2 shrink-0 ml-1.5 md:ml-3">
-        <span className={cn(
-          "font-bold text-sm sm:text-base mr-1.5 sm:mr-2.5 select-none tracking-tight whitespace-nowrap",
-          displayInfo.isNegative 
-            ? "text-rose-600 dark:text-rose-400" 
-            : "text-emerald-600 dark:text-emerald-400"
-        )}>
-          {displayInfo.text}
-        </span>
-        <div className="flex items-center gap-0.5 md:gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 md:pl-2.5 shrink-0">
-          <button 
-            onClick={(e) => onEdit(book, e)}
-            className="p-1 md:p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all cursor-pointer"
-            title="Edit Book"
-          >
-            <Pencil size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
-          </button>
-          {canDelete && (
-            <button 
-              onClick={(e) => onDelete(book.id, e)}
-              className="p-1 md:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all cursor-pointer"
-              title="Delete Book"
-            >
-              <Trash2 size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
-            </button>
-          )}
-          <button 
-            onClick={() => onOpen(book.id)}
-            className="p-1.5 md:p-1.5 text-indigo-800 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all ml-0.5 cursor-pointer"
-            title="Open Cashbook"
-          >
-            <motion.div
-              animate={{ x: [0, 3, 0] }}
-              transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
-            >
-              <ArrowRight size={16} className="w-[16px] h-[16px] md:w-[18px] md:h-[18px]" />
-            </motion.div>
-          </button>
-        </div>
-      </div>
-    </motion.div>
-  );
-}, areCashbookCardPropsEqual);
-CashbookGridCard.displayName = 'CashbookGridCard';
-
 const CashbookListCard = React.memo(({
   book,
   displayInfo,
@@ -1618,107 +1488,97 @@ const CashbookListCard = React.memo(({
   onOpen: (id: string) => void;
 }) => {
   return (
-    <motion.div
+    <div
       key={book.id}
-      initial={false}
-      animate={
-        justEdited
-          ? { scale: [1, 1.02, 1.02, 1], y: 0, opacity: 1 }
-          : { opacity: 1, y: 0, scale: 1 }
-      }
-      transition={
-        justEdited
-          ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
-          : { duration: 0.2, ease: "easeOut" }
-      }
       onMouseDown={() => onTouchStart(book.id)}
       onMouseUp={onTouchEnd}
       onTouchStart={() => onTouchStart(book.id)}
       onTouchEnd={onTouchEnd}
       onClick={() => onPress(book.id)}
       className={cn(
-        "group border rounded-2xl md:rounded-[20px] transition-all duration-200 relative overflow-hidden select-none flex items-center justify-between cursor-pointer w-full p-3 sm:p-3.5 md:p-3 min-h-[64px] md:h-[72px] min-w-0",
-        justEdited
-          ? (theme === 'dark' ? "bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/20 font-bold" : "bg-indigo-50/50 border-indigo-500 ring-2 ring-indigo-500/30 font-bold")
-          : theme === 'dark' 
-            ? "border-transparent bg-transparent hover:bg-zinc-900/90 hover:border-zinc-800 hover:shadow-sm" 
-            : "border-transparent bg-transparent hover:bg-slate-100 hover:border-slate-200 hover:shadow-sm",
+        "group w-full select-none flex items-center justify-between cursor-pointer px-4 sm:px-6 py-3 sm:py-3.5 transition-colors duration-150 relative min-h-[58px] sm:min-h-[64px] min-w-0 rounded-none",
+        selected
+          ? (theme === 'dark' ? "bg-indigo-950/30" : "bg-indigo-50/70")
+          : (theme === 'dark' 
+              ? "bg-transparent hover:bg-zinc-900/60" 
+              : "bg-transparent hover:bg-slate-50/90"),
+        justEdited && (theme === 'dark' ? "bg-indigo-950/40 ring-1 ring-inset ring-indigo-500/40" : "bg-indigo-50/80 ring-1 ring-inset ring-indigo-500/40")
       )}
     >
-      {selected && (
-        <div className="absolute top-2 right-2 z-10">
-          <div className="bg-indigo-600 text-white rounded-full p-1 shadow-md">
-            <Check size={12} />
+      {/* Left + Center: Selection checkbox + Cashbook Icon + Cashbook Info (Name & Created on) */}
+      <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0 pr-3 sm:pr-6">
+        {selected && (
+          <div className="w-4 h-4 bg-indigo-600 text-white rounded-none flex items-center justify-center shrink-0">
+            <Check size={11} strokeWidth={3} />
           </div>
-        </div>
-      )}
-
-      {/* Left: Book Icon + Book Name & Created on Date */}
-      <div className="flex-grow flex-1 min-w-0 flex items-center gap-2 md:gap-3 pr-1 md:pr-1.5">
-        <div className="p-2 md:p-2.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-xl md:rounded-[14px] group-hover:scale-110 transition-transform shrink-0">
-          <BookOpen size={18} className="w-[18px] h-[18px] md:w-5 md:h-5" />
+        )}
+        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-none bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-100 dark:border-indigo-900/40">
+          <BookOpen size={18} />
         </div>
         <div className="min-w-0 flex-1">
-          <h4 
+          <h3 
             title={book.name}
             className={cn(
-              "font-bold text-sm sm:text-base md:text-lg leading-snug break-normal line-clamp-2 transition-colors duration-300",
-              theme === 'dark' ? "text-slate-100" : "text-slate-800"
+              "font-semibold text-sm sm:text-base leading-snug truncate transition-colors duration-150 tracking-tight",
+              theme === 'dark' ? "text-slate-100" : "text-slate-900"
             )}
           >
             {book.name}
-          </h4>
+          </h3>
           <p className={cn(
-            "text-[9px] md:text-[10px] mt-0.5 transition-colors duration-300 whitespace-nowrap truncate",
-            theme === 'dark' ? "text-slate-500" : "text-slate-400"
+            "text-[11px] sm:text-xs mt-0.5 transition-colors duration-150 whitespace-nowrap truncate font-normal",
+            theme === 'dark' ? "text-zinc-500" : "text-slate-400"
           )}>
             Created on {formatDateTime12h(book.createdAt)}
           </p>
         </div>
       </div>
 
-      {/* Right: Net Balance + Actions */}
-      <div className="flex items-center gap-1.5 md:gap-2 shrink-0 ml-1.5 md:ml-3">
-        <span className={cn(
-          "font-bold text-xs sm:text-sm md:text-base mr-1.5 sm:mr-2.5 select-none tracking-tight whitespace-nowrap",
-          displayInfo.isNegative 
-            ? "text-rose-600 dark:text-rose-400" 
-            : "text-emerald-600 dark:text-emerald-400"
-        )}>
-          {displayInfo.text}
-        </span>
-        <div className="flex items-center gap-0.5 md:gap-1 border-l border-slate-100 dark:border-slate-800 pl-1.5 md:pl-2.5 shrink-0">
+      {/* Right: Net Balance + Edit + Delete + Open/View (vertically aligned across rows) */}
+      <div className="flex items-center shrink-0">
+        <div className="text-right min-w-[70px] sm:min-w-[110px] md:min-w-[130px] pr-3 sm:pr-6 shrink-0">
+          <span className={cn(
+            "font-mono tabular-nums text-sm sm:text-base font-semibold tracking-tight whitespace-nowrap",
+            displayInfo.isNegative 
+              ? "text-rose-600 dark:text-rose-400" 
+              : "text-emerald-600 dark:text-emerald-400"
+          )}>
+            {displayInfo.text}
+          </span>
+        </div>
+        <div className="flex items-center gap-0.5 sm:gap-1 pl-2 sm:pl-3 border-l border-slate-200 dark:border-zinc-800 shrink-0">
           <button 
+            type="button"
             onClick={(e) => onEdit(book, e)}
-            className="p-1 md:p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all cursor-pointer"
+            className="p-1.5 sm:p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-zinc-800/80 rounded-none transition-colors cursor-pointer"
             title="Edit Book"
+            aria-label="Edit Book"
           >
-            <Pencil size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
+            <Pencil size={15} />
           </button>
           {canDelete && (
             <button 
+              type="button"
               onClick={(e) => onDelete(book.id, e)}
-              className="p-1 md:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all cursor-pointer"
+              className="p-1.5 sm:p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-none transition-colors cursor-pointer"
               title="Delete Book"
+              aria-label="Delete Book"
             >
-              <Trash2 size={12} className="w-[14px] h-[14px] md:w-[16px] md:h-[16px]" />
+              <Trash2 size={15} />
             </button>
           )}
           <button 
+            type="button"
             onClick={() => onOpen(book.id)}
-            className="p-1.5 md:p-1.5 text-indigo-800 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-all ml-0.5 cursor-pointer"
+            className="p-1.5 sm:p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-none transition-colors ml-0.5 cursor-pointer"
             title="Open Cashbook"
+            aria-label="Open Cashbook"
           >
-            <motion.div
-              animate={{ x: [0, 3, 0] }}
-              transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
-            >
-              <ArrowRight size={16} className="w-[16px] h-[16px] md:w-[18px] md:h-[18px]" />
-            </motion.div>
+            <ArrowRight size={16} />
           </button>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }, areCashbookCardPropsEqual);
 CashbookListCard.displayName = 'CashbookListCard';
@@ -2514,7 +2374,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [helpQuery, setHelpQuery] = useState('');
   const [helpResponse, setHelpResponse] = useState('');
   const [isHelpLoading, setIsHelpLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isLoading, setIsLoading] = useState(() => {
     try {
       const local = loadCompleteLocalCashbooks(currentUserId);
@@ -9236,8 +9095,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   value={searchQueryInput}
                   onChange={(e) => setSearchQueryInput(e.target.value)}
                   className={cn(
-                    "w-full pl-10 pr-4 py-2 border-none rounded-full focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
-                    theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-100 text-black"
+                    "w-full pl-10 pr-4 py-2 border rounded-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm transition-all",
+                    theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white placeholder-zinc-500" : "bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400"
                   )}
                 />
               </div>
@@ -9462,8 +9321,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   value={searchQueryInput}
                   onChange={(e) => setSearchQueryInput(e.target.value)}
                   className={cn(
-                    "flex-1 rounded-full py-2 px-4 outline-none text-sm transition-all",
-                    theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-100 text-black"
+                    "flex-1 rounded-none py-2 px-3 border outline-none text-sm transition-all",
+                    theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
                   )}
                 />
                 {searchQueryInput && (
@@ -9490,7 +9349,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           >
               {isOffline && (
                 <div className={cn(
-                  "flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-xs font-medium border transition-all animate-fade-in shadow-xs",
+                  "flex items-center gap-2.5 px-4 py-2.5 rounded-none text-xs font-medium border transition-all animate-fade-in shadow-xs",
                   theme === 'dark' 
                     ? "bg-amber-950/20 border-amber-800/40 text-amber-300" 
                     : "bg-amber-50 border-amber-200 text-amber-800"
@@ -9511,7 +9370,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   )}>
                     Hello, <span className="text-indigo-600 dark:text-indigo-400">{userName}</span>!
                     {userPhoneVerified && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/40 dark:border-emerald-900/30">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-none text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/40 dark:border-emerald-900/30">
                         ✓ Verified
                       </span>
                     )}
@@ -9527,8 +9386,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     <button
                       onClick={() => { vibrate(); setShowBulkDeleteConfirm(true); setDeleteConfirmed(false); }}
                       className={cn(
-                        "flex-1 sm:flex-none py-2 sm:py-2.5 px-4 sm:px-6 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm sm:text-base animate-in fade-in zoom-in duration-200",
-                        theme === 'dark' ? "shadow-none" : "shadow-lg shadow-rose-100"
+                        "flex-1 sm:flex-none py-2 sm:py-2.5 px-4 sm:px-6 bg-rose-600 hover:bg-rose-700 text-white rounded-none font-bold transition-all flex items-center justify-center gap-2 text-sm sm:text-base animate-in fade-in zoom-in duration-200 cursor-pointer shadow-xs",
+                        theme === 'dark' ? "shadow-none" : ""
                       )}
                     >
                       <Trash2 size={18} />
@@ -9539,123 +9398,55 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <button
                         onClick={() => { vibrate(); setIsCreatingBook(true); }}
                         className={cn(
-                          "group/shortcut relative py-2 sm:py-2.5 px-3.5 sm:px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all inline-flex items-center justify-center gap-1.5 text-xs sm:text-sm hover:scale-[1.02] active:scale-[0.98] duration-200 cursor-pointer w-auto shrink-0",
-                          theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
+                          "group/shortcut relative py-2 sm:py-2.5 px-4 sm:px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-none font-semibold transition-colors inline-flex items-center justify-center gap-1.5 text-xs sm:text-sm active:scale-[0.98] duration-150 cursor-pointer w-auto shrink-0 shadow-xs",
+                          theme === 'dark' ? "shadow-none" : ""
                         )}
                       >
                         <Plus size={16} />
                         <span>Create a Book</span>
-                        <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
-                          Press <kbd className="bg-slate-700 px-1 rounded">C</kbd> + <kbd className="bg-slate-700 px-1 rounded">B</kbd>
+                        <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded-none shadow-lg whitespace-nowrap items-center gap-1 z-50">
+                          Press <kbd className="bg-slate-700 px-1 rounded-none">C</kbd> + <kbd className="bg-slate-700 px-1 rounded-none">B</kbd>
                         </span>
                       </button>
                     )
                   )}
-
-                  <div className={cn(
-                    "hidden sm:flex items-center gap-2 p-1 rounded-xl border shadow-sm transition-colors duration-300 shrink-0",
-                    theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
-                  )}>
-                    <button 
-                      onClick={() => setViewMode('grid')}
-                      className={cn(
-                        "p-2 rounded-lg transition-all cursor-pointer", 
-                        viewMode === 'grid' 
-                          ? (theme === 'dark' ? "bg-indigo-600 text-white shadow-none" : "bg-indigo-600 text-white shadow-lg shadow-indigo-100") 
-                          : (theme === 'dark' ? "text-slate-400 hover:bg-slate-800" : "text-slate-400 hover:bg-slate-50")
-                      )}
-                    >
-                      <LayoutGrid size={20} />
-                    </button>
-                    <button 
-                      onClick={() => setViewMode('list')}
-                      className={cn(
-                        "p-2 rounded-lg transition-all cursor-pointer", 
-                        viewMode === 'list' 
-                          ? (theme === 'dark' ? "bg-indigo-600 text-white shadow-none" : "bg-indigo-600 text-white shadow-lg shadow-indigo-100") 
-                          : (theme === 'dark' ? "text-slate-400 hover:bg-slate-800" : "text-slate-400 hover:bg-slate-50")
-                      )}
-                    >
-                      <List size={20} />
-                    </button>
-                  </div>
                 </div>
               </div>
 
-              {/* Books Section */}
+              {/* Books Section - Full-Width List with 1px Separators */}
               {filteredBooks.length === 0 ? (
                 <div className={cn(
-                  "flex flex-col items-center justify-center p-6 sm:p-10 text-center space-y-4 sm:space-y-5 border rounded-3xl shadow-sm mx-auto max-w-sm sm:max-w-md transition-colors duration-300",
-                  theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
+                  "w-full flex flex-col items-center justify-center py-16 px-6 text-center border transition-colors duration-200 rounded-none",
+                  theme === 'dark' ? "bg-zinc-950/60 border-zinc-800" : "bg-white border-slate-200"
                 )}>
-                  <div className={cn(
-                    "w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center transition-colors duration-300 shadow-inner",
-                    theme === 'dark' ? "bg-indigo-950/40 text-indigo-400" : "bg-indigo-50 text-indigo-600"
+                  <div className="w-12 h-12 rounded-none flex items-center justify-center bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 mb-4 border border-indigo-100 dark:border-indigo-900/40">
+                    <BookOpen size={22} />
+                  </div>
+                  <h3 className={cn(
+                    "text-base font-semibold transition-colors duration-200",
+                    theme === 'dark' ? "text-slate-100" : "text-slate-900"
                   )}>
-                    <BookOpen size={22} className="sm:w-6 sm:h-6" />
-                  </div>
-                  <div className="space-y-1 px-4">
-                    <h3 className={cn(
-                      "text-base sm:text-lg font-black transition-colors duration-300",
-                      theme === 'dark' ? "text-slate-100" : "text-slate-800"
-                    )}>No Cashbooks Yet</h3>
-                    <p className={cn(
-                      "max-w-[220px] sm:max-w-xs mx-auto text-xs transition-colors duration-300 leading-relaxed",
-                      theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                    )}>Start your financial journey by creating your first cashbook today.</p>
-                  </div>
-                  <div className="pt-2">
+                    {searchQuery ? "No matching Cashbooks found" : "No Cashbooks yet"}
+                  </h3>
+                  <p className={cn(
+                    "max-w-md text-xs sm:text-sm mt-1 transition-colors duration-200",
+                    theme === 'dark' ? "text-zinc-400" : "text-slate-500"
+                  )}>
+                    {searchQuery ? "Try searching with a different term." : "Create your first Cashbook to start tracking your finances."}
+                  </p>
+                  {!searchQuery && (
                     <button
                       onClick={() => { vibrate(); setIsCreatingBook(true); }}
-                      className={cn(
-                        "w-auto inline-flex items-center justify-center gap-2 py-2.5 px-5 sm:px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all active:scale-95 text-xs sm:text-sm cursor-pointer shadow-md shadow-indigo-500/20",
-                        theme === 'dark' ? "shadow-none" : ""
-                      )}
+                      className="mt-6 inline-flex items-center justify-center gap-2 py-2 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-none font-semibold text-xs sm:text-sm transition-colors cursor-pointer shadow-xs"
                     >
                       <Plus size={16} />
-                      Create a Book
+                      <span>Create a Book</span>
                     </button>
-                  </div>
-                </div>
-              ) : viewMode === 'grid' ? (
-                /* GRID VIEW - FLUID RESPONSIVE AUTO-FILL GRID */
-                <div 
-                  className="grid w-full gap-4 sm:gap-5 md:gap-6 min-w-0"
-                  style={{
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))'
-                  }}
-                >
-                  {filteredBooks.map((book) => {
-                    const displayInfo = getBookDisplayInfo(book);
-                    return (
-                      <CashbookGridCard
-                        key={book.id}
-                        book={book}
-                        displayInfo={displayInfo}
-                        selected={selectedBooks.has(book.id)}
-                        justEdited={justEditedBookId === book.id}
-                        theme={theme}
-                        canDelete={(book as any).role !== 'Viewer'}
-                        onTouchStart={onTouchStartBook}
-                        onTouchEnd={onTouchEndBook}
-                        onPress={handleBookPress}
-                        onEdit={(b, e) => {
-                          e.stopPropagation();
-                          setIsEditingBook(b.id);
-                          setEditBookName(b.name);
-                        }}
-                        onDelete={(id, e) => {
-                          e.stopPropagation();
-                          handleDeleteBook(id);
-                        }}
-                        onOpen={handleSelectBook}
-                      />
-                    );
-                  })}
+                  )}
                 </div>
               ) : (
-                /* LIST VIEW - EXACT REFERENCE DESIGN MATCHING USER SCREENSHOT */
-                <div className="grid w-full grid-cols-1 gap-2.5 min-w-0">
+                /* FULL-WIDTH CASHBOOK LIST WITH SEPARATOR LINES */
+                <div className="w-full border border-slate-200 dark:border-zinc-800 divide-y divide-slate-200 dark:divide-zinc-800 bg-white dark:bg-zinc-950 rounded-none shadow-xs">
                   {filteredBooks.map((book) => {
                     const displayInfo = getBookDisplayInfo(book);
                     return (
