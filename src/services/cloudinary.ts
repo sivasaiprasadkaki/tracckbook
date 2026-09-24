@@ -4,23 +4,26 @@ import { supabase } from '../lib/supabase';
  * Cloudinary Upload Service for Expense/Cashbook Images
  */
 
-export async function getUserCloudinaryFolder(user?: { email?: string | null; id: string } | null): Promise<string> {
-  let resolvedUser = user;
+export async function getUserCloudinaryFolder(user?: { email?: string | null; id?: string } | null): Promise<string> {
+  let resolvedUser: any = user;
   if (!resolvedUser && supabase) {
-    const { data } = await supabase.auth.getSession();
-    if (data?.session?.user) {
-      resolvedUser = data.session.user;
-    }
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.user) {
+        resolvedUser = data.session.user;
+      }
+    } catch (_) {}
   }
 
   if (resolvedUser) {
     const identifier = (resolvedUser.email && resolvedUser.email.trim()) 
       ? resolvedUser.email.trim().toLowerCase() 
-      : resolvedUser.id;
-    return `trackbook/${identifier}`;
+      : (resolvedUser.id || 'general');
+    return `trackbook/${identifier.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
   }
 
-  throw new Error("No authenticated user found for Cloudinary folder generation.");
+  const fallbackId = typeof localStorage !== 'undefined' ? (localStorage.getItem('trackbook_last_user_id') || 'general') : 'general';
+  return `trackbook/${fallbackId}`;
 }
 
 export async function getUserProfileCloudinaryFolder(user?: { email?: string | null; id: string } | null): Promise<string> {
@@ -43,6 +46,11 @@ export async function getUserProfileCloudinaryFolder(user?: { email?: string | n
 }
 
 export async function uploadToCloudinary(fileDataUriOrFile: string | File, folder?: string): Promise<string> {
+  // If it's already an uploaded HTTP(S) URL, return directly
+  if (typeof fileDataUriOrFile === 'string' && (fileDataUriOrFile.startsWith('http://') || fileDataUriOrFile.startsWith('https://'))) {
+    return fileDataUriOrFile;
+  }
+
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'dd2kcpetc';
   const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || 'trackbook_preset';
 
@@ -78,6 +86,9 @@ export async function uploadToCloudinary(fileDataUriOrFile: string | File, folde
       if (data.secure_url) {
         return data.secure_url;
       }
+    } else {
+      const errBody = await response.text().catch(() => '');
+      console.warn(`[Cloudinary] Direct upload status ${response.status}:`, errBody);
     }
   } catch (directErr) {
     console.warn('[Cloudinary] Direct upload attempt failed, attempting server proxy fallback:', directErr);

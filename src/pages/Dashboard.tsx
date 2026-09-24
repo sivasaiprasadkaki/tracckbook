@@ -368,10 +368,64 @@ function safeFormatTime(dateVal: any, options?: Intl.DateTimeFormatOptions, loca
   return 'N/A';
 }
 
-// Preserve original uploaded files without compression or quality reduction
+// Fast canvas-based image compressor to ensure instant cloud uploads
 async function compressImage(file: File): Promise<Blob | File> {
-  // Respecting upload rule: Preserve the original file exactly as uploaded for pristine cloud archiving
-  return file;
+  if (!file.type || !file.type.startsWith('image/') || file.type.includes('svg') || file.type.includes('gif')) {
+    return file;
+  }
+  // Skip compression if file is already very light (< 350KB)
+  if (file.size <= 350 * 1024) {
+    return file;
+  }
+
+  try {
+    return await new Promise<Blob | File>((resolve) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const MAX_DIM = 1600;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > MAX_DIM || height > MAX_DIM) {
+          if (width > height) {
+            height = Math.round((height * MAX_DIM) / width);
+            width = MAX_DIM;
+          } else {
+            width = Math.round((width * MAX_DIM) / height);
+            height = MAX_DIM;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          return resolve(file);
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob((blob) => {
+          if (blob && blob.size < file.size) {
+            const compressedFile = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' });
+            resolve(compressedFile);
+          } else {
+            resolve(file);
+          }
+        }, 'image/jpeg', 0.82);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(file);
+      };
+      img.src = url;
+    });
+  } catch (err) {
+    console.warn('[Image Compress] Compression fallback to original file:', err);
+    return file;
+  }
 }
 
 // Generate lightweight thumbnail URL for Cloudinary images (w_200,q_auto,f_auto)
@@ -903,31 +957,28 @@ const AttachmentCell = React.memo(({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            if (!isUploading) {
-              setPreviewImages(images, transactionId);
-              setPreviewIndex(0);
-              setPreviewRotation(0);
-              setPreviewZoom(1);
-            }
+            setPreviewImages(images, transactionId);
+            setPreviewIndex(0);
+            setPreviewRotation(0);
+            setPreviewZoom(1);
           }}
-          disabled={isUploading}
           className={cn(
             "flex items-center gap-2 text-left transition-all cursor-pointer group/bill",
             isUploading 
-              ? "text-emerald-500 dark:text-emerald-400 animate-pulse pointer-events-none" 
+              ? "text-emerald-500 dark:text-emerald-400" 
               : "text-slate-500 hover:text-indigo-600"
           )}
         >
-          <Paperclip size={14} className={isUploading ? "animate-bounce" : ""} />
+          <Paperclip size={14} className={isUploading ? "animate-bounce text-emerald-500" : ""} />
           <div className="text-left">
             <p className="text-[10px] font-black leading-none">
               {isUploading ? "Syncing..." : images.length}
             </p>
             <p className={cn(
               "text-[10px] font-bold transition-colors mt-0.5",
-              isUploading ? "text-emerald-400" : "text-slate-400 group-hover/bill:text-indigo-400"
+              isUploading ? "text-emerald-500" : "text-slate-400 group-hover/bill:text-indigo-400"
             )}>
-              {isUploading ? "Uploading attachments..." : `${images.length === 1 ? 'Attachment' : 'Attachments'}`}
+              {isUploading ? "Uploading to Cloud..." : `${images.length === 1 ? 'Attachment' : 'Attachments'}`}
             </p>
           </div>
         </button>
@@ -1147,18 +1198,15 @@ const MobileTransactionRow = React.memo(({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (!isUploading) {
-                        setPreviewImages(t.images!, t.id);
-                        setPreviewIndex(0);
-                        setPreviewRotation(0);
-                        setPreviewZoom(1);
-                      }
+                      setPreviewImages(t.images!, t.id);
+                      setPreviewIndex(0);
+                      setPreviewRotation(0);
+                      setPreviewZoom(1);
                     }}
-                    disabled={isUploading}
                     className={cn(
                       "flex items-center gap-1 transition-colors duration-300 text-[10px] font-bold cursor-pointer py-0.5 px-2 rounded-lg border",
                       isUploading 
-                        ? "text-emerald-500 border-emerald-100/30 bg-emerald-500/5 dark:text-emerald-400 animate-pulse pointer-events-none" 
+                        ? "text-emerald-500 border-emerald-100/30 bg-emerald-500/5 dark:text-emerald-400" 
                         : (theme === 'dark' ? "text-indigo-400 border-indigo-950 bg-indigo-950/10 hover:text-indigo-300" : "text-indigo-650 border-indigo-100 bg-indigo-50/10 hover:text-indigo-700")
                     )}
                   >
@@ -5979,8 +6027,77 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }).catch(err => console.error('[handleBulkDeleteBooks] Error starting undoable delete:', err));
   };
 
-  const handleRetryUpload = (blobUrl: string, transactionId: string) => {
-    console.log('[handleRetryUpload] Image upload retry is now handled synchronously during save.');
+  const handleRetryUpload = async (blobUrl: string, transactionId: string) => {
+    const cleanImg = blobUrl.split('#')[0];
+    const file = imageFilesRef.current[cleanImg];
+    if (!file) {
+      console.warn('[handleRetryUpload] File not found in memory for', cleanImg);
+      return;
+    }
+
+    setUploadStatuses(prev => ({
+      ...prev,
+      [blobUrl]: { status: 'uploading' }
+    }));
+
+    try {
+      const folder = await getUserCloudinaryFolder(session?.user);
+      const processedFile = file.type && file.type.startsWith('image/') ? await compressImage(file) : file;
+      const fileToUpload = processedFile instanceof File ? processedFile : new File([processedFile], file.name || 'image.jpg', { type: file.type });
+      const cloudUrl = await uploadToCloudinary(fileToUpload, folder);
+
+      if (cloudUrl) {
+        setUploadStatuses(prev => ({
+          ...prev,
+          [blobUrl]: { status: 'success' },
+          [cloudUrl]: { status: 'success' }
+        }));
+
+        setBooks(prev => prev.map(b => b.id === activeBookId ? {
+          ...b,
+          transactions: b.transactions.map(t => {
+            if (t.id === transactionId && t.images) {
+              return {
+                ...t,
+                images: t.images.map(img => img === blobUrl || img.split('#')[0] === cleanImg ? cloudUrl : img)
+              };
+            }
+            return t;
+          })
+        } : b));
+
+        const cached = entriesCache.get(activeBookId);
+        if (cached) {
+          entriesCache.set(activeBookId, cached.map(t => {
+            if (t.id === transactionId && t.images) {
+              return {
+                ...t,
+                images: t.images.map((img: string) => img === blobUrl || img.split('#')[0] === cleanImg ? cloudUrl : img)
+              };
+            }
+            return t;
+          }));
+        }
+
+        const resolvedUser = await resolveUserDataForAttachments();
+        await supabase.from('attachments').insert([{
+          entry_id: transactionId,
+          user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
+          user_name: resolvedUser.name,
+          user_email: resolvedUser.email,
+          file_url: cloudUrl
+        }]);
+
+        delete imageFilesRef.current[cleanImg];
+        try { URL.revokeObjectURL(cleanImg); } catch (_) {}
+      }
+    } catch (err: any) {
+      console.error('[handleRetryUpload] Retry failed:', err);
+      setUploadStatuses(prev => ({
+        ...prev,
+        [blobUrl]: { status: 'failed', error: err?.message || 'Retry failed' }
+      }));
+    }
   };
 
   const saveTransaction = async () => {
@@ -6111,9 +6228,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       (async () => {
         try {
           const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
-          const finalImages: string[] = [];
 
-          for (const img of currentSelectedImages) {
+          // Upload all images in parallel for maximum speed
+          const uploadPromises = currentSelectedImages.map(async (img) => {
             const hashIdx = img.indexOf('#');
             const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
             const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
@@ -6128,13 +6245,47 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   : new File([processedFile], file.name || 'image.jpg', { type: file.type });
                 const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
                 if (cloudUrl) {
-                  finalImages.push(cloudUrl + hash);
+                  return { original: img, clean: cleanImg, final: cloudUrl + hash };
                 }
               }
-            } else {
-              finalImages.push(img);
+              return { original: img, clean: cleanImg, final: img };
             }
+            return { original: img, clean: cleanImg, final: img };
+          });
+
+          const uploadResults = await Promise.all(uploadPromises);
+          const finalImages = uploadResults.map(r => r.final);
+
+          // Mark upload statuses as success
+          setUploadStatuses(prev => {
+            const next = { ...prev };
+            uploadResults.forEach(r => {
+              next[r.original] = { status: 'success' };
+              next[r.final] = { status: 'success' };
+            });
+            return next;
+          });
+
+          // Update books state to replace blob URLs with Cloudinary URLs
+          setBooks(prev => prev.map(b => b.id === activeBookId ? {
+            ...b,
+            transactions: b.transactions.map(t => t.id === savedId ? { ...t, images: finalImages } : t)
+          } : b));
+
+          // Update entriesCache and attachmentCache
+          const prevCached = entriesCache.get(activeBookId);
+          if (prevCached) {
+            entriesCache.set(activeBookId, prevCached.map(t => t.id === savedId ? { ...t, images: finalImages } : t));
           }
+          attachmentCache.set(savedId, { images: finalImages, isAi: false });
+
+          // Clean up blob URLs from memory
+          uploadResults.forEach(r => {
+            if (r.clean.startsWith('blob:')) {
+              delete imageFilesRef.current[r.clean];
+              try { URL.revokeObjectURL(r.clean); } catch (_) {}
+            }
+          });
 
           const resolvedUser = await resolveUserDataForAttachments();
           const payload: any = {
@@ -6194,17 +6345,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           if (finalImages.length > 0) {
             const attachmentInserts = finalImages.map(url => ({
               entry_id: savedId,
-              user_id: session.user.id,
+              user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
               user_name: resolvedUser.name,
               user_email: resolvedUser.email,
               file_url: url
             }));
             await supabase.from('attachments').insert(attachmentInserts);
           }
-
-          // UI state and cache are already optimistically updated instantly.
-          // No redundant fetchData() call, preventing UI freeze and full-database refetch.
         } catch (bgErr: any) {
+          currentSelectedImages.forEach(img => {
+            setUploadStatuses(prev => ({
+              ...prev,
+              [img]: { status: 'failed', error: bgErr?.message || 'Upload failed' }
+            }));
+          });
           const errDetail = typeof bgErr === 'object' ? JSON.stringify(bgErr) : String(bgErr || '');
           const isNetworkFailure = (typeof navigator !== 'undefined' && !navigator.onLine) || 
             syncManager.network.state === 'offline' ||
@@ -6390,9 +6544,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       (async () => {
         try {
           const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
-          const finalImages: string[] = [];
 
-          for (const img of currentSelectedImages) {
+          // Upload all images in parallel for maximum speed
+          const uploadPromises = currentSelectedImages.map(async (img) => {
             const hashIdx = img.indexOf('#');
             const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
             const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
@@ -6407,13 +6561,47 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   : new File([processedFile], file.name || 'image.jpg', { type: file.type });
                 const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
                 if (cloudUrl) {
-                  finalImages.push(cloudUrl + hash);
+                  return { original: img, clean: cleanImg, final: cloudUrl + hash };
                 }
               }
-            } else {
-              finalImages.push(img);
+              return { original: img, clean: cleanImg, final: img };
             }
+            return { original: img, clean: cleanImg, final: img };
+          });
+
+          const uploadResults = await Promise.all(uploadPromises);
+          const finalImages = uploadResults.map(r => r.final);
+
+          // Mark upload statuses as success
+          setUploadStatuses(prev => {
+            const next = { ...prev };
+            uploadResults.forEach(r => {
+              next[r.original] = { status: 'success' };
+              next[r.final] = { status: 'success' };
+            });
+            return next;
+          });
+
+          // Update books state to replace blob URLs with Cloudinary URLs
+          setBooks(prev => prev.map(b => b.id === activeBookId ? {
+            ...b,
+            transactions: b.transactions.map(t => t.id === tempId ? { ...t, images: finalImages } : t)
+          } : b));
+
+          // Update entriesCache and attachmentCache
+          const prevCached = entriesCache.get(activeBookId);
+          if (prevCached) {
+            entriesCache.set(activeBookId, prevCached.map(t => t.id === tempId ? { ...t, images: finalImages } : t));
           }
+          attachmentCache.set(tempId, { images: finalImages, isAi: false });
+
+          // Clean up blob URLs from memory
+          uploadResults.forEach(r => {
+            if (r.clean.startsWith('blob:')) {
+              delete imageFilesRef.current[r.clean];
+              try { URL.revokeObjectURL(r.clean); } catch (_) {}
+            }
+          });
 
           const resolvedUser = await resolveUserDataForAttachments();
           const payload: any = {
@@ -6484,7 +6672,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           if (finalImages.length > 0) {
             const attachmentInserts = finalImages.map(url => ({
               entry_id: tempId,
-              user_id: session.user.id,
+              user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
               user_name: resolvedUser.name,
               user_email: resolvedUser.email,
               file_url: url
@@ -6504,6 +6692,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           // No redundant fetchData() call, preventing lag and full-database reload.
           optimisticEntriesRef.current.delete(tempId);
         } catch (bgErr: any) {
+          currentSelectedImages.forEach(img => {
+            setUploadStatuses(prev => ({
+              ...prev,
+              [img]: { status: 'failed', error: bgErr?.message || 'Upload failed' }
+            }));
+          });
           optimisticEntriesRef.current.delete(tempId);
           const errStr = typeof bgErr === 'object' ? JSON.stringify(bgErr) : String(bgErr || '');
           const isNetworkFailure = (typeof navigator !== 'undefined' && !navigator.onLine) || 
