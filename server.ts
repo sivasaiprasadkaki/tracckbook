@@ -25,6 +25,7 @@ import {
   handleRevokeInvitation,
   handleGetMembers,
   handleGetCashbookEntries,
+  handleGetAttachments,
   handleSaveCashbookEntry,
   handleBatchSaveCashbookEntries
 } from "./api/rbac.ts";
@@ -106,6 +107,8 @@ app.post("/api/rbac/decline-role-change", handleDeclineRoleChange);
 app.get("/api/rbac/user-cashbooks", handleGetUserCashbooks);
 app.get("/api/rbac/cashbook-entries", handleGetCashbookEntries);
 app.post("/api/rbac/cashbook-entries", handleGetCashbookEntries);
+app.get("/api/rbac/attachments", handleGetAttachments);
+app.post("/api/rbac/attachments", handleGetAttachments);
 app.post("/api/rbac/save-entry", handleSaveCashbookEntry);
 app.post("/api/rbac/batch-save-entries", handleBatchSaveCashbookEntries);
 app.all("/api/sync", syncHandler);

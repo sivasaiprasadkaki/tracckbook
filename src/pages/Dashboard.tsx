@@ -926,7 +926,7 @@ const AttachmentCell = React.memo(({
   
   const isUploading = images.some(img => {
     const status = uploadStatuses[img]?.status;
-    return status === 'uploading' || (img.startsWith('blob:') && status !== 'failed' && status !== 'success');
+    return status === 'uploading';
   });
   
   const isFailed = images.some(img => uploadStatuses[img]?.status === 'failed');
@@ -1137,9 +1137,9 @@ const MobileTransactionRow = React.memo(({
 
       <div className="mb-3.5 flex flex-wrap items-center gap-2">
         <p className={cn(
-          "text-[13px] font-semibold leading-relaxed line-clamp-2 transition-colors duration-300 flex-1 min-w-[120px]",
+          "text-[13px] font-semibold leading-relaxed truncate whitespace-nowrap transition-colors duration-300 flex-1 min-w-[120px]",
           theme === 'dark' ? "text-slate-200" : "text-slate-850"
-        )}>
+        )} title={t.description}>
           {t.description || 'No details provided'}
         </p>
         
@@ -1171,7 +1171,7 @@ const MobileTransactionRow = React.memo(({
           {t.images && t.images.length > 0 ? (() => {
             const isUploading = t.images.some(img => {
               const status = uploadStatuses[img]?.status;
-              return status === 'uploading' || (img.startsWith('blob:') && status !== 'failed' && status !== 'success');
+              return status === 'uploading';
             });
             const isFailed = t.images.some(img => uploadStatuses[img]?.status === 'failed');
             
@@ -1375,9 +1375,9 @@ const DesktopTransactionRow = React.memo(({
         <div className="flex items-center gap-2 flex-wrap">
           <div>
             <p className={cn(
-              "text-sm font-bold transition-colors duration-300",
+              "text-sm font-bold transition-colors duration-300 truncate max-w-[280px] lg:max-w-md xl:max-w-lg whitespace-nowrap",
               theme === 'dark' ? "text-slate-300" : "text-black"
-            )}>{t.description || '--'}</p>
+            )} title={t.description}>{t.description || '--'}</p>
             {/* User name display removed for privacy/clutter reduction */}
           </div>
           {getTransactionSource(t) === 'Imported' && (
@@ -1773,19 +1773,94 @@ async function fetchAttachmentsDeduplicated(entryIds: string[]): Promise<{ attac
   const queryPromise = (async () => {
     try {
       const startTime = performance.now();
-      const [attachmentsRes, aiAttachmentsRes] = await Promise.all([
-        supabase ? supabase.from('attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', entryIds) : Promise.resolve({ data: [] }),
-        supabase ? supabase.from('ai_attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', entryIds) : Promise.resolve({ data: [] })
-      ]).catch((err) => {
-        console.warn('[Deduplication] Attachments query note (network/offline):', err?.message || err);
-        return [{ data: [] }, { data: [] }];
+      let attachments: any[] = [];
+      let aiAttachments: any[] = [];
+
+      // 1. Primary: Call server RBAC attachments endpoint (bypasses RLS with service_role, chunked by 50)
+      try {
+        const rbacAttRes = await fetch('/api/rbac/attachments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entryIds })
+        });
+        if (rbacAttRes.ok) {
+          const rbacData = await rbacAttRes.json();
+          if (Array.isArray(rbacData.attachments)) {
+            attachments = rbacData.attachments;
+          }
+          if (Array.isArray(rbacData.aiAttachments)) {
+            aiAttachments = rbacData.aiAttachments;
+          }
+        }
+      } catch (rbacErr) {
+        console.warn('[Deduplication] Server attachments endpoint error, checking client fallback:', rbacErr);
+      }
+
+      // 2. Client fallback or supplementary query if server endpoint returned empty
+      if (attachments.length === 0 && supabase) {
+        const CHUNK_SIZE = 50;
+        const attPromises: any[] = [];
+        const aiPromises: any[] = [];
+
+        for (let i = 0; i < entryIds.length; i += CHUNK_SIZE) {
+          const chunk = entryIds.slice(i, i + CHUNK_SIZE);
+          attPromises.push(
+            supabase.from('attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', chunk)
+          );
+          aiPromises.push(
+            supabase.from('ai_attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', chunk)
+          );
+        }
+
+        const [attResults, aiResults] = await Promise.all([
+          Promise.all(attPromises).catch(() => []),
+          Promise.all(aiPromises).catch(() => [])
+        ]);
+
+        attResults.forEach((r: any) => {
+          if (r && Array.isArray(r.data)) {
+            attachments.push(...r.data);
+          }
+        });
+
+        aiResults.forEach((r: any) => {
+          if (r && Array.isArray(r.data)) {
+            aiAttachments.push(...r.data);
+          }
+        });
+      }
+
+      // Populate attachmentCache so attachments survive offline, refreshes, and state updates
+      attachments.forEach((att: any) => {
+        if (att?.entry_id && att?.file_url) {
+          const existing = attachmentCache.get(att.entry_id)?.images || [];
+          if (!existing.includes(att.file_url)) {
+            attachmentCache.set(att.entry_id, {
+              images: [...existing, att.file_url],
+              isAi: false
+            });
+          }
+        }
       });
+      aiAttachments.forEach((att: any) => {
+        if (att?.entry_id && att?.file_url) {
+          const existing = attachmentCache.get(att.entry_id)?.images || [];
+          if (!existing.includes(att.file_url)) {
+            attachmentCache.set(att.entry_id, {
+              images: [...existing, att.file_url],
+              isAi: true
+            });
+          }
+        }
+      });
+      persistAttachmentCacheToStorage();
+
       const duration = performance.now() - startTime;
-      console.log(`[Performance] Attachments load timing: fetched from db in ${duration.toFixed(2)}ms for ${entryIds.length} entries`);
+      console.log(`[Performance] Attachments load timing: fetched ${attachments.length} attachments in ${duration.toFixed(2)}ms for ${entryIds.length} entries`);
       
       return {
-        attachments: (attachmentsRes as any)?.data || [],
-        aiAttachments: (aiAttachmentsRes as any)?.data || []
+        attachments,
+        aiAttachments
       };
     } catch (err) {
       console.warn('[Deduplication] Safe fallback for fetchAttachmentsDeduplicated:', err);
@@ -2100,11 +2175,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               mergedMap.set(b.id, {
                 ...b,
                 createdAt: b.createdAt ? new Date(b.createdAt) : (b.created_at ? new Date(b.created_at) : new Date()),
-                transactions: Array.isArray(b.transactions) ? b.transactions.map((t: any) => ({
-                  ...t,
-                  date: t.date ? new Date(t.date) : new Date(),
-                  images: t.images || []
-                })) : []
+                transactions: Array.isArray(b.transactions) ? b.transactions.map((t: any) => {
+                  let images = Array.isArray(t.images) ? t.images.filter((img: string) => typeof img === 'string' && !img.startsWith('blob:')) : [];
+                  if (images.length === 0 && attachmentCache.has(t.id)) {
+                    images = attachmentCache.get(t.id)?.images || [];
+                  }
+                  return {
+                    ...t,
+                    date: t.date ? new Date(t.date) : new Date(),
+                    images
+                  };
+                }) : []
               });
             }
           });
@@ -4342,6 +4423,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       ) {
         return false;
       }
+      const imgsA = Array.isArray(itemA.images) ? itemA.images : [];
+      const imgsB = Array.isArray(itemB.images) ? itemB.images : [];
+      if (imgsA.length !== imgsB.length) return false;
+      for (let j = 0; j < imgsA.length; j++) {
+        if (imgsA[j] !== imgsB[j]) return false;
+      }
     }
     return true;
   }
@@ -4363,7 +4450,34 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         continue;
       }
 
-      const txsEqual = areEntriesEqual(prev.transactions || [], next.transactions || []);
+      // Merge transactions intelligently to never lose attachments
+      const mergedTxs = (next.transactions || []).map((nextTx: Transaction) => {
+        const prevTx = prev.transactions?.find((pt: Transaction) => pt.id === nextTx.id);
+        if (!prevTx) return nextTx;
+
+        const nextImgs = Array.isArray(nextTx.images) ? nextTx.images.filter(img => typeof img === 'string' && img.length > 0) : [];
+        const prevImgs = Array.isArray(prevTx.images) ? prevTx.images.filter(img => typeof img === 'string' && !img.startsWith('blob:')) : [];
+        
+        let finalImages = nextImgs;
+        if (finalImages.length === 0 && prevImgs.length > 0) {
+          finalImages = prevImgs;
+        }
+
+        return {
+          ...nextTx,
+          images: finalImages,
+          attachment_details: (nextTx.attachment_details && nextTx.attachment_details.length > 0) 
+            ? nextTx.attachment_details 
+            : (prevTx.attachment_details || [])
+        };
+      });
+
+      const nextWithMergedTxs = {
+        ...next,
+        transactions: mergedTxs
+      };
+
+      const txsEqual = areEntriesEqual(prev.transactions || [], mergedTxs);
       const metadataEqual =
         prev.name === next.name &&
         prev.syncStatus === next.syncStatus &&
@@ -4376,7 +4490,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         result.push(prev);
       } else {
         anyChanged = true;
-        result.push(next);
+        result.push(nextWithMergedTxs);
       }
     }
 
@@ -4527,6 +4641,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         const cashbookIds = cashbooks.map(cb => cb.id);
         let entries: any[] = [];
         let entFetchFailed = false;
+        const attachmentsMap = new Map<string, string[]>();
+        const attachmentsDetailsMap = new Map<string, any[]>();
+        const aiEntryIds = new Set<string>();
 
         if (cashbookIds.length > 0) {
           try {
@@ -4566,6 +4683,37 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   }
                 }
               }
+              if (rbacEntJson.success && Array.isArray(rbacEntJson.attachments)) {
+                for (const att of rbacEntJson.attachments) {
+                  if (att && att.entry_id && att.file_url) {
+                    if (!attachmentsMap.has(att.entry_id)) attachmentsMap.set(att.entry_id, []);
+                    if (!attachmentsMap.get(att.entry_id)!.includes(att.file_url)) {
+                      attachmentsMap.get(att.entry_id)!.push(att.file_url);
+                    }
+                    if (!attachmentsDetailsMap.has(att.entry_id)) attachmentsDetailsMap.set(att.entry_id, []);
+                    attachmentsDetailsMap.get(att.entry_id)!.push(att);
+                  }
+                }
+              }
+              if (rbacEntJson.success && Array.isArray(rbacEntJson.aiAttachments)) {
+                for (const att of rbacEntJson.aiAttachments) {
+                  if (att && att.entry_id && att.file_url) {
+                    aiEntryIds.add(att.entry_id);
+                    if (!attachmentsMap.has(att.entry_id)) attachmentsMap.set(att.entry_id, []);
+                    if (!attachmentsMap.get(att.entry_id)!.includes(att.file_url)) {
+                      attachmentsMap.get(att.entry_id)!.push(att.file_url);
+                    }
+                    if (!attachmentsDetailsMap.has(att.entry_id)) attachmentsDetailsMap.set(att.entry_id, []);
+                    attachmentsDetailsMap.get(att.entry_id)!.push(att);
+                  }
+                }
+              }
+
+              // Update attachmentCache and persist to storage
+              for (const [eId, urls] of attachmentsMap.entries()) {
+                attachmentCache.set(eId, { images: urls, isAi: aiEntryIds.has(eId) });
+              }
+              persistAttachmentCacheToStorage();
             }
           } catch (rbacEntErr) {
             console.warn('[Dashboard] RBAC entries fallback note:', rbacEntErr);
@@ -4586,9 +4734,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         }
 
         // Fetch attachments for all entries in a single step
-        let attachmentsMap = new Map<string, string[]>();
-        let attachmentsDetailsMap = new Map<string, any[]>();
-        let aiEntryIds = new Set<string>();
         if (allEntryIds.length > 0) {
           const { attachments, aiAttachments } = await fetchAttachmentsDeduplicated(allEntryIds);
           if (attachments) {
@@ -4597,7 +4742,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 if (!attachmentsMap.has(att.entry_id)) {
                   attachmentsMap.set(att.entry_id, []);
                 }
-                attachmentsMap.get(att.entry_id)!.push(att.file_url);
+                if (!attachmentsMap.get(att.entry_id)!.includes(att.file_url)) {
+                  attachmentsMap.get(att.entry_id)!.push(att.file_url);
+                }
 
                 if (!attachmentsDetailsMap.has(att.entry_id)) {
                   attachmentsDetailsMap.set(att.entry_id, []);
@@ -4613,7 +4760,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 if (!attachmentsMap.has(att.entry_id)) {
                   attachmentsMap.set(att.entry_id, []);
                 }
-                attachmentsMap.get(att.entry_id)!.push(att.file_url);
+                if (!attachmentsMap.get(att.entry_id)!.includes(att.file_url)) {
+                  attachmentsMap.get(att.entry_id)!.push(att.file_url);
+                }
 
                 if (!attachmentsDetailsMap.has(att.entry_id)) {
                   attachmentsDetailsMap.set(att.entry_id, []);
@@ -4626,8 +4775,36 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         const mappedBooks = cashbooks.map(cb => {
           const rawEntries = entriesMapByCashbook.get(cb.id) || [];
+          const existingBook = booksRef.current.find(b => b.id === cb.id);
+          const existingTxsMap = new Map((existingBook?.transactions || []).map(t => [t.id, t]));
+          const cachedTxsMap = new Map((entriesCache.get(cb.id) || []).map(t => [t.id, t]));
+
           let entryList = rawEntries.map(t => {
-            const images = attachmentsMap.get(t.id) || [];
+            let images = attachmentsMap.get(t.id) || [];
+
+            // 1. Check persistent attachment cache
+            if (images.length === 0 && attachmentCache.has(t.id)) {
+              images = attachmentCache.get(t.id)?.images || [];
+            }
+
+            // 2. Check existing in-memory transaction or cached entry
+            if (images.length === 0) {
+              const prevTx = existingTxsMap.get(t.id) || cachedTxsMap.get(t.id);
+              if (prevTx && Array.isArray(prevTx.images)) {
+                images = prevTx.images.filter((img: string) => typeof img === 'string' && !img.startsWith('blob:'));
+              }
+            }
+
+            // 3. Fallback to raw t.images
+            if (images.length === 0 && Array.isArray(t.images)) {
+              images = t.images.filter((img: string) => typeof img === 'string' && !img.startsWith('blob:'));
+            }
+
+            // Keep attachmentCache populated
+            if (images.length > 0 && !attachmentCache.has(t.id)) {
+              attachmentCache.set(t.id, { images, isAi: aiEntryIds.has(t.id) });
+            }
+
             const details = attachmentsDetailsMap.get(t.id) || [];
             const isMerged = t.image_layout === 'merge' || t.bill_type === 'MERGE' || t.billType === 'MERGE';
             const isAi = aiEntryIds.has(t.id) || !!t.isAi || t.source === 'AI';
@@ -5081,6 +5258,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 t.category === newRow.category
               );
 
+              // Preserve attachments from optimistic entry or attachmentCache
+              const prevEntry = optIndex !== -1 ? currentTxs[optIndex] : null;
+              const cachedImgs = attachmentCache.get(newRow.id)?.images || [];
+              const optImgs = Array.isArray(prevEntry?.images) ? prevEntry.images : [];
+              const finalImgs = (Array.isArray(newRow.attachments) && newRow.attachments.length > 0)
+                ? newRow.attachments
+                : ((Array.isArray(newRow.images) && newRow.images.length > 0) 
+                  ? newRow.images 
+                  : (optImgs.length > 0 ? optImgs : cachedImgs));
+
               const formattedNewEntry: Transaction = {
                 id: newRow.id,
                 amount: Number(newRow.amount) || 0,
@@ -5090,8 +5277,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 date: newRow.date ? new Date(newRow.date) : (newRow.created_at ? new Date(newRow.created_at) : new Date()),
                 created_at: newRow.created_at || new Date().toISOString(),
                 description: newRow.description || '',
-                images: Array.isArray(newRow.attachments) ? newRow.attachments : (Array.isArray(newRow.images) ? newRow.images : []),
-                imageLayout: newRow.image_layout || 'split',
+                images: finalImgs,
+                imageLayout: newRow.image_layout || prevEntry?.imageLayout || 'split',
                 syncStatus: 'SYNCED',
                 is_offline: false
               };
@@ -5110,11 +5297,31 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               };
               entriesCache.set(bookId, updatedTxs);
               changed = true;
+
+              // Asynchronously query server for attachments if new entry has no images locally
+              if (finalImgs.length === 0) {
+                fetchAttachmentsDeduplicated([newRow.id]).then(({ attachments }) => {
+                  if (attachments && attachments.length > 0) {
+                    const newUrls = attachments.map((a: any) => a.file_url).filter(Boolean);
+                    if (newUrls.length > 0) {
+                      setBooks(latest => latest.map(b => b.id === bookId ? {
+                        ...b,
+                        transactions: b.transactions.map(tx => tx.id === newRow.id ? { ...tx, images: newUrls } : tx)
+                      } : b));
+                    }
+                  }
+                }).catch(() => {});
+              }
             }
           } else if (eventType === 'UPDATE') {
             if (!newRow || !newRow.id) continue;
             const updatedTxs = currentTxs.map(t => {
               if (t.id === newRow.id) {
+                const updatedImages = (Array.isArray(newRow.attachments) && newRow.attachments.length > 0)
+                  ? newRow.attachments
+                  : ((Array.isArray(newRow.images) && newRow.images.length > 0)
+                    ? newRow.images
+                    : (t.images && t.images.length > 0 ? t.images : (attachmentCache.get(t.id)?.images || [])));
                 return {
                   ...t,
                   amount: Number(newRow.amount) || t.amount,
@@ -5123,7 +5330,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   mode: newRow.mode || t.mode,
                   description: newRow.description !== undefined ? newRow.description : t.description,
                   date: newRow.date ? new Date(newRow.date) : t.date,
-                  images: Array.isArray(newRow.attachments) ? newRow.attachments : (Array.isArray(newRow.images) ? newRow.images : t.images),
+                  images: updatedImages,
                   imageLayout: newRow.image_layout || t.imageLayout,
                   syncStatus: 'SYNCED' as const,
                   is_offline: false
@@ -6229,6 +6436,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         try {
           const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
 
+          // Mark blob images as uploading
+          currentSelectedImages.forEach(img => {
+            if (img.startsWith('blob:')) {
+              setUploadStatuses(prev => ({ ...prev, [img]: { status: 'uploading' } }));
+            }
+          });
+
           // Upload all images in parallel for maximum speed
           const uploadPromises = currentSelectedImages.map(async (img) => {
             const hashIdx = img.indexOf('#');
@@ -6266,11 +6480,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             return next;
           });
 
-          // Update books state to replace blob URLs with Cloudinary URLs
-          setBooks(prev => prev.map(b => b.id === activeBookId ? {
-            ...b,
-            transactions: b.transactions.map(t => t.id === savedId ? { ...t, images: finalImages } : t)
-          } : b));
+          // Update books state to replace blob URLs with Cloudinary URLs and persist to cache
+          setBooks(prev => {
+            const next = prev.map(b => b.id === activeBookId ? {
+              ...b,
+              transactions: b.transactions.map(t => t.id === savedId ? { ...t, images: finalImages } : t)
+            } : b);
+            booksRef.current = next;
+            try {
+              if (session?.user?.id) {
+                localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
+                localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(next));
+                offlineDb.saveCachedCashbooks(session.user.id, next);
+              }
+            } catch (_) {}
+            return next;
+          });
 
           // Update entriesCache and attachmentCache
           const prevCached = entriesCache.get(activeBookId);
@@ -6278,6 +6503,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             entriesCache.set(activeBookId, prevCached.map(t => t.id === savedId ? { ...t, images: finalImages } : t));
           }
           attachmentCache.set(savedId, { images: finalImages, isAi: false });
+          persistAttachmentCacheToStorage();
 
           // Clean up blob URLs from memory
           uploadResults.forEach(r => {
@@ -6320,6 +6546,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               body: JSON.stringify({
                 entry: payload,
                 attachments: attachmentInserts,
+                clearAttachments: (originalTx.images && originalTx.images.length > 0 && finalImages.length === 0),
                 isUpdate: true,
                 userId: session.user.id,
                 userEmail: session.user.email
@@ -6547,6 +6774,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         try {
           const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
 
+          // Mark blob images as uploading
+          currentSelectedImages.forEach(img => {
+            if (img.startsWith('blob:')) {
+              setUploadStatuses(prev => ({ ...prev, [img]: { status: 'uploading' } }));
+            }
+          });
+
           // Upload all images in parallel for maximum speed
           const uploadPromises = currentSelectedImages.map(async (img) => {
             const hashIdx = img.indexOf('#');
@@ -6584,11 +6818,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             return next;
           });
 
-          // Update books state to replace blob URLs with Cloudinary URLs
-          setBooks(prev => prev.map(b => b.id === activeBookId ? {
-            ...b,
-            transactions: b.transactions.map(t => t.id === tempId ? { ...t, images: finalImages } : t)
-          } : b));
+          // Update books state to replace blob URLs with Cloudinary URLs and persist to cache
+          setBooks(prev => {
+            const next = prev.map(b => b.id === activeBookId ? {
+              ...b,
+              transactions: b.transactions.map(t => t.id === tempId ? { ...t, images: finalImages } : t)
+            } : b);
+            booksRef.current = next;
+            try {
+              if (session?.user?.id) {
+                localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
+                localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(next));
+                offlineDb.saveCachedCashbooks(session.user.id, next);
+              }
+            } catch (_) {}
+            return next;
+          });
 
           // Update entriesCache and attachmentCache
           const prevCached = entriesCache.get(activeBookId);
@@ -6596,6 +6841,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             entriesCache.set(activeBookId, prevCached.map(t => t.id === tempId ? { ...t, images: finalImages } : t));
           }
           attachmentCache.set(tempId, { images: finalImages, isAi: false });
+          persistAttachmentCacheToStorage();
 
           // Clean up blob URLs from memory
           uploadResults.forEach(r => {
@@ -7097,7 +7343,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setMode(MODES.includes(t.mode) ? t.mode : 'Custom');
     if (!MODES.includes(t.mode)) setCustomMode(t.mode);
     setTransactionDate(safeToDateTimeLocal(t.date));
-    setSelectedImages(t.images || []);
+    const initialImages = (Array.isArray(t.images) && t.images.length > 0)
+      ? t.images
+      : (attachmentCache.get(t.id)?.images || []);
+    setSelectedImages(initialImages);
     setImageLayout(t.imageLayout || 'split');
   }, []);
 
@@ -14248,16 +14497,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       ref={descriptionInputRef}
                       value={description}
                       onChange={(e) => {
-                        const val = e.target.value;
+                        const val = e.target.value.replace(/[\r\n]+/g, ' ');
                         setDescription(val);
                         if (detailsError && val.trim()) {
                           setDetailsError(false);
                         }
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                        }
+                      }}
                       placeholder="Enter transaction details"
                       tabIndex={4}
                       className={cn(
-                        "w-full h-[52px] px-4 py-3 rounded-xl outline-none text-sm font-medium transition-all duration-200 border",
+                        "w-full h-[52px] px-4 py-3 rounded-xl outline-none text-sm font-medium transition-all duration-200 border whitespace-nowrap overflow-x-auto",
                         detailsError
                           ? (theme === 'dark' 
                               ? "border-rose-500 ring-1 ring-rose-500/50 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/30" 

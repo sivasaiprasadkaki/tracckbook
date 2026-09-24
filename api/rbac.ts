@@ -1547,6 +1547,14 @@ export async function handleGetMembers(req: Request, res: Response) {
 // 8. GET CASHBOOK ENTRIES & ATTACHMENTS (FOR BOTH OWNED & JOINED CASHBOOKS)
 export async function handleGetCashbookEntries(req: Request, res: Response) {
   try {
+    const directEntryIds = req.body?.entryIds || req.query?.entryIds;
+    let entryIdsToFetch: string[] = [];
+    if (Array.isArray(directEntryIds)) {
+      entryIdsToFetch = directEntryIds.filter(id => typeof id === 'string' && id.trim().length > 0);
+    } else if (typeof directEntryIds === 'string') {
+      entryIdsToFetch = directEntryIds.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
     const rawIds = req.body?.cashbookIds || req.body?.cashbookId || req.query?.cashbookId || req.query?.cashbookIds;
     let idList: string[] = [];
     if (Array.isArray(rawIds)) {
@@ -1555,8 +1563,13 @@ export async function handleGetCashbookEntries(req: Request, res: Response) {
       idList = rawIds.split(',').map(s => s.trim());
     }
 
-    // Clean UUIDs
     const validBookIds = idList.filter(id => typeof id === 'string' && id.trim().length > 0);
+
+    // If only entryIds were requested, return attachments directly
+    if (entryIdsToFetch.length > 0 && validBookIds.length === 0) {
+      return handleGetAttachments(req, res);
+    }
+
     if (validBookIds.length === 0) {
       return res.json({ success: true, entries: [], attachments: [], aiAttachments: [] });
     }
@@ -1579,27 +1592,49 @@ export async function handleGetCashbookEntries(req: Request, res: Response) {
       console.warn('[RBAC Server] Entries query exception:', e.message);
     }
 
-    // 2. Fetch attachments
-    const entryIds = entries.map(e => e.id).filter(Boolean);
+    // 2. Fetch attachments with chunking (batches of 50 to avoid PostgREST URL length limits)
+    const entryIds = Array.from(new Set([...entries.map(e => e.id).filter(Boolean), ...entryIdsToFetch]));
     let attachments: any[] = [];
     let aiAttachments: any[] = [];
 
     if (entryIds.length > 0) {
-      try {
-        const { data: attData } = await supabaseAdmin
-          .from('attachments')
-          .select('*')
-          .in('entry_id', entryIds);
-        if (attData) attachments = attData;
-      } catch (_) {}
+      const CHUNK_SIZE = 50;
+      const attPromises: Promise<any>[] = [];
+      const aiPromises: Promise<any>[] = [];
+
+      for (let i = 0; i < entryIds.length; i += CHUNK_SIZE) {
+        const chunk = entryIds.slice(i, i + CHUNK_SIZE);
+        attPromises.push(
+          supabaseAdmin
+            .from('attachments')
+            .select('*')
+            .in('entry_id', chunk)
+        );
+        aiPromises.push(
+          supabaseAdmin
+            .from('ai_attachments')
+            .select('*')
+            .in('entry_id', chunk)
+        );
+      }
 
       try {
-        const { data: aiAttData } = await supabaseAdmin
-          .from('ai_attachments')
-          .select('*')
-          .in('entry_id', entryIds);
-        if (aiAttData) aiAttachments = aiAttData;
-      } catch (_) {}
+        const attResults = await Promise.all(attPromises);
+        attResults.forEach(r => {
+          if (r.data && Array.isArray(r.data)) attachments.push(...r.data);
+        });
+      } catch (attErr) {
+        console.warn('[RBAC Server] Attachments chunk query notice:', attErr);
+      }
+
+      try {
+        const aiResults = await Promise.all(aiPromises);
+        aiResults.forEach(r => {
+          if (r.data && Array.isArray(r.data)) aiAttachments.push(...r.data);
+        });
+      } catch (aiErr) {
+        console.warn('[RBAC Server] AI attachments chunk query notice:', aiErr);
+      }
     }
 
     return res.json({
@@ -1612,6 +1647,73 @@ export async function handleGetCashbookEntries(req: Request, res: Response) {
   } catch (err: any) {
     console.error('[RBAC Server] Error fetching cashbook entries:', err);
     return res.status(500).json({ error: err.message || 'Error fetching entries' });
+  }
+}
+
+// 8b. GET ATTACHMENTS DIRECTLY FOR ENTRY IDS (BYPASSES RLS VIA SERVICE_ROLE)
+export async function handleGetAttachments(req: Request, res: Response) {
+  try {
+    const rawIds = req.body?.entryIds || req.query?.entryIds;
+    let entryIds: string[] = [];
+    if (Array.isArray(rawIds)) {
+      entryIds = rawIds.filter(id => typeof id === 'string' && id.trim().length > 0);
+    } else if (typeof rawIds === 'string') {
+      entryIds = rawIds.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    if (entryIds.length === 0) {
+      return res.json({ success: true, attachments: [], aiAttachments: [] });
+    }
+
+    const CHUNK_SIZE = 50;
+    const attPromises: Promise<any>[] = [];
+    const aiPromises: Promise<any>[] = [];
+
+    for (let i = 0; i < entryIds.length; i += CHUNK_SIZE) {
+      const chunk = entryIds.slice(i, i + CHUNK_SIZE);
+      attPromises.push(
+        supabaseAdmin
+          .from('attachments')
+          .select('*')
+          .in('entry_id', chunk)
+      );
+      aiPromises.push(
+        supabaseAdmin
+          .from('ai_attachments')
+          .select('*')
+          .in('entry_id', chunk)
+      );
+    }
+
+    let attachments: any[] = [];
+    let aiAttachments: any[] = [];
+
+    try {
+      const attResults = await Promise.all(attPromises);
+      attResults.forEach(r => {
+        if (r.data && Array.isArray(r.data)) attachments.push(...r.data);
+      });
+    } catch (attErr) {
+      console.warn('[RBAC Server] Direct attachments chunk query notice:', attErr);
+    }
+
+    try {
+      const aiResults = await Promise.all(aiPromises);
+      aiResults.forEach(r => {
+        if (r.data && Array.isArray(r.data)) aiAttachments.push(...r.data);
+      });
+    } catch (aiErr) {
+      console.warn('[RBAC Server] Direct AI attachments chunk query notice:', aiErr);
+    }
+
+    return res.json({
+      success: true,
+      attachments,
+      aiAttachments
+    });
+  } catch (err: any) {
+    console.error('[RBAC Server] Error in handleGetAttachments:', err);
+    return res.status(500).json({ error: err.message || 'Error fetching attachments' });
   }
 }
 
@@ -1677,8 +1779,14 @@ export async function handleSaveCashbookEntry(req: Request, res: Response) {
       return res.status(500).json({ error: e.message || 'Database error saving entry.' });
     }
 
-    // If update, clear previous attachments for this entry
-    if (isUpdate && entry.id) {
+    // Only clear previous attachments if new attachments are explicitly provided with items,
+    // OR if clearAttachments is explicitly flagged as true.
+    // Never delete existing attachments when updating date, description, category, amount, etc.
+    const shouldClearAttachments = isUpdate && entry.id && (
+      (Array.isArray(attachments) && attachments.length > 0) ||
+      req.body?.clearAttachments === true
+    );
+    if (shouldClearAttachments) {
       try {
         await supabaseAdmin.from('attachments').delete().eq('entry_id', entry.id);
         await supabaseAdmin.from('ai_attachments').delete().eq('entry_id', entry.id);
