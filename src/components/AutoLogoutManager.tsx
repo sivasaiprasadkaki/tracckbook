@@ -1,112 +1,181 @@
-import React, { useEffect, useRef } from 'react';
-import { supabase, isMobileDeviceOrView } from '../lib/supabase';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { executeAppLogout } from '../lib/supabase';
+
+// 15 minutes of zero work or movement triggers automatic logout
+const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes (900,000 ms)
+const ACTIVITY_STORAGE_KEY = 'trackbook_last_activity_ts';
+const THROTTLE_MS = 1000; // Throttle storage writes to once per second
 
 export default function AutoLogoutManager({ session }: { session: any }) {
-  const navigate = useNavigate();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const lastActiveRef = useRef<number>(Date.now());
+  const isLoggingOutRef = useRef<boolean>(false);
 
   useEffect(() => {
-    // Only monitor on stable sessions
-    if (!session || !supabase) return;
-
-    // Mobile view / devices will NEVER be logged out automatically.
-    // Once logged in on mobile view, user stays logged in until they explicitly log out.
-    if (isMobileDeviceOrView()) {
-      console.log('[AutoLogout] Mobile view/device detected. Auto-logout is permanently disabled.');
+    // Only monitor when there is an active session
+    if (!session?.user) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+        heartbeatRef.current = null;
+      }
       return;
     }
 
-    const checkIsStrictDesktop = () => {
-      if (typeof window === 'undefined') return false;
-      if (isMobileDeviceOrView()) return false;
-      const isSmallScreen = window.innerWidth < 1024;
-      return !isSmallScreen;
-    };
+    isLoggingOutRef.current = false;
 
-    const handleInactivityLogout = async () => {
-      // Re-verify strictly: NEVER logout if user is in mobile view or on a mobile device
-      if (!checkIsStrictDesktop()) {
-        console.log('[AutoLogout] Mobile view detected at timeout check. Aborting auto-logout.');
-        return;
-      }
-
-      console.warn('[AutoLogout] Desktop user inactive for 10 minutes. Triggering automatic logout...');
+    // Initialize or read last activity timestamp
+    const now = Date.now();
+    const storedLast = typeof localStorage !== 'undefined' ? Number(localStorage.getItem(ACTIVITY_STORAGE_KEY)) : 0;
+    if (storedLast && now - storedLast < INACTIVITY_TIMEOUT_MS) {
+      lastActiveRef.current = storedLast;
+    } else {
+      lastActiveRef.current = now;
       try {
-        if (supabase) {
-          await supabase.auth.signOut();
-        }
+        localStorage.setItem(ACTIVITY_STORAGE_KEY, now.toString());
+      } catch {}
+    }
+
+    const performInactivityLogout = async () => {
+      if (isLoggingOutRef.current) return;
+      isLoggingOutRef.current = true;
+      console.warn('[AutoLogout] User has been inactive with no work or movement for 15 minutes. Automatically logging out...');
+      try {
+        await executeAppLogout({ reason: 'inactivity' });
       } catch (err) {
-        console.error('[AutoLogout] Supabase signOut error:', err);
-      } finally {
-        sessionStorage.setItem('logout_reason', 'inactivity');
-        navigate('/login', { replace: true });
-        window.location.reload();
+        console.error('[AutoLogout] Error during auto logout:', err);
+        window.location.replace('/login');
       }
     };
 
-    const resetTimer = () => {
-      if (!checkIsStrictDesktop()) {
-        if (timerRef.current) {
-          clearTimeout(timerRef.current);
-          timerRef.current = null;
-        }
-        return;
-      }
+    const scheduleTimer = () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
-      // 10 minutes for inactive desktop sessions only
-      const timeoutMs = 10 * 60 * 1000;
-      timerRef.current = setTimeout(handleInactivityLogout, timeoutMs);
+      const elapsed = Date.now() - lastActiveRef.current;
+      const remaining = Math.max(0, INACTIVITY_TIMEOUT_MS - elapsed);
+
+      if (remaining <= 0) {
+        performInactivityLogout();
+        return;
+      }
+
+      timerRef.current = setTimeout(() => {
+        // Double check against real stored timestamp
+        const currentStored = typeof localStorage !== 'undefined' ? Number(localStorage.getItem(ACTIVITY_STORAGE_KEY)) || lastActiveRef.current : lastActiveRef.current;
+        const actualElapsed = Date.now() - currentStored;
+        if (actualElapsed >= INACTIVITY_TIMEOUT_MS) {
+          performInactivityLogout();
+        } else {
+          scheduleTimer();
+        }
+      }, remaining);
     };
 
-    // Register initial reset if on desktop
-    resetTimer();
+    let lastWriteTime = 0;
+    const registerActivity = () => {
+      if (isLoggingOutRef.current) return;
+      const current = Date.now();
+      lastActiveRef.current = current;
 
-    // Listeners for mouse movement, keyboard activity, clicks, scrolling, touch, pointer
-    const interactionEvents = [
+      if (current - lastWriteTime > THROTTLE_MS) {
+        lastWriteTime = current;
+        try {
+          localStorage.setItem(ACTIVITY_STORAGE_KEY, current.toString());
+        } catch {}
+      }
+
+      scheduleTimer();
+    };
+
+    // Initial scheduling
+    scheduleTimer();
+
+    // Heartbeat check every 5 seconds (handles tab suspension, device sleep, minimized browser)
+    heartbeatRef.current = setInterval(() => {
+      if (isLoggingOutRef.current) return;
+      const currentStored = typeof localStorage !== 'undefined' ? Number(localStorage.getItem(ACTIVITY_STORAGE_KEY)) || lastActiveRef.current : lastActiveRef.current;
+      const elapsed = Date.now() - currentStored;
+
+      if (elapsed >= INACTIVITY_TIMEOUT_MS) {
+        performInactivityLogout();
+      }
+    }, 5000);
+
+    // Cross-tab synchronization
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === ACTIVITY_STORAGE_KEY && e.newValue) {
+        const remoteTimestamp = Number(e.newValue);
+        if (remoteTimestamp > lastActiveRef.current) {
+          lastActiveRef.current = remoteTimestamp;
+          scheduleTimer();
+        }
+      } else if (e.key === 'trackbook_explicit_logout' && e.newValue === 'true') {
+        performInactivityLogout();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    // Re-verify immediately when tab regains visibility or focus
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        const currentStored = typeof localStorage !== 'undefined' ? Number(localStorage.getItem(ACTIVITY_STORAGE_KEY)) || lastActiveRef.current : lastActiveRef.current;
+        const elapsed = Date.now() - currentStored;
+        if (elapsed >= INACTIVITY_TIMEOUT_MS) {
+          performInactivityLogout();
+        } else {
+          lastActiveRef.current = currentStored;
+          scheduleTimer();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    // Interaction & movement event listeners (desktop, mobile, tablet)
+    const interactionEvents: (keyof WindowEventMap)[] = [
       'mousemove',
-      'keydown',
+      'mousedown',
+      'mouseup',
       'click',
-      'scroll',
+      'contextmenu',
+      'keydown',
+      'keyup',
+      'keypress',
       'touchstart',
       'touchmove',
       'touchend',
-      'pointerdown'
+      'pointerdown',
+      'pointermove',
+      'scroll',
+      'wheel'
     ];
 
-    const handleEvent = () => {
-      resetTimer();
-    };
-
     interactionEvents.forEach(type => {
-      window.addEventListener(type, handleEvent, { passive: true });
+      window.addEventListener(type, registerActivity, { passive: true, capture: true });
     });
-
-    // Resize listener: if resized to mobile view, immediately abort and cancel any active timer
-    const handleResize = () => {
-      if (!checkIsStrictDesktop()) {
-        if (timerRef.current) {
-          clearTimeout(timerRef.current);
-          timerRef.current = null;
-        }
-      } else {
-        resetTimer();
-      }
-    };
-    window.addEventListener('resize', handleResize);
 
     return () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
+        timerRef.current = null;
       }
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+        heartbeatRef.current = null;
+      }
+      window.removeEventListener('storage', handleStorageChange);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
       interactionEvents.forEach(type => {
-        window.removeEventListener(type, handleEvent);
+        window.removeEventListener(type, registerActivity, { capture: true });
       });
-      window.removeEventListener('resize', handleResize);
     };
-  }, [session, navigate]);
+  }, [session]);
 
   return null;
 }

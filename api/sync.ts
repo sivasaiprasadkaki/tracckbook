@@ -102,14 +102,27 @@ export async function handleSyncOfflineEntry(req: Request, res: Response) {
 
     const resolvedUserId = await resolveValidUserId(entry.user_id, entry.cashbook_id);
 
+    // Resolve cashbook name
+    let resolvedCashbookName = entry.cashbook_name;
+    if (!resolvedCashbookName && entry.cashbook_id) {
+      try {
+        const { data: cb } = await supabaseAdmin
+          .from('cashbooks')
+          .select('name')
+          .eq('id', entry.cashbook_id)
+          .maybeSingle();
+        if (cb?.name) resolvedCashbookName = cb.name;
+      } catch (_) {}
+    }
+
     // 2. Prepare entry payload matching exact Supabase entries table schema
-    const entryPayload = {
+    const entryPayload: any = {
       id: id,
       cashbook_id: entry.cashbook_id,
       user_id: resolvedUserId,
       user_name: entry.user_name || 'User',
       amount: Number(entry.amount),
-      type: entry.type === 'in' ? 'in' : 'out',
+      type: (entry.type || '').toLowerCase() === 'in' ? 'in' : 'out',
       description: entry.description || '',
       category: entry.category || 'General',
       mode: entry.mode || 'Cash',
@@ -121,11 +134,31 @@ export async function handleSyncOfflineEntry(req: Request, res: Response) {
     console.log(`[Sync Server] Inserting/upserting entry ${id} for cashbook ${entry.cashbook_id}...`);
 
     // 3. Perform idempotent upsert on table entries
-    const { data: upserted, error: upsertError } = await supabaseAdmin
+    let upserted: any = null;
+    let { data: upData, error: upsertError } = await supabaseAdmin
       .from('entries')
       .upsert([entryPayload], { onConflict: 'id' })
       .select()
       .maybeSingle();
+
+    if (upsertError) {
+      if (upsertError.code === '42703' || upsertError.message?.toLowerCase().includes('column')) {
+        const fallback = { ...entryPayload };
+        delete fallback.image_layout;
+        delete fallback.user_name;
+        const { data: retryData, error: retryErr } = await supabaseAdmin
+          .from('entries')
+          .upsert([fallback], { onConflict: 'id' })
+          .select()
+          .maybeSingle();
+        if (!retryErr) {
+          upserted = retryData;
+          upsertError = null;
+        }
+      }
+    } else {
+      upserted = upData;
+    }
 
     if (upsertError) {
       console.error('[Sync Server] Error upserting offline entry:', upsertError);
@@ -184,7 +217,19 @@ export async function handleBatchSyncOfflineEntries(req: Request, res: Response)
 
       const resolvedUserId = await resolveValidUserId(item.user_id, item.cashbook_id);
 
-      const payload = {
+      let itemCashbookName = item.cashbook_name;
+      if (!itemCashbookName && item.cashbook_id) {
+        try {
+          const { data: cb } = await supabaseAdmin
+            .from('cashbooks')
+            .select('name')
+            .eq('id', item.cashbook_id)
+            .maybeSingle();
+          if (cb?.name) itemCashbookName = cb.name;
+        } catch (_) {}
+      }
+
+      const payload: any = {
         id,
         cashbook_id: item.cashbook_id,
         user_id: resolvedUserId,
@@ -192,18 +237,33 @@ export async function handleBatchSyncOfflineEntries(req: Request, res: Response)
         amount: Number(item.amount),
         type: item.type === 'in' ? 'in' : 'out',
         description: item.description || '',
-        category: item.category || 'General',
+        category: entry.category || item.category || 'General',
         mode: item.mode || 'Cash',
         date: item.date || new Date().toISOString(),
         image_layout: item.image_layout || item.imageLayout || 'split',
         created_at: item.created_at || new Date().toISOString()
       };
 
-      const { data: upserted, error: upsertErr } = await supabaseAdmin
+      let { data: upserted, error: upsertErr } = await supabaseAdmin
         .from('entries')
         .upsert([payload], { onConflict: 'id' })
         .select()
         .maybeSingle();
+
+      if (upsertErr && (upsertErr.code === '42703' || upsertErr.code === 'PGRST204' || upsertErr.message?.toLowerCase().includes('column'))) {
+        const fallback = { ...payload };
+        delete fallback.image_layout;
+        delete fallback.user_name;
+        const { data: retryData, error: retryErr } = await supabaseAdmin
+          .from('entries')
+          .upsert([fallback], { onConflict: 'id' })
+          .select()
+          .maybeSingle();
+        if (!retryErr) {
+          upserted = retryData;
+          upsertErr = null;
+        }
+      }
 
       if (upsertErr) {
         results.push({ id, success: false, error: upsertErr.message });

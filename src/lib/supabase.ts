@@ -17,7 +17,17 @@ export const clearSupabaseAuthStorage = () => {
         const keysToRemove: string[] = [];
         for (let i = 0; i < storage.length; i++) {
           const key = storage.key(i);
-          if (key && (key.startsWith('sb-') || key.endsWith('-auth-token') || key === 'trackbook_cached_auth_session')) {
+          if (
+            key &&
+            (key.startsWith('sb-') ||
+             key.endsWith('-auth-token') ||
+             key.includes('auth-token') ||
+             key === 'trackbook_cached_auth_session' ||
+             key === 'trackbook_cached_books' ||
+             key === 'trackbook_avatar' ||
+             key === 'trackbook_offline_auth' ||
+             key.startsWith('tb_auth_unlocked_'))
+          ) {
             keysToRemove.push(key);
           }
         }
@@ -348,4 +358,88 @@ if (!supabase) {
     key: supabaseAnonKey ? (supabaseAnonKey === 'your_supabase_anon_key' ? 'Placeholder' : 'Present') : 'Missing'
   });
 }
+
+export interface LogoutOptions {
+  reason?: 'user' | 'inactivity' | 'blocked' | 'expired' | string;
+  redirectUrl?: string;
+}
+
+export const executeAppLogout = async (options: LogoutOptions = {}): Promise<void> => {
+  const reason = options.reason || 'user';
+  const redirectUrl = options.redirectUrl || '/login';
+
+  console.log(`[TrackBook Auth] Executing complete logout (reason: ${reason})...`);
+
+  // 1. Mark explicit logout flag in localStorage so session rehydration is prevented
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('trackbook_explicit_logout', 'true');
+      localStorage.removeItem('trackbook_last_activity_ts');
+      localStorage.removeItem('trackbook_cached_books');
+      localStorage.removeItem('trackbook_cached_auth_session');
+      localStorage.removeItem('trackbook_avatar');
+      localStorage.removeItem('trackbook_offline_auth');
+      localStorage.removeItem('supabase_remember_me');
+      localStorage.removeItem('trackbook_force_tpin');
+    }
+  } catch (e) {
+    console.warn('[TrackBook Auth] Error cleaning localStorage:', e);
+  }
+
+  // 2. Clear unlocked TPIN state & set logout reason in sessionStorage
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const k = sessionStorage.key(i);
+        if (k && (k.startsWith('tb_auth_unlocked_') || k === 'tb_fresh_login_session' || k.startsWith('sb-') || k.endsWith('-auth-token'))) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach(k => {
+        try { sessionStorage.removeItem(k); } catch {}
+      });
+
+      if (reason === 'inactivity') {
+        sessionStorage.setItem('logout_reason', 'inactivity');
+      } else if (reason === 'blocked') {
+        sessionStorage.setItem('auth_blocked_notice', 'User blocked');
+      } else {
+        sessionStorage.removeItem('logout_reason');
+      }
+    }
+  } catch (e) {}
+
+  // 3. Clear all Supabase auth storage tokens
+  clearSupabaseAuthStorage();
+
+  // 4. Safely call supabase.auth.signOut() with a strict timeout race so it never hangs
+  try {
+    if (supabase?.auth) {
+      await Promise.race([
+        supabase.auth.signOut(),
+        new Promise(resolve => setTimeout(resolve, 1000))
+      ]);
+    }
+  } catch (err) {
+    console.warn('[TrackBook Auth] Supabase signOut note:', err);
+  }
+
+  // 5. Broadcast global logout event
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('trackbook:logout', { detail: { reason } }));
+    }
+  } catch (e) {}
+
+  // 6. Hard redirect to target URL
+  if (typeof window !== 'undefined') {
+    if (window.location.pathname === redirectUrl) {
+      window.location.reload();
+    } else {
+      window.location.replace(redirectUrl);
+    }
+  }
+};
+
 

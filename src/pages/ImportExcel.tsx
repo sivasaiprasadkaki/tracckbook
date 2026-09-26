@@ -547,7 +547,7 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
           user_id: session.user.id,
           user_name: userName,
           amount: entry.amount,
-          type: entry.type,
+          type: (entry.type || 'out').toLowerCase() === 'in' ? 'in' : 'out',
           description: entry.description,
           category: entry.category,
           mode: entry.mode,
@@ -567,12 +567,13 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
           if (err1) {
             console.warn('[ImportExcel] Attempt 1 failed:', err1.message);
             const isColumnError = err1.code === '42703' || 
+                                  err1.code === 'PGRST204' ||
                                   err1.message?.includes('column') || 
                                   err1.message?.includes('does not exist');
 
             if (isColumnError) {
               // Attempt 2: Without is_imported, import_batch_id, source
-              const baseRows = insertRows.map(({ is_imported, import_batch_id, source, user_name, ...rest }) => rest);
+              const baseRows = insertRows.map(({ is_imported, import_batch_id, source, user_name, ...rest }: any) => rest);
               const { error: err2 } = await supabase.from('entries').insert(baseRows);
 
               if (err2) {

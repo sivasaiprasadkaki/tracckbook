@@ -183,10 +183,14 @@ function NavigationHandler({
           return;
         }
 
-        try {
-          localStorage.removeItem('trackbook_explicit_logout');
-        } catch {}
+        clearSessionUnlocked();
         setSession(null);
+        const currentPath = locationRef.current.pathname;
+        const isResetRoute = currentPath === '/reset-password' || currentPath === '/resetpassword';
+        if (!isResetRoute) {
+          navigate('/login', { replace: true });
+        }
+        return;
       } else if (sessionVal) {
         setSession(sessionVal);
         console.log('[DEBUG] SESSION REFRESHED');
@@ -204,6 +208,9 @@ function NavigationHandler({
           navigate('/reset-password' + currentSearch + currentHash, { replace: true });
         }
       } else if (event === 'SIGNED_IN') {
+        try {
+          localStorage.removeItem('trackbook_explicit_logout');
+        } catch {}
         if (sessionVal?.user?.id) {
           markSessionUnlocked(sessionVal.user.id);
         }
@@ -215,14 +222,19 @@ function NavigationHandler({
         if (currentPath === '/login' || currentPath === '/register' || currentPath === '/signup' || currentPath === '/forgot' || currentPath === '/') {
           navigate('/cashbooks', { replace: true });
         }
-      } else if (event === 'SIGNED_OUT') {
-        clearSessionUnlocked();
-        // Only redirect to login if not intentionally on reset password page
-        if (!isResetRoute) {
-          navigate('/login', { replace: true });
-        }
       }
     });
+
+    const handleCustomLogout = () => {
+      clearSessionUnlocked();
+      setSession(null);
+      const currentPath = locationRef.current.pathname;
+      const isResetRoute = currentPath === '/reset-password' || currentPath === '/resetpassword';
+      if (!isResetRoute) {
+        navigate('/login', { replace: true });
+      }
+    };
+    window.addEventListener('trackbook:logout', handleCustomLogout);
 
     // Active session protection: periodically re-verify user account status
     const interval = setInterval(() => {
@@ -241,6 +253,7 @@ function NavigationHandler({
     return () => {
       clearInterval(interval);
       window.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('trackbook:logout', handleCustomLogout);
       subscription.unsubscribe();
     };
   }, [navigate, setSession, setLoading]);

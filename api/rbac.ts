@@ -1733,6 +1733,21 @@ export async function handleSaveCashbookEntry(req: Request, res: Response) {
 
     const resolvedUserId = await resolveValidUserId(entry.user_id || userId, entry.cashbook_id);
 
+    // Resolve cashbook name if provided or fetch from cashbooks table
+    let resolvedCashbookName = entry.cashbook_name;
+    if (!resolvedCashbookName && entry.cashbook_id) {
+      try {
+        const { data: cb } = await supabaseAdmin
+          .from('cashbooks')
+          .select('name')
+          .eq('id', entry.cashbook_id)
+          .maybeSingle();
+        if (cb?.name) {
+          resolvedCashbookName = cb.name;
+        }
+      } catch (_) {}
+    }
+
     // Clean payload strictly conforming to entries table columns
     const cleanEntry: any = {
       id: entry.id,
@@ -1854,10 +1869,28 @@ export async function handleBatchSaveCashbookEntries(req: Request, res: Response
     }
 
     const resolvedUserId = await resolveValidUserId(userId, cashbook_id || entries[0]?.cashbook_id);
+
+    // Collect distinct cashbook IDs to resolve their names
+    const cbIds = Array.from(new Set(entries.map((e: any) => e.cashbook_id || cashbook_id).filter(Boolean)));
+    const cashbookMap = new Map<string, string>();
+    if (cbIds.length > 0) {
+      try {
+        const { data: cbList } = await supabaseAdmin
+          .from('cashbooks')
+          .select('id, name')
+          .in('id', cbIds);
+        if (cbList) {
+          cbList.forEach((c: any) => cashbookMap.set(c.id, c.name));
+        }
+      } catch (_) {}
+    }
+
     const cleanEntries = entries.map((entry: any) => {
+      const targetCbId = entry.cashbook_id || cashbook_id;
+      const targetCbName = entry.cashbook_name || cashbookMap.get(targetCbId) || null;
       const clean: any = {
         id: entry.id,
-        cashbook_id: entry.cashbook_id || cashbook_id,
+        cashbook_id: targetCbId,
         user_id: entry.user_id || resolvedUserId,
         amount: Number(entry.amount),
         type: entry.type === 'out' ? 'out' : 'in',
@@ -1901,6 +1934,76 @@ export async function handleBatchSaveCashbookEntries(req: Request, res: Response
   }
 }
 
+// 11. AUTOMATIC BACKFILL OF CASHBOOK_NAME ON EXISTING ENTRIES
+let isBackfillRunning = false;
+export async function triggerBackgroundCashbookNameBackfill(): Promise<{ success: boolean; updatedCount: number; message: string }> {
+  if (isBackfillRunning) {
+    return { success: true, updatedCount: 0, message: 'Backfill already in progress' };
+  }
+  isBackfillRunning = true;
+  try {
+    // Check if column exists first
+    const { error: testErr } = await supabaseAdmin
+      .from('entries')
+      .select('id, cashbook_name')
+      .limit(1);
+
+    if (testErr) {
+      return { 
+        success: false, 
+        updatedCount: 0, 
+        message: 'cashbook_name column does not exist yet in Supabase table.' 
+      };
+    }
+
+    const { data: cashbooks, error: cbErr } = await supabaseAdmin
+      .from('cashbooks')
+      .select('id, name');
+
+    if (cbErr || !cashbooks || cashbooks.length === 0) {
+      return { success: true, updatedCount: 0, message: 'No cashbooks found to backfill' };
+    }
+
+    let updatedCount = 0;
+    for (const cb of cashbooks) {
+      if (!cb.id || !cb.name) continue;
+      try {
+        const { count, error } = await supabaseAdmin
+          .from('entries')
+          .update({ cashbook_name: cb.name }, { count: 'exact' })
+          .eq('cashbook_id', cb.id)
+          .or('cashbook_name.is.null,cashbook_name.eq.""');
+        if (!error && count) {
+          updatedCount += count;
+        }
+      } catch (_) {}
+    }
+
+    console.log(`[RBAC Server] Backfilled cashbook_name on ${updatedCount} entries.`);
+    return { success: true, updatedCount, message: `Successfully backfilled ${updatedCount} entries.` };
+  } catch (err: any) {
+    console.warn('[RBAC Server] Backfill error:', err.message);
+    return { success: false, updatedCount: 0, message: err.message };
+  } finally {
+    isBackfillRunning = false;
+  }
+}
+
+export async function handleBackfillCashbookNames(req: Request, res: Response) {
+  const result = await triggerBackgroundCashbookNameBackfill();
+  return res.json(result);
+}
+
+// Periodically check if column is added and backfill
+setInterval(async () => {
+  try {
+    const { error } = await supabaseAdmin.from('entries').select('id, cashbook_name').limit(1);
+    if (!error) {
+      triggerBackgroundCashbookNameBackfill();
+    }
+  } catch (_) {}
+}, 20000);
+
 export default async function rbacHandler(req: any, res: any) {
   const action = req.query?.action || req.body?.action;
   switch (action) {
@@ -1912,6 +2015,8 @@ export default async function rbacHandler(req: any, res: any) {
     case 'user-cashbooks': return handleGetUserCashbooks(req, res);
     case 'cashbook-entries': return handleGetCashbookEntries(req, res);
     case 'save-entry': return handleSaveCashbookEntry(req, res);
+    case 'batch-save-entries': return handleBatchSaveCashbookEntries(req, res);
+    case 'backfill-cashbook-names': return handleBackfillCashbookNames(req, res);
     default:
       return res.status(200).json({ ok: true, message: 'RBAC module ready' });
   }

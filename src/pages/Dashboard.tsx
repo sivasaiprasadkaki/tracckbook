@@ -87,7 +87,7 @@ import ReactMarkdown from 'react-markdown';
 import { cn, formatCurrency, vibrate } from '../lib/utils';
 import { parseReceipt, parseMultipleReceipts } from '../services/gemini';
 import { processAndOcrImage } from '../services/ocrService';
-import { supabase } from '../lib/supabase';
+import { supabase, executeAppLogout } from '../lib/supabase';
 import { uploadToCloudinary, getOptimizedCloudinaryUrl, getExportOptimizedCloudinaryUrl, getUserCloudinaryFolder, getUserProfileCloudinaryFolder, resolveAttachmentUrl } from '../services/cloudinary';
 import imageCompression from 'browser-image-compression';
 import XLSX from 'xlsx-js-style';
@@ -96,6 +96,7 @@ import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
 import { backgroundExportManager, buildTransactionsWorksheet } from '../services/exportManager';
 import { syncManager, offlineDb, OfflineEntry } from '../services/syncManager';
+import { reconcileAndMigrateOfflineData } from '../services/dataReconciliation';
 import { SyncStatusBadge } from '../components/SyncStatusBadge';
 import DownloadCenter, { DownloadCenterTrigger } from '../components/DownloadCenter';
 import NotificationBell from '../components/NotificationBell';
@@ -243,6 +244,8 @@ function ProcessingTimeline({
 interface Transaction {
   id: string;
   clientEntryId?: string;
+  cashbook_id?: string;
+  cashbook_name?: string;
   amount: number;
   type: 'in' | 'out';
   description: string;
@@ -2193,75 +2196,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       }
     } catch (e) {}
 
-    // 2. Merge offline cashbooks (strictly ONLY if PENDING sync)
-    try {
-      const rawBooks = localStorage.getItem('trackbook_offline_pending_books_v1');
-      if (rawBooks) {
-        const pendingBooks = JSON.parse(rawBooks);
-        if (Array.isArray(pendingBooks)) {
-          pendingBooks.forEach((pb: any) => {
-            if (pb && pb.id && !deletedIds.has(pb.id) && pb.syncStatus === 'PENDING') {
-              if (!mergedMap.has(pb.id)) {
-                const normName = (pb.name || '').trim().toLowerCase();
-                const alreadyExists = Array.from(mergedMap.values()).some(b => b.name.trim().toLowerCase() === normName);
-                if (!alreadyExists) {
-                  mergedMap.set(pb.id, {
-                    id: pb.id,
-                    name: pb.name,
-                    user_id: pb.user_id || userId || 'offline-user',
-                    user_name: pb.user_name || 'User',
-                    createdAt: pb.created_at ? new Date(pb.created_at) : (pb.createdAt ? new Date(pb.createdAt) : new Date()),
-                    transactions: entriesCache.get(pb.id) || [],
-                    is_offline: true,
-                    syncStatus: 'PENDING'
-                  });
-                }
-              }
-            }
-          });
-        }
-      }
-    } catch (e) {}
-
-    // 3. Merge offline entries (preserve them until server response confirms them)
-    try {
-      const rawEntries = localStorage.getItem('trackbook_offline_pending_entries_v1');
-      if (rawEntries) {
-        const pendingEntries = JSON.parse(rawEntries);
-        if (Array.isArray(pendingEntries) && pendingEntries.length > 0) {
-          mergedMap.forEach((cb) => {
-            const cbPending = pendingEntries.filter((e: any) => e.cashbook_id === cb.id && !deletedIds.has(e.id));
-            if (cbPending.length > 0) {
-              const existingIds = new Set(cb.transactions.map(t => t.id));
-              const newTxs: Transaction[] = cbPending
-                .filter((e: any) => !existingIds.has(e.id) && !existingIds.has(e.clientEntryId))
-                .map((e: any) => ({
-                  id: e.id,
-                  clientEntryId: e.clientEntryId || e.id,
-                  amount: e.amount,
-                  type: e.type,
-                  description: e.description,
-                  category: e.category,
-                  mode: e.mode,
-                  date: new Date(e.date),
-                  images: [],
-                  imageLayout: 'split',
-                  source: 'Manual',
-                  user_name: e.user_name,
-                  syncStatus: e.syncStatus || 'PENDING',
-                  is_offline: e.syncStatus !== 'SYNCED',
-                  created_at: e.created_at
-                }));
-              if (newTxs.length > 0) {
-                cb.transactions = [...newTxs, ...cb.transactions];
-              }
-            }
-            entriesCache.set(cb.id, cb.transactions);
-          });
-        }
-      }
-    } catch (e) {}
-
+    // Synced authoritative cache loaded
     const result = sortCashbooksLatestFirst(Array.from(mergedMap.values()));
     result.forEach(cb => {
       if (cb.id && Array.isArray(cb.transactions) && cb.transactions.length > 0) {
@@ -2302,34 +2237,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           setBooks([]);
         }
 
-        // Also query IndexedDB for full offline cache strictly for this user
-        offlineDb.getCachedCashbooks(currentUserId).then((idbBooks) => {
-          if (idbBooks && idbBooks.length > 0 && currentUserId === prevUserIdRef.current) {
-            const mapped = idbBooks.map((b: any) => ({
-              ...b,
-              createdAt: b.createdAt ? new Date(b.createdAt) : new Date(),
-              transactions: Array.isArray(b.transactions) ? b.transactions.map((t: any) => ({
-                ...t,
-                date: t.date ? new Date(t.date) : new Date(),
-                images: t.images || []
-              })) : []
-            }));
-            const local = loadCompleteLocalCashbooks(currentUserId);
-            const idbMap = new Map<string, Cashbook>();
-            local.forEach(b => { if (b && b.id) idbMap.set(b.id, b); });
-            mapped.forEach(b => { if (b && b.id && !idbMap.has(b.id)) idbMap.set(b.id, b); });
-            const finalList = Array.from(idbMap.values());
-            if (finalList.length > 0) {
-              setBooks(finalList);
-              finalList.forEach(b => {
-                if (b.id && Array.isArray(b.transactions) && b.transactions.length > 0) {
-                  entriesCache.set(b.id, b.transactions);
-                }
-              });
-              setIsLoading(false);
-            }
-          }
-        }).catch(() => {});
+
       } else {
         // Only clear if user explicitly clicked sign out — NEVER on network loss or background disconnect
         const isExplicit = typeof localStorage !== 'undefined' && localStorage.getItem('trackbook_explicit_logout') === 'true';
@@ -2384,60 +2292,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       setIsEntriesLoading(false);
     }
 
-    // 3. Layer any additional pending books or entries from IndexedDB
-    try {
-      const idbPendingBooks = await offlineDb.getPendingCashbooks();
-      if (Array.isArray(idbPendingBooks)) {
-        idbPendingBooks.forEach(pb => {
-          if (pb && pb.id && !mergedMap.has(pb.id) && !deletedIds.has(pb.id)) {
-            mergedMap.set(pb.id, {
-              id: pb.id,
-              name: pb.name,
-              user_id: pb.user_id || effectiveUserId || 'offline-user',
-              user_name: pb.user_name || 'User',
-              createdAt: pb.created_at ? new Date(pb.created_at) : ((pb as any).createdAt ? new Date((pb as any).createdAt) : new Date()),
-              transactions: entriesCache.get(pb.id) || [],
-              is_offline: pb.syncStatus !== 'SYNCED',
-              syncStatus: pb.syncStatus || 'PENDING'
-            });
-          }
-        });
-      }
-
-      const idbPendingEntries = await offlineDb.getPendingEntries();
-      if (Array.isArray(idbPendingEntries) && idbPendingEntries.length > 0) {
-        mergedMap.forEach(cb => {
-          const cbPending = idbPendingEntries.filter(e => e.cashbook_id === cb.id && !deletedIds.has(e.id));
-          if (cbPending.length > 0) {
-            const existingIds = new Set(cb.transactions.map(t => t.id));
-            const newTxs: Transaction[] = cbPending
-              .filter(e => !existingIds.has(e.id) && !existingIds.has(e.clientEntryId))
-              .map(e => ({
-                id: e.id,
-                clientEntryId: e.clientEntryId || e.id,
-                amount: e.amount,
-                type: e.type,
-                description: e.description,
-                category: e.category,
-                mode: e.mode,
-                date: new Date(e.date),
-                images: [],
-                imageLayout: 'split',
-                source: 'Manual',
-                user_name: e.user_name,
-                syncStatus: e.syncStatus || 'PENDING',
-                is_offline: e.syncStatus !== 'SYNCED',
-                created_at: e.created_at
-              }));
-            if (newTxs.length > 0) {
-              cb.transactions = [...newTxs, ...cb.transactions];
-              entriesCache.set(cb.id, cb.transactions);
-            }
-          }
-        });
-      }
-    } catch {}
-
+    // Authoritative local cache loaded cleanly
     const finalList = sortCashbooksLatestFirst(Array.from(mergedMap.values()));
     if (finalList.length > 0) {
       setBooks(finalList);
@@ -2680,6 +2535,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         setIsEntriesLoading(true);
       } else {
         setIsEntriesLoading(false);
+      }
+      // Guarantee instant fresh sync from Supabase when switching/opening a cashbook
+      if (typeof window !== 'undefined' && navigator.onLine) {
+        window.dispatchEvent(new CustomEvent('trackbook_refresh_cashbooks'));
       }
     } else {
       setIsEntriesLoading(false);
@@ -4510,10 +4369,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return;
     }
 
-    // If device is offline, retain existing cached cashbooks and entries immediately without making network calls
-    const isDeviceOffline = (typeof navigator !== 'undefined' && !navigator.onLine) || 
-      syncManager.network.state === 'offline' ||
-      (typeof window !== 'undefined' && (window as any).TrackBookBridge?.isNetworkAvailable?.() === false);
+    // If device is strictly offline (no browser connection), retain existing cached books
+    const isDeviceOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
     if (isDeviceOffline) {
       console.log('[fetchData] Device is offline. Retaining local cached cashbooks and pending entries.');
@@ -4860,74 +4717,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           };
         });
 
-        // Load and merge pending offline cashbooks from IndexedDB (strictly if PENDING sync)
-        try {
-          const pendingBooks = await offlineDb.getPendingCashbooks();
-          if (pendingBooks && pendingBooks.length > 0) {
-            for (const pb of pendingBooks) {
-              if (pb && pb.id && pb.syncStatus === 'PENDING') {
-                const existingIdx = mappedBooks.findIndex(b => b.id === pb.id);
-                if (existingIdx === -1) {
-                  mappedBooks.unshift({
-                    id: pb.id,
-                    name: pb.name,
-                    user_id: pb.user_id || session.user.id,
-                    user_name: pb.user_name || 'User',
-                    createdAt: pb.created_at ? new Date(pb.created_at) : new Date(),
-                    transactions: entriesCache.get(pb.id) || [],
-                    is_offline: true,
-                    syncStatus: 'PENDING'
-                  });
-                } else {
-                  mappedBooks[existingIdx].is_offline = true;
-                  mappedBooks[existingIdx].syncStatus = 'PENDING';
-                }
-              }
-            }
-          }
-        } catch (pbMergeErr) {
-          console.warn('[Offline] Error merging pending offline cashbooks:', pbMergeErr);
-        }
-
-        // Load and merge pending offline entries from IndexedDB
-        try {
-          const pendingOfflineEntries = await offlineDb.getPendingEntries();
-          if (pendingOfflineEntries && pendingOfflineEntries.length > 0) {
-            mappedBooks.forEach(cb => {
-              const cbPending = pendingOfflineEntries.filter(e => e.cashbook_id === cb.id);
-              if (cbPending.length > 0) {
-                const existingIds = new Set(cb.transactions.map(t => t.id));
-                const pendingTxs: Transaction[] = cbPending
-                  .filter(e => !existingIds.has(e.id) && !existingIds.has(e.clientEntryId))
-                  .map(e => ({
-                    id: e.id,
-                    clientEntryId: e.clientEntryId || e.id,
-                    amount: e.amount,
-                    type: e.type,
-                    description: e.description,
-                    category: e.category,
-                    mode: e.mode,
-                    date: new Date(e.date),
-                    images: [],
-                    imageLayout: 'split',
-                    source: 'Manual',
-                    user_name: e.user_name,
-                    syncStatus: 'PENDING',
-                    is_offline: true,
-                    created_at: e.created_at
-                  }));
-
-                if (pendingTxs.length > 0) {
-                  cb.transactions = [...pendingTxs, ...cb.transactions];
-                  entriesCache.set(cb.id, cb.transactions);
-                }
-              }
-            });
-          }
-        } catch (offlineMergeErr) {
-          console.warn('[Offline] Error merging pending offline entries:', offlineMergeErr);
-        }
-
         // Authoritative server books (excluding any deleted ones)
         const deletedIds = getDeletedBookIds();
         const cleanServerBooks = mappedBooks.filter(b => b && b.id && !deletedIds.has(b.id));
@@ -4939,29 +4728,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           finalMap.set(b.id, b);
           existingNames.add(b.name.trim().toLowerCase());
         });
-
-        // 2. Only add offline books that are strictly PENDING sync and NOT deleted
-        try {
-          const pendingOffline = (offlineDb.getLocalCashbooks() || [])
-            .filter(pb => pb && pb.id && !deletedIds.has(pb.id) && pb.syncStatus === 'PENDING');
-
-          pendingOffline.forEach(pb => {
-            const normName = (pb.name || '').trim().toLowerCase();
-            if (!finalMap.has(pb.id) && !existingNames.has(normName)) {
-              finalMap.set(pb.id, {
-                id: pb.id,
-                name: pb.name,
-                user_id: pb.user_id || session.user.id,
-                user_name: pb.user_name || 'User',
-                createdAt: pb.created_at ? new Date(pb.created_at) : ((pb as any).createdAt ? new Date((pb as any).createdAt) : new Date()),
-                transactions: entriesCache.get(pb.id) || [],
-                is_offline: true,
-                syncStatus: 'PENDING'
-              });
-              existingNames.add(normName);
-            }
-          });
-        } catch (e) {}
 
         // 3. Preserve in-flight optimistic cashbooks so newly created cashbooks appear instantly with 0ms delay and never disappear
         const nowBooks = Date.now();
@@ -4998,7 +4764,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           if (session?.user?.id) {
             localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(finalMergedList));
             localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(finalMergedList));
-            offlineDb.saveCachedCashbooks(session.user.id, finalMergedList);
           }
           localStorage.removeItem('trackbook_cached_books');
         } catch (e) {}
@@ -5046,6 +4811,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   // Fetch data from Supabase init, on invitation accepted, and periodic background refresh
   useEffect(() => {
+    // Safely reconcile any pending unsynced offline records from IndexedDB/localStorage to Supabase
+    if (session?.user?.id && navigator.onLine) {
+      reconcileAndMigrateOfflineData(session)
+        .then((res) => {
+          if (res.migratedBooks > 0 || res.migratedEntries > 0) {
+            console.log(`[Dashboard] Reconciled and migrated ${res.migratedBooks} books and ${res.migratedEntries} entries to Supabase.`);
+            fetchData(true);
+          }
+        })
+        .catch((err) => console.warn('[Dashboard] Data reconciliation notice:', err));
+    }
+
     fetchData();
 
     const handleCashbookRefresh = () => {
@@ -5349,6 +5126,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         if (changed) {
           booksRef.current = nextBooks;
+          try {
+            if (session?.user?.id) {
+              localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(nextBooks));
+              localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(nextBooks));
+            }
+          } catch (_) {}
           return nextBooks;
         }
         return prev;
@@ -5804,153 +5587,127 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       setCreateBookError("A book with this name already exists. Please choose a different name.");
       return;
     }
-    
+
+    // Online-First architecture: internet required to create cashbooks
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setCreateBookError("Internet connection is required to create a cashbook.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setCreateBookError(null);
+
     const tempId = safeUUID();
     const bookName = newBookName.trim();
-    const now = new Date();
-    
-    const newBook: Cashbook = {
-      id: tempId,
-      name: bookName,
-      transactions: [],
-      createdAt: now,
+    const resolvedUserName = session.user.user_metadata?.full_name || 
+                             session.user.user_metadata?.name || 
+                             session.user.email?.split('@')[0] || 'User';
+
+    const payload: any = { 
+      id: tempId, 
+      name: bookName, 
+      created_at: new Date().toISOString(),
       user_id: session.user.id,
+      user_name: resolvedUserName
+    };
+
+    let savedBookRecord: any = null;
+    let createErrorDetail: any = null;
+
+    // 1. Direct Supabase insert
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('cashbooks')
+          .insert([payload])
+          .select()
+          .maybeSingle();
+
+        if (!error && data) {
+          savedBookRecord = data;
+        } else if (error) {
+          createErrorDetail = error;
+          if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
+            const fallbackPayload: any = {
+              id: payload.id,
+              name: payload.name,
+              created_at: payload.created_at,
+              user_id: payload.user_id
+            };
+            const { data: retryData, error: retryError } = await supabase
+              .from('cashbooks')
+              .insert([fallbackPayload])
+              .select()
+              .maybeSingle();
+            if (!retryError && retryData) {
+              savedBookRecord = retryData;
+              createErrorDetail = null;
+            }
+          }
+        }
+      } catch (err: any) {
+        createErrorDetail = err;
+      }
+    }
+
+    // 2. Server-side proxy fallback with service role
+    if (!savedBookRecord) {
+      try {
+        const res = await fetch('/api/sync/cashbook', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.success === true && json.cashbook) {
+            savedBookRecord = json.cashbook;
+            createErrorDetail = null;
+          }
+        }
+      } catch (apiErr: any) {
+        createErrorDetail = createErrorDetail || apiErr;
+      }
+    }
+
+    // If INSERT failed: DO NOT display as created! Show clear error.
+    if (!savedBookRecord) {
+      setIsSubmitting(false);
+      console.error('[CreateBook] Database insert failed:', createErrorDetail);
+      setCreateBookError("Unable to create cashbook. Please check your connection and try again.");
+      return;
+    }
+
+    // SUCCESS: Return actual Cashbook record -> Update UI
+    const finalBook: Cashbook = {
+      id: savedBookRecord.id || tempId,
+      name: savedBookRecord.name || bookName,
+      transactions: [],
+      createdAt: savedBookRecord.created_at ? new Date(savedBookRecord.created_at) : new Date(),
+      user_id: savedBookRecord.user_id || session.user.id,
       syncStatus: 'SYNCED',
       is_offline: false
     };
 
-    // Store in optimistic ref so background fetches do not wipe it
-    optimisticCashbooksRef.current.set(tempId, { book: newBook, timestamp: Date.now() });
-
-    // 1. Update UI state instantly: new Cashbook appears in the list immediately (0ms delay)
     setBooks(prev => {
-      const next = [newBook, ...prev.filter(b => b.id !== newBook.id)];
+      const next = [finalBook, ...prev.filter(b => b.id !== finalBook.id)];
       booksRef.current = next;
-      try {
-        if (session?.user?.id) {
-          localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
-          offlineDb.saveCachedCashbooks(session.user.id, next);
-        }
-      } catch (cacheErr) {
-        console.warn('[CreateBook] Cache save note:', cacheErr);
-      }
       return next;
     });
 
-    // 2. Close modal and reset input immediately
+    entriesCache.set(finalBook.id, []);
+
+    // Close modal and reset input only after verified persistence
     setNewBookName('');
     setCreateBookError(null);
     setIsCreatingBook(false);
     setIsSubmitting(false);
 
-    // 3. Highlight newly created cashbook in the list
-    setJustEditedBookId(tempId);
+    // Highlight newly created cashbook in the list
+    setJustEditedBookId(finalBook.id);
     setTimeout(() => {
       setJustEditedBookId(null);
     }, 2500);
-
-    // 4. Synchronize in the background silently without blocking the user
-    (async () => {
-      const resolvedUserName = session.user.user_metadata?.full_name || 
-                               session.user.user_metadata?.name || 
-                               session.user.email?.split('@')[0] || 'User';
-
-      const payload: any = { 
-        id: newBook.id, 
-        name: newBook.name, 
-        created_at: safeToISOString(newBook.createdAt),
-        user_id: session.user.id,
-        user_name: resolvedUserName,
-        user_email: session.user.email || undefined
-      };
-
-      const isOffline = typeof navigator !== 'undefined' && (!navigator.onLine || syncManager.network.state === 'offline');
-      if (isOffline) {
-        console.log('[CreateBook] Offline state detected. Book queued for background sync:', newBook.id);
-        await syncManager.saveOfflineCashbook(payload);
-        return;
-      }
-
-      let syncSuccess = false;
-
-      // Direct Supabase insert
-      if (supabase) {
-        try {
-          const { error } = await supabase
-            .from('cashbooks')
-            .insert([payload]);
-          if (!error) {
-            syncSuccess = true;
-            console.log('[CreateBook] Direct Supabase insert successful:', newBook.id);
-          } else {
-            if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
-              const fallbackPayload: any = {
-                id: payload.id,
-                name: payload.name,
-                created_at: payload.created_at,
-                user_id: payload.user_id
-              };
-              const { error: retryError } = await supabase
-                .from('cashbooks')
-                .insert([fallbackPayload]);
-              if (!retryError) {
-                syncSuccess = true;
-                console.log('[CreateBook] Direct Supabase insert (fallback columns) successful:', newBook.id);
-              }
-            } else {
-              console.warn('[CreateBook] Direct Supabase insert note, falling back to sync endpoint:', error.message);
-            }
-          }
-        } catch (err: any) {
-          console.warn('[CreateBook] Direct Supabase insert exception:', err?.message);
-        }
-      }
-
-      // Try backend sync endpoint if direct insert was not successful
-      if (!syncSuccess) {
-        try {
-          const res = await fetch('/api/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'cashbook', ...payload })
-          });
-          if (res.ok) {
-            const json = await res.json();
-            if (json && json.success === true) {
-              syncSuccess = true;
-              console.log('[CreateBook] Book created/synced successfully via backend endpoint:', newBook.id);
-            }
-          }
-        } catch (apiErr: any) {
-          console.warn('[CreateBook] Sync API error, saving to offline queue:', apiErr?.message);
-          await syncManager.saveOfflineCashbook(payload);
-        }
-      }
-
-      // If online and creation failed on both direct and backend endpoint, rollback gracefully
-      if (!syncSuccess) {
-        if (!navigator.onLine) {
-          await syncManager.saveOfflineCashbook(payload);
-        } else {
-          optimisticCashbooksRef.current.delete(tempId);
-          console.error('[CreateBook] Failed to persist cashbook remotely, rolling back optimistic entry:', tempId);
-          setBooks(prev => {
-            const next = prev.filter(b => b.id !== tempId);
-            booksRef.current = next;
-            try {
-              if (session?.user?.id) {
-                localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
-                offlineDb.saveCachedCashbooks(session.user.id, next);
-              }
-            } catch (_) {}
-            return next;
-          });
-          setError("Couldn't create the cashbook. Please try again.");
-        }
-      } else {
-        optimisticCashbooksRef.current.delete(tempId);
-      }
-    })();
   };
 
   const handleUpdateBook = async (e: React.FormEvent) => {
@@ -6054,18 +5811,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
             const fallbackPayload = { ...payload };
             delete fallbackPayload.user_name;
-            await supabase.from('cashbooks').insert([fallbackPayload]);
+            const { error: retryError } = await supabase.from('cashbooks').insert([fallbackPayload]);
+            if (!retryError) syncBookSuccess = true;
           }
+        } else {
+          syncBookSuccess = true;
         }
       } catch (err: any) {
-        const isNet = !navigator.onLine || err?.name === 'TypeError' || err?.message?.toLowerCase().includes('failed to fetch');
-        if (isNet) {
-          console.log('[DuplicateBook] Offline during duplication, queued book locally.');
-        } else {
-          console.warn('[DuplicateBook] Notice duplicating book in Supabase:', err?.message || err);
-        }
-        await syncManager.saveOfflineCashbook(payload);
+        console.warn('[DuplicateBook] Notice duplicating book in Supabase:', err?.message || err);
       }
+    }
+
+    if (!syncBookSuccess) {
+      setError("Unable to duplicate cashbook. Please check your internet connection and try again.");
+      return;
     }
     
     const sourceEntries = entriesCache.get(bookId) || bookToDup.transactions || [];
@@ -6111,7 +5870,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const next = [newBook, ...prev];
       if (session?.user?.id) {
         localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
-        offlineDb.saveCachedCashbooks(session.user.id, next);
       }
       return next;
     });
@@ -6380,165 +6138,123 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const currentDescription = description;
       const currentShowForm = showForm;
 
-      // 1. OPTIMISTIC UPDATE: Update UI state instantly
-      const updatedTx: Transaction = {
-        ...originalTx,
-        amount: amountNum,
-        type: currentShowForm as 'in' | 'out',
-        description: currentDescription,
-        category: currentCategory,
-        mode: currentMode,
-        date: dateObj,
-        images: currentSelectedImages,
-        imageLayout: currentImageLayout
-      };
+      // Online-first architecture check
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setError('Internet connection required to edit entries.');
+        setIsSubmitting(false);
+        return;
+      }
 
-      setBooks(prev => prev.map(b => b.id === activeBookId ? {
-        ...b,
-        transactions: b.transactions.map(t => t.id === originalTx.id ? updatedTx : t)
-      } : b));
+      setIsSubmitting(true);
+      setError(null);
 
-      const prevCached = entriesCache.get(activeBookId) || [];
-      entriesCache.set(activeBookId, prevCached.map(t => t.id === originalTx.id ? {
-        ...t,
-        amount: amountNum,
-        type: currentShowForm,
-        description: currentDescription,
-        category: currentCategory,
-        mode: currentMode,
-        date: dateObj,
-        image_layout: currentImageLayout
-      } : t));
+      try {
+        const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
 
-      attachmentCache.set(savedId, { images: currentSelectedImages, isAi: false });
+        // Upload any blob images in parallel
+        const uploadPromises = currentSelectedImages.map(async (img) => {
+          const hashIdx = img.indexOf('#');
+          const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
+          const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
 
-      // 2. CLOSE FORM IMMEDIATELY
-      setShowForm(null);
-      setEditingTransaction(null);
-      resetForm();
-      setIsSubmitting(false);
-      setProgressModal(null);
-
-      // Highlight the edited transaction in the list
-      setTimeout(() => {
-        setJustEditedTransactionId(savedId);
-        const element = document.getElementById(`entry-${savedId}`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-        setTimeout(() => {
-          setJustEditedTransactionId(null);
-        }, 2000);
-      }, 50);
-
-      // 3. PERSIST SILENTLY IN BACKGROUND
-      (async () => {
-        try {
-          const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
-
-          // Mark blob images as uploading
-          currentSelectedImages.forEach(img => {
-            if (img.startsWith('blob:')) {
-              setUploadStatuses(prev => ({ ...prev, [img]: { status: 'uploading' } }));
-            }
-          });
-
-          // Upload all images in parallel for maximum speed
-          const uploadPromises = currentSelectedImages.map(async (img) => {
-            const hashIdx = img.indexOf('#');
-            const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
-            const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
-
-            if (cleanImg.startsWith('blob:')) {
-              const file = imageFilesRef.current[cleanImg];
-              if (file) {
-                const isImage = file.type && file.type.startsWith('image/');
-                const processedFile = isImage ? await compressImage(file) : file;
-                const fileToUpload = processedFile instanceof File 
-                  ? processedFile 
-                  : new File([processedFile], file.name || 'image.jpg', { type: file.type });
-                const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
-                if (cloudUrl) {
-                  return { original: img, clean: cleanImg, final: cloudUrl + hash };
-                }
+          if (cleanImg.startsWith('blob:')) {
+            const file = imageFilesRef.current[cleanImg];
+            if (file) {
+              const isImage = file.type && file.type.startsWith('image/');
+              const processedFile = isImage ? await compressImage(file) : file;
+              const fileToUpload = processedFile instanceof File 
+                ? processedFile 
+                : new File([processedFile], file.name || 'image.jpg', { type: file.type });
+              const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
+              if (cloudUrl) {
+                return { original: img, clean: cleanImg, final: cloudUrl + hash };
               }
-              return { original: img, clean: cleanImg, final: img };
             }
             return { original: img, clean: cleanImg, final: img };
-          });
-
-          const uploadResults = await Promise.all(uploadPromises);
-          const finalImages = uploadResults.map(r => r.final);
-
-          // Mark upload statuses as success
-          setUploadStatuses(prev => {
-            const next = { ...prev };
-            uploadResults.forEach(r => {
-              next[r.original] = { status: 'success' };
-              next[r.final] = { status: 'success' };
-            });
-            return next;
-          });
-
-          // Update books state to replace blob URLs with Cloudinary URLs and persist to cache
-          setBooks(prev => {
-            const next = prev.map(b => b.id === activeBookId ? {
-              ...b,
-              transactions: b.transactions.map(t => t.id === savedId ? { ...t, images: finalImages } : t)
-            } : b);
-            booksRef.current = next;
-            try {
-              if (session?.user?.id) {
-                localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
-                localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(next));
-                offlineDb.saveCachedCashbooks(session.user.id, next);
-              }
-            } catch (_) {}
-            return next;
-          });
-
-          // Update entriesCache and attachmentCache
-          const prevCached = entriesCache.get(activeBookId);
-          if (prevCached) {
-            entriesCache.set(activeBookId, prevCached.map(t => t.id === savedId ? { ...t, images: finalImages } : t));
           }
-          attachmentCache.set(savedId, { images: finalImages, isAi: false });
-          persistAttachmentCacheToStorage();
+          return { original: img, clean: cleanImg, final: img };
+        });
 
-          // Clean up blob URLs from memory
-          uploadResults.forEach(r => {
-            if (r.clean.startsWith('blob:')) {
-              delete imageFilesRef.current[r.clean];
-              try { URL.revokeObjectURL(r.clean); } catch (_) {}
+        const uploadResults = await Promise.all(uploadPromises);
+        const finalImages = uploadResults.map(r => r.final);
+
+        // Clean up blob URLs from memory
+        uploadResults.forEach(r => {
+          if (r.clean.startsWith('blob:')) {
+            delete imageFilesRef.current[r.clean];
+            try { URL.revokeObjectURL(r.clean); } catch (_) {}
+          }
+        });
+
+        const resolvedUser = await resolveUserDataForAttachments();
+        const targetBook = books.find(b => b.id === activeBookId);
+        const payload: any = {
+          id: savedId,
+          cashbook_id: activeBookId,
+          user_id: session.user.id,
+          amount: amountNum,
+          type: (currentShowForm ? String(currentShowForm).toLowerCase() : 'in') === 'out' ? 'out' : 'in',
+          description: currentDescription,
+          category: currentCategory,
+          mode: currentMode,
+          date: safeToISOString(dateObj),
+          user_name: resolvedUser.name,
+          image_layout: currentImageLayout
+        };
+
+        const attachmentInserts = finalImages.map(url => ({
+          entry_id: savedId,
+          user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
+          user_name: resolvedUser.name,
+          user_email: resolvedUser.email,
+          file_url: url
+        }));
+
+        let editSaved = false;
+        let lastEditError: any = null;
+
+        // 1. Direct Supabase update
+        if (supabase) {
+          try {
+            const { error: updateErr } = await supabase
+              .from('entries')
+              .update(payload)
+              .eq('id', savedId);
+
+            if (!updateErr) {
+              await supabase.from('attachments').delete().eq('entry_id', savedId);
+              await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
+              if (attachmentInserts.length > 0) {
+                await supabase.from('attachments').insert(attachmentInserts);
+              }
+              editSaved = true;
+            } else {
+              lastEditError = updateErr;
+              if (updateErr.code === '42703' || updateErr.code === 'PGRST204' || updateErr.message?.toLowerCase().includes('column')) {
+                const fallbackPayload = { ...payload };
+                delete fallbackPayload.image_layout;
+                delete fallbackPayload.user_name;
+                const { error: retryUpdateErr } = await supabase
+                  .from('entries')
+                  .update(fallbackPayload)
+                  .eq('id', savedId);
+                if (!retryUpdateErr) {
+                  await supabase.from('attachments').delete().eq('entry_id', savedId);
+                  await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
+                  if (attachmentInserts.length > 0) {
+                    await supabase.from('attachments').insert(attachmentInserts);
+                  }
+                  editSaved = true;
+                }
+              }
             }
-          });
+          } catch (e: any) {
+            lastEditError = e;
+          }
+        }
 
-          const resolvedUser = await resolveUserDataForAttachments();
-          const payload: any = {
-            id: savedId,
-            cashbook_id: activeBookId,
-            user_id: session.user.id,
-            amount: amountNum,
-            type: currentShowForm,
-            description: currentDescription,
-            category: currentCategory,
-            mode: currentMode,
-            date: safeToISOString(dateObj),
-            user_name: resolvedUser.name,
-            image_layout: currentImageLayout
-          };
-
-          const attachmentInserts = finalImages.map(url => ({
-            entry_id: savedId,
-            user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
-            user_name: resolvedUser.name,
-            user_email: resolvedUser.email,
-            file_url: url
-          }));
-
-          let editSaved = false;
-
-          // 1. Primary Save via Server-side RBAC Endpoint (bypasses RLS with service_role)
+        // 2. Server-side proxy fallback with service role
+        if (!editSaved) {
           try {
             const rbacSaveRes = await fetch('/api/rbac/save-entry', {
               method: 'POST',
@@ -6556,145 +6272,46 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               const rbacSaveJson = await rbacSaveRes.json();
               if (rbacSaveJson.success) editSaved = true;
             }
-          } catch (_) {}
-
-          // 2. Direct Supabase Fallback if server endpoint was unreachable
-          if (!editSaved && supabase) {
-            let entryError: any = null;
-            const firstUpdate = await supabase
-              .from('entries')
-              .update({ ...payload, image_layout: currentImageLayout })
-              .eq('id', savedId);
-            entryError = firstUpdate.error;
-
-            if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-              const secondUpdate = await supabase.from('entries').update(payload).eq('id', savedId);
-              entryError = secondUpdate.error;
-            }
-
-            if (!entryError) {
-              await supabase.from('attachments').delete().eq('entry_id', savedId);
-              await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
-              if (attachmentInserts.length > 0) {
-                await supabase.from('attachments').insert(attachmentInserts);
-              }
-              editSaved = true;
-            }
-          }
-        } catch (bgErr: any) {
-          currentSelectedImages.forEach(img => {
-            setUploadStatuses(prev => ({
-              ...prev,
-              [img]: { status: 'failed', error: bgErr?.message || 'Upload failed' }
-            }));
-          });
-          const errDetail = typeof bgErr === 'object' ? JSON.stringify(bgErr) : String(bgErr || '');
-          const isNetworkFailure = (typeof navigator !== 'undefined' && !navigator.onLine) || 
-            syncManager.network.state === 'offline' ||
-            errDetail.toLowerCase().includes('failed to fetch') || 
-            errDetail.toLowerCase().includes('network');
-
-          if (isNetworkFailure) {
-            console.log('[Instant Edit] Network offline; edit retained locally in cache');
-          } else {
-            console.error('[Instant Edit] Background sync error:', bgErr);
-            setBooks(prev => prev.map(b => b.id === activeBookId ? {
-              ...b,
-              transactions: b.transactions.map(t => t.id === originalTx.id ? originalTx : t)
-            } : b));
-            entriesCache.set(activeBookId, prevCached);
-            setError(bgErr.message || 'Failed to update entry. Please check your connection.');
+          } catch (apiErr: any) {
+            lastEditError = lastEditError || apiErr;
           }
         }
 
-      })();
+        if (!editSaved) {
+          throw lastEditError || new Error('Failed to update entry in database.');
+        }
 
-    } else {
-      // Direct Creation Mode
-      const tempId = safeUUID();
-      const currentSelectedImages = [...selectedImages];
-      const currentImageLayout = imageLayout;
-      const currentCategory = finalCategory || 'General';
-      const currentMode = finalMode || 'Cash';
-      const currentDescription = description;
-      const currentShowForm = showForm;
-
-      // Check if user is offline
-      if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-        const offlineTx: Transaction = {
-          id: tempId,
-          clientEntryId: tempId,
+        // SUCCESS: Update UI state with real persisted record
+        const updatedTx: Transaction = {
+          ...originalTx,
           amount: amountNum,
           type: currentShowForm as 'in' | 'out',
           description: currentDescription,
           category: currentCategory,
           mode: currentMode,
           date: dateObj,
-          images: [],
-          imageLayout: currentImageLayout,
-          source: 'Manual',
-          user_name: resolvedName,
-          syncStatus: 'PENDING',
-          is_offline: true,
-          created_at: new Date().toISOString()
+          images: finalImages,
+          imageLayout: currentImageLayout
         };
 
         setBooks(prev => prev.map(b => b.id === activeBookId ? {
           ...b,
-          transactions: [offlineTx, ...b.transactions]
+          transactions: b.transactions.map(t => t.id === originalTx.id ? updatedTx : t)
         } : b));
 
-        const activeBook = books.find(b => b.id === activeBookId);
-        const resolvedUserId = session?.user?.id || 
-          activeBook?.userId || 
-          localStorage.getItem('trackbook_last_user_id') || 
-          '00000000-0000-0000-0000-000000000000';
-
         const prevCached = entriesCache.get(activeBookId) || [];
-        entriesCache.set(activeBookId, [{
-          id: tempId,
-          clientEntryId: tempId,
-          amount: amountNum,
-          type: currentShowForm,
-          description: currentDescription,
-          category: currentCategory,
-          mode: currentMode,
-          date: dateObj,
-          image_layout: currentImageLayout,
-          user_id: resolvedUserId,
-          cashbook_id: activeBookId,
-          syncStatus: 'PENDING',
-          is_offline: true
-        }, ...prevCached]);
-
-        syncManager.saveOfflineEntry({
-          id: tempId,
-          clientEntryId: tempId,
-          cashbook_id: activeBookId,
-          user_id: resolvedUserId,
-          user_name: resolvedName,
-          amount: amountNum,
-          type: currentShowForm as 'in' | 'out',
-          description: currentDescription,
-          category: currentCategory,
-          mode: currentMode,
-          date: dateObj.toISOString(),
-          created_at: new Date().toISOString(),
-          syncStatus: 'PENDING',
-          retryCount: 0,
-          source: 'Manual',
-          images: [],
-          is_offline: true
-        });
+        entriesCache.set(activeBookId, prevCached.map(t => t.id === originalTx.id ? updatedTx : t));
+        attachmentCache.set(savedId, { images: finalImages, isAi: false });
 
         setShowForm(null);
+        setEditingTransaction(null);
         resetForm();
         setIsSubmitting(false);
         setProgressModal(null);
 
         setTimeout(() => {
-          setJustEditedTransactionId(tempId);
-          const element = document.getElementById("entry-" + tempId);
+          setJustEditedTransactionId(savedId);
+          const element = document.getElementById(`entry-${savedId}`);
           if (element) {
             element.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
@@ -6703,181 +6320,142 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           }, 2000);
         }, 50);
 
+      } catch (err: any) {
+        console.error('[EditEntry] Database update failed:', err);
+        setError("Unable to update entry. Please check your connection and try again.");
+        setIsSubmitting(false);
+        setProgressModal(null);
+      }
+
+    } else {
+      // Direct Creation Mode (Strict Online-First Flow)
+      const currentSelectedImages = [...selectedImages];
+      const currentImageLayout = imageLayout;
+      const currentCategory = finalCategory || 'General';
+      const currentMode = finalMode || 'Cash';
+      const currentDescription = description;
+      const currentShowForm = showForm;
+
+      // Online-First: internet connection strictly required to save entries
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setError('Internet connection is required to save entries.');
+        setIsSubmitting(false);
+        setProgressModal(null);
         return;
       }
 
-      // 1. OPTIMISTIC UPDATE: Add transaction to UI state instantly (0ms delay)
-      const optimisticTx: Transaction = {
-        id: tempId,
-        clientEntryId: tempId,
-        amount: amountNum,
-        type: currentShowForm as 'in' | 'out',
-        description: currentDescription,
-        category: currentCategory,
-        mode: currentMode,
-        date: dateObj,
-        images: currentSelectedImages,
-        imageLayout: currentImageLayout,
-        source: 'Manual',
-        user_name: resolvedName,
-        syncStatus: 'SYNCED',
-        is_offline: false,
-        created_at: new Date().toISOString()
-      };
+      setIsSubmitting(true);
+      setError(null);
 
-      optimisticEntriesRef.current.set(tempId, {
-        entry: optimisticTx,
-        cashbookId: activeBookId,
-        timestamp: Date.now()
-      });
+      const tempId = safeUUID();
+      const resolvedUser = await resolveUserDataForAttachments();
+      const targetBook = books.find(b => b.id === activeBookId);
 
-      setBooks(prev => {
-        const next = prev.map(b => b.id === activeBookId ? {
-          ...b,
-          transactions: [optimisticTx, ...(b.transactions || []).filter(t => t.id !== tempId)]
-        } : b);
-        booksRef.current = next;
-        try {
-          if (session?.user?.id) {
-            localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
-            offlineDb.saveCachedCashbooks(session.user.id, next);
-          }
-        } catch (_) {}
-        return next;
-      });
+      try {
+        const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
 
-      const prevCached = entriesCache.get(activeBookId) || [];
-      entriesCache.set(activeBookId, [optimisticTx, ...prevCached.filter(t => t.id !== tempId)]);
+        // Upload any blob images in parallel
+        const uploadPromises = currentSelectedImages.map(async (img) => {
+          const hashIdx = img.indexOf('#');
+          const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
+          const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
 
-      attachmentCache.set(tempId, { images: currentSelectedImages, isAi: false });
-
-      // 2. CLOSE FORM IMMEDIATELY (0ms delay)
-      setShowForm(null);
-      resetForm();
-      setIsSubmitting(false);
-      setProgressModal(null);
-
-      // Scroll and highlight the new transaction immediately
-      setTimeout(() => {
-        setJustEditedTransactionId(tempId);
-        const element = document.getElementById(`entry-${tempId}`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-        setTimeout(() => {
-          setJustEditedTransactionId(null);
-        }, 2000);
-      }, 50);
-
-      // 3. PERSIST SILENTLY IN BACKGROUND
-      (async () => {
-        try {
-          const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
-
-          // Mark blob images as uploading
-          currentSelectedImages.forEach(img => {
-            if (img.startsWith('blob:')) {
-              setUploadStatuses(prev => ({ ...prev, [img]: { status: 'uploading' } }));
-            }
-          });
-
-          // Upload all images in parallel for maximum speed
-          const uploadPromises = currentSelectedImages.map(async (img) => {
-            const hashIdx = img.indexOf('#');
-            const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
-            const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
-
-            if (cleanImg.startsWith('blob:')) {
-              const file = imageFilesRef.current[cleanImg];
-              if (file) {
-                const isImage = file.type && file.type.startsWith('image/');
-                const processedFile = isImage ? await compressImage(file) : file;
-                const fileToUpload = processedFile instanceof File 
-                  ? processedFile 
-                  : new File([processedFile], file.name || 'image.jpg', { type: file.type });
-                const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
-                if (cloudUrl) {
-                  return { original: img, clean: cleanImg, final: cloudUrl + hash };
-                }
+          if (cleanImg.startsWith('blob:')) {
+            const file = imageFilesRef.current[cleanImg];
+            if (file) {
+              const isImage = file.type && file.type.startsWith('image/');
+              const processedFile = isImage ? await compressImage(file) : file;
+              const fileToUpload = processedFile instanceof File 
+                ? processedFile 
+                : new File([processedFile], file.name || 'image.jpg', { type: file.type });
+              const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
+              if (cloudUrl) {
+                return { original: img, clean: cleanImg, final: cloudUrl + hash };
               }
-              return { original: img, clean: cleanImg, final: img };
             }
             return { original: img, clean: cleanImg, final: img };
-          });
-
-          const uploadResults = await Promise.all(uploadPromises);
-          const finalImages = uploadResults.map(r => r.final);
-
-          // Mark upload statuses as success
-          setUploadStatuses(prev => {
-            const next = { ...prev };
-            uploadResults.forEach(r => {
-              next[r.original] = { status: 'success' };
-              next[r.final] = { status: 'success' };
-            });
-            return next;
-          });
-
-          // Update books state to replace blob URLs with Cloudinary URLs and persist to cache
-          setBooks(prev => {
-            const next = prev.map(b => b.id === activeBookId ? {
-              ...b,
-              transactions: b.transactions.map(t => t.id === tempId ? { ...t, images: finalImages } : t)
-            } : b);
-            booksRef.current = next;
-            try {
-              if (session?.user?.id) {
-                localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
-                localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(next));
-                offlineDb.saveCachedCashbooks(session.user.id, next);
-              }
-            } catch (_) {}
-            return next;
-          });
-
-          // Update entriesCache and attachmentCache
-          const prevCached = entriesCache.get(activeBookId);
-          if (prevCached) {
-            entriesCache.set(activeBookId, prevCached.map(t => t.id === tempId ? { ...t, images: finalImages } : t));
           }
-          attachmentCache.set(tempId, { images: finalImages, isAi: false });
-          persistAttachmentCacheToStorage();
+          return { original: img, clean: cleanImg, final: img };
+        });
 
-          // Clean up blob URLs from memory
-          uploadResults.forEach(r => {
-            if (r.clean.startsWith('blob:')) {
-              delete imageFilesRef.current[r.clean];
-              try { URL.revokeObjectURL(r.clean); } catch (_) {}
+        const uploadResults = await Promise.all(uploadPromises);
+        const finalImages = uploadResults.map(r => r.final);
+
+        // Clean up blob URLs from memory
+        uploadResults.forEach(r => {
+          if (r.clean.startsWith('blob:')) {
+            delete imageFilesRef.current[r.clean];
+            try { URL.revokeObjectURL(r.clean); } catch (_) {}
+          }
+        });
+
+        const payload: any = {
+          id: tempId,
+          cashbook_id: activeBookId,
+          user_id: session.user.id,
+          user_name: resolvedUser.name || resolvedName,
+          amount: amountNum,
+          type: (currentShowForm ? String(currentShowForm).toLowerCase() : 'in') === 'out' ? 'out' : 'in',
+          description: currentDescription,
+          category: currentCategory,
+          mode: currentMode,
+          date: safeToISOString(dateObj),
+          image_layout: currentImageLayout,
+          created_at: new Date().toISOString()
+        };
+
+        const attachmentInserts = finalImages.map(url => ({
+          entry_id: tempId,
+          user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
+          user_name: resolvedUser.name,
+          user_email: resolvedUser.email,
+          file_url: url
+        }));
+
+        let savedEntryRow: any = null;
+        let lastCreationError: any = null;
+
+        // 1. Direct Supabase INSERT
+        if (supabase) {
+          try {
+            const { data: dbEntry, error: insertErr } = await supabase
+              .from('entries')
+              .insert([payload])
+              .select()
+              .maybeSingle();
+
+            if (!insertErr && dbEntry) {
+              savedEntryRow = dbEntry;
+              if (attachmentInserts.length > 0) {
+                await supabase.from('attachments').insert(attachmentInserts);
+              }
+            } else if (insertErr) {
+              lastCreationError = insertErr;
+              if (insertErr.code === '42703' || insertErr.code === 'PGRST204' || insertErr.message?.toLowerCase().includes('column')) {
+                const fallbackPayload = { ...payload };
+                delete fallbackPayload.image_layout;
+                delete fallbackPayload.user_name;
+                const { data: retryEntry, error: retryErr } = await supabase
+                  .from('entries')
+                  .insert([fallbackPayload])
+                  .select()
+                  .maybeSingle();
+                if (!retryErr && retryEntry) {
+                  savedEntryRow = retryEntry;
+                  lastCreationError = null;
+                  if (attachmentInserts.length > 0) {
+                    await supabase.from('attachments').insert(attachmentInserts);
+                  }
+                }
+              }
             }
-          });
+          } catch (directEx: any) {
+            lastCreationError = directEx;
+          }
+        }
 
-          const resolvedUser = await resolveUserDataForAttachments();
-          const payload: any = {
-            id: tempId,
-            cashbook_id: activeBookId,
-            user_id: session.user.id,
-            user_name: resolvedUser.name,
-            amount: amountNum,
-            type: currentShowForm,
-            description: currentDescription,
-            category: currentCategory,
-            mode: currentMode,
-            date: safeToISOString(dateObj),
-            source: 'Manual'
-          };
-
-          const attachmentInserts = finalImages.map(url => ({
-            entry_id: tempId,
-            user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
-            user_name: resolvedUser.name,
-            user_email: resolvedUser.email,
-            file_url: url
-          }));
-
-          let creationSaved = false;
-          let lastCreationError: any = null;
-
-          // 1. Primary Save via Server-side RBAC Endpoint (service_role completely bypasses RLS)
+        // 2. Server-side RBAC / Service Role fallback
+        if (!savedEntryRow) {
           try {
             const rbacSaveRes = await fetch('/api/rbac/save-entry', {
               method: 'POST',
@@ -6891,8 +6469,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             });
             if (rbacSaveRes.ok) {
               const rbacSaveJson = await rbacSaveRes.json();
-              if (rbacSaveJson.success) {
-                creationSaved = true;
+              if (rbacSaveJson && rbacSaveJson.success && rbacSaveJson.entry) {
+                savedEntryRow = rbacSaveJson.entry;
+                lastCreationError = null;
               }
             } else {
               const errData = await rbacSaveRes.json().catch(() => null);
@@ -6901,135 +6480,65 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           } catch (netErr: any) {
             lastCreationError = netErr;
           }
-
-          // 2. Direct Supabase Fallback if server endpoint was unreachable
-          if (!creationSaved && supabase) {
-            let directErr: any = null;
-            const firstTry = await supabase
-              .from('entries')
-              .insert([{ ...payload, image_layout: currentImageLayout }]);
-            directErr = firstTry.error;
-
-            if (directErr && (directErr.code === '42703' || directErr.message?.toLowerCase().includes('column'))) {
-              const secondTry = await supabase.from('entries').insert([payload]);
-              directErr = secondTry.error;
-            }
-
-            if (!directErr) {
-              creationSaved = true;
-              if (attachmentInserts.length > 0) {
-                await supabase.from('attachments').insert(attachmentInserts);
-              }
-            } else {
-              lastCreationError = directErr;
-            }
-          }
-
-          // 3. Graceful handling if RLS or offline prevents direct save
-          if (!creationSaved) {
-            const isRlsViolation = lastCreationError?.code === '42501' || 
-              lastCreationError?.message?.toLowerCase().includes('row-level security') ||
-              lastCreationError?.message?.toLowerCase().includes('policy');
-            
-            if (isRlsViolation) {
-              console.warn('[Creation] RLS restriction detected on client, delegating to background sync');
-              syncManager.saveOfflineEntry({
-                id: tempId,
-                clientEntryId: tempId,
-                cashbook_id: activeBookId,
-                user_id: session.user.id,
-                user_name: resolvedUser.name,
-                amount: amountNum,
-                type: currentShowForm as 'in' | 'out',
-                description: currentDescription,
-                category: currentCategory,
-                mode: currentMode,
-                date: safeToISOString(dateObj),
-                created_at: new Date().toISOString(),
-                syncStatus: 'PENDING',
-                retryCount: 0,
-                source: 'Manual',
-                images: finalImages,
-                is_offline: true
-              });
-              creationSaved = true;
-            } else if (lastCreationError) {
-              throw lastCreationError;
-            }
-          }
-
-          // UI state and cache are already optimistically updated instantly.
-          optimisticEntriesRef.current.delete(tempId);
-        } catch (bgErr: any) {
-          currentSelectedImages.forEach(img => {
-            setUploadStatuses(prev => ({
-              ...prev,
-              [img]: { status: 'failed', error: bgErr?.message || 'Upload failed' }
-            }));
-          });
-          optimisticEntriesRef.current.delete(tempId);
-          const errStr = typeof bgErr === 'object' ? JSON.stringify(bgErr) : String(bgErr || '');
-          const isNetworkFailure = (typeof navigator !== 'undefined' && !navigator.onLine) || 
-            syncManager.network.state === 'offline' ||
-            bgErr?.message?.toLowerCase().includes('fetch') || 
-            bgErr?.details?.toLowerCase().includes('fetch') ||
-            bgErr?.message?.toLowerCase().includes('network') ||
-            errStr.toLowerCase().includes('failed to fetch') ||
-            errStr.toLowerCase().includes('network');
-
-          if (isNetworkFailure) {
-            console.log('[Instant Save] Connection drop/offline detected, queuing entry for background sync:', tempId);
-            const activeBook = books.find(b => b.id === activeBookId);
-            const resolvedUserId = session?.user?.id || 
-              activeBook?.user_id || 
-              activeBook?.userId || 
-              localStorage.getItem('trackbook_last_user_id') || 
-              '00000000-0000-0000-0000-000000000000';
-
-            syncManager.saveOfflineEntry({
-              id: tempId,
-              clientEntryId: tempId,
-              cashbook_id: activeBookId,
-              user_id: resolvedUserId,
-              user_name: resolvedName,
-              amount: amountNum,
-              type: currentShowForm as 'in' | 'out',
-              description: currentDescription,
-              category: currentCategory,
-              mode: currentMode,
-              date: dateObj.toISOString(),
-              created_at: new Date().toISOString(),
-              syncStatus: 'PENDING',
-              retryCount: 0,
-              source: 'Manual',
-              images: [],
-              is_offline: true
-            });
-            setBooks(prev => {
-              const next = prev.map(b => b.id === activeBookId ? {
-                ...b,
-                transactions: b.transactions.map(t => t.id === tempId ? { ...t, syncStatus: 'PENDING' as const, is_offline: true } : t)
-              } : b);
-              booksRef.current = next;
-              return next;
-            });
-            return;
-          }
-
-          console.error('[Instant Save] Background sync error:', bgErr);
-          setBooks(prev => {
-            const next = prev.map(b => b.id === activeBookId ? {
-              ...b,
-              transactions: b.transactions.filter(t => t.id !== tempId)
-            } : b);
-            booksRef.current = next;
-            return next;
-          });
-          entriesCache.set(activeBookId, prevCached);
-          setError(bgErr.message || 'Failed to save entry. Please check your connection.');
         }
 
-      })();
+        // If Supabase INSERT fails: DO NOT show successful saved state!
+        if (!savedEntryRow) {
+          throw lastCreationError || new Error('Failed to save entry to database.');
+        }
+
+        // SUCCESS: Received actual database row -> Update UI immediately
+        const finalTx: Transaction = {
+          id: savedEntryRow.id || tempId,
+          clientEntryId: savedEntryRow.id || tempId,
+          amount: Number(savedEntryRow.amount),
+          type: savedEntryRow.type as 'in' | 'out',
+          description: savedEntryRow.description || '',
+          category: savedEntryRow.category || 'General',
+          mode: savedEntryRow.mode || 'Cash',
+          date: new Date(savedEntryRow.date),
+          images: finalImages,
+          imageLayout: savedEntryRow.image_layout || currentImageLayout,
+          source: 'Manual',
+          user_name: savedEntryRow.user_name || resolvedName,
+          syncStatus: 'SYNCED',
+          is_offline: false,
+          created_at: savedEntryRow.created_at || new Date().toISOString()
+        };
+
+        setBooks(prev => prev.map(b => b.id === activeBookId ? {
+          ...b,
+          transactions: [finalTx, ...(b.transactions || []).filter(t => t.id !== tempId && t.id !== finalTx.id)]
+        } : b));
+
+        const prevCached = entriesCache.get(activeBookId) || [];
+        entriesCache.set(activeBookId, [finalTx, ...prevCached.filter(t => t.id !== tempId && t.id !== finalTx.id)]);
+        attachmentCache.set(finalTx.id, { images: finalImages, isAi: false });
+
+        // CLOSE FORM ONLY AFTER CONFIRMED DATABASE INSERT
+        setShowForm(null);
+        resetForm();
+        setIsSubmitting(false);
+        setProgressModal(null);
+
+        // Scroll and highlight the new transaction immediately
+        setTimeout(() => {
+          setJustEditedTransactionId(finalTx.id);
+          const element = document.getElementById(`entry-${finalTx.id}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          setTimeout(() => {
+            setJustEditedTransactionId(null);
+          }, 2000);
+        }, 50);
+
+      } catch (err: any) {
+        console.error('[CreateEntry] Database insert failed:', err);
+        setIsSubmitting(false);
+        setProgressModal(null);
+        setError("Unable to save entry. Please try again.");
+      }
     }
   };
 
@@ -7184,13 +6693,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         user_id: session.user.id,
         user_name: resolvedUser.name,
         amount: totalAmount,
-        type: mergeType,
+        type: (mergeType ? String(mergeType).toLowerCase() : 'out') === 'in' ? 'in' : 'out',
         description: mergeDescription || 'Merged Transactions',
         category: mergeCategory,
         mode: 'Online',
         date: safeToISOString(new Date()),
-        image_layout: 'merge',
-        bill_type: 'MERGE'
+        image_layout: 'merge'
       };
 
       let insertError: any = null;
@@ -7198,14 +6706,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       insertError = firstInsertError;
 
       if (insertError) {
-        if (insertError.code === '42703' || insertError.message?.toLowerCase().includes('column')) {
+        if (insertError.code === '42703' || insertError.code === 'PGRST204' || insertError.message?.toLowerCase().includes('column')) {
           const fallbackPayload = { ...payload };
           delete fallbackPayload.image_layout;
-          delete fallbackPayload.bill_type;
           const { error: retryError } = await supabase.from('entries').insert([fallbackPayload]);
           insertError = retryError;
 
-          if (insertError && (insertError.code === '42703' || insertError.message?.toLowerCase().includes('column'))) {
+          if (insertError && (insertError.code === '42703' || insertError.code === 'PGRST204' || insertError.message?.toLowerCase().includes('column'))) {
             const fallbackNoUser = { ...fallbackPayload };
             delete fallbackNoUser.user_name;
             const { error: retryError2 } = await supabase.from('entries').insert([fallbackNoUser]);
@@ -8780,12 +8287,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 cashbook_id: activeBookId,
                 user_id: session.user.id,
                 amount: result.amount,
-                type: result.type,
+                type: (result.type || 'out').toLowerCase() === 'in' ? 'in' : 'out',
                 description: result.description,
                 category: result.category,
                 mode: 'Online',
-                date: safeToISOString(parseAIDate(result.date)),
-                source: 'AI'
+                date: safeToISOString(parseAIDate(result.date))
               };
 
               // Save entry via RBAC server endpoint first (bypasses RLS)
@@ -8914,12 +8420,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         cashbook_id: activeBookId,
                         user_id: session.user.id,
                         amount: result.amount,
-                        type: result.type,
+                        type: (result.type || 'out').toLowerCase() === 'in' ? 'in' : 'out',
                         description: result.description,
                         category: result.category,
                         mode: 'Online',
-                        date: safeToISOString(parseAIDate(result.date)),
-                        source: 'AI'
+                        date: safeToISOString(parseAIDate(result.date))
                       };
 
                       // Save entry via RBAC server endpoint first (bypasses RLS)
@@ -9439,16 +8944,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
   };
 
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
   const handleSignOut = async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
     try {
-      localStorage.setItem('trackbook_explicit_logout', 'true');
-      clearSessionUnlocked();
-      localStorage.removeItem('trackbook_cached_books');
-      localStorage.removeItem('trackbook_avatar');
-    } catch (e) {}
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
+      vibrate(10);
+      setIsProfileOpen(false);
+    } catch {}
+    await executeAppLogout({ reason: 'user' });
   };
 
   if (isLoading && books.length === 0) {
@@ -9823,11 +9328,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </button>
 
                       <button 
+                        type="button"
                         onClick={handleSignOut}
-                        className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-900/20 text-rose-600 transition-all"
+                        disabled={isSigningOut}
+                        className={cn(
+                          "w-full flex items-center gap-3 p-3 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-900/20 text-rose-600 transition-all cursor-pointer font-medium select-none",
+                          isSigningOut && "opacity-60 cursor-wait pointer-events-none"
+                        )}
                       >
-                        <LogOut size={18} />
-                        <span className="font-medium flex-1 text-left">Logout</span>
+                        {isSigningOut ? (
+                          <Loader2 size={18} className="animate-spin text-rose-600 shrink-0" />
+                        ) : (
+                          <LogOut size={18} className="shrink-0" />
+                        )}
+                        <span className="flex-1 text-left">{isSigningOut ? "Logging out..." : "Logout"}</span>
                       </button>
 
                       {/* Version Display */}
@@ -16621,13 +16135,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           const bookId = book?.id;
                           if (bookId) {
                             removeDeletedBookId(bookId);
-                            syncManager.saveOfflineCashbook({
-                              id: book.id,
-                              name: book.name,
-                              user_id: book.user_id || session?.user?.id || 'offline-user',
-                              user_name: book.user_name || 'User',
-                              created_at: safeToISOString(book.createdAt)
-                            });
+                            if (supabase && session?.user?.id) {
+                              Promise.resolve(supabase.from('cashbooks').insert([{
+                                id: book.id,
+                                name: book.name,
+                                user_id: book.user_id || session.user.id,
+                                user_name: book.user_name || 'User',
+                                created_at: safeToISOString(book.createdAt)
+                              }])).catch(() => {});
+                            }
                           }
                           // Restore cashbook metadata
                           setBooks(prevBooks => {
@@ -16639,9 +16155,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           // Restore entries cache
                           if (undoAction.data.cachedEntries) {
                             entriesCache.set(bookId, undoAction.data.cachedEntries);
-                          }
-                          if (session && navigator.onLine) {
-                            syncManager.triggerSync();
                           }
 
                         } else if (undoAction.type === 'bulk_books') {
@@ -16658,13 +16171,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                               const bId = book?.id;
                               if (bId) {
                                 removeDeletedBookId(bId);
-                                syncManager.saveOfflineCashbook({
-                                  id: book.id,
-                                  name: book.name,
-                                  user_id: book.user_id || session?.user?.id || 'offline-user',
-                                  user_name: book.user_name || 'User',
-                                  created_at: safeToISOString(book.createdAt)
-                                });
+                                if (supabase && session?.user?.id) {
+                                  Promise.resolve(supabase.from('cashbooks').insert([{
+                                    id: book.id,
+                                    name: book.name,
+                                    user_id: book.user_id || session.user.id,
+                                    user_name: book.user_name || 'User',
+                                    created_at: safeToISOString(book.createdAt)
+                                  }])).catch(() => {});
+                                }
                               }
                               next.splice(pair.index, 0, pair.item.book);
                               if (pair.item.cachedEntries) {
@@ -16673,9 +16188,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             });
                             return next;
                           });
-                          if (session && navigator.onLine) {
-                            syncManager.triggerSync();
-                          }
 
                         } else if (undoAction.type === 'transaction') {
                           // Put back in active book transactions

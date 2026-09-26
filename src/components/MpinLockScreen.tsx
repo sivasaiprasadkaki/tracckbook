@@ -7,7 +7,7 @@ import {
   getLockoutSecondsRemaining 
 } from '../services/mpinSecurityService';
 import { ForgotMpinModal } from './MpinModals';
-import { supabase } from '../lib/supabase';
+import { supabase, executeAppLogout } from '../lib/supabase';
 
 interface MpinLockScreenProps {
   userId: string;
@@ -134,11 +134,10 @@ export function MpinLockScreen({
   const handleSignOut = async () => {
     setIsLoggingOut(true);
     try {
-      await supabase.auth.signOut();
-      window.location.href = '/login';
+      await executeAppLogout({ reason: 'user' });
     } catch (err) {
       console.error('Sign out error:', err);
-      window.location.reload();
+      window.location.replace('/login');
     }
   };
 

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { cn, vibrate } from '../lib/utils';
 import { useAppVersion } from '../hooks/useAppVersion';
+import { executeAppLogout } from '../lib/supabase';
 
 export type SectionType = 
   | 'dashboard' 
@@ -310,7 +311,14 @@ export default function SaaSSidebar({
 
         {/* Sign out */}
         <button
-          onClick={onSignOut}
+          onClick={async () => {
+            vibrate(10);
+            if (onSignOut) {
+              await onSignOut();
+            } else {
+              await executeAppLogout({ reason: 'user' });
+            }
+          }}
           className={cn(
             "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer",
             isCollapsed && "justify-center"
