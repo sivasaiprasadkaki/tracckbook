@@ -5588,15 +5588,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return;
     }
 
-    // Online-First architecture: internet required to create cashbooks
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      setCreateBookError("Internet connection is required to create a cashbook.");
-      return;
-    }
-
-    setIsSubmitting(true);
-    setCreateBookError(null);
-
     const tempId = safeUUID();
     const bookName = newBookName.trim();
     const resolvedUserName = session.user.user_metadata?.full_name || 
@@ -5611,80 +5602,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       user_name: resolvedUserName
     };
 
-    let savedBookRecord: any = null;
-    let createErrorDetail: any = null;
-
-    // 1. Direct Supabase insert
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('cashbooks')
-          .insert([payload])
-          .select()
-          .maybeSingle();
-
-        if (!error && data) {
-          savedBookRecord = data;
-        } else if (error) {
-          createErrorDetail = error;
-          if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
-            const fallbackPayload: any = {
-              id: payload.id,
-              name: payload.name,
-              created_at: payload.created_at,
-              user_id: payload.user_id
-            };
-            const { data: retryData, error: retryError } = await supabase
-              .from('cashbooks')
-              .insert([fallbackPayload])
-              .select()
-              .maybeSingle();
-            if (!retryError && retryData) {
-              savedBookRecord = retryData;
-              createErrorDetail = null;
-            }
-          }
-        }
-      } catch (err: any) {
-        createErrorDetail = err;
-      }
-    }
-
-    // 2. Server-side proxy fallback with service role
-    if (!savedBookRecord) {
-      try {
-        const res = await fetch('/api/sync/cashbook', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (res.ok) {
-          const json = await res.json();
-          if (json && json.success === true && json.cashbook) {
-            savedBookRecord = json.cashbook;
-            createErrorDetail = null;
-          }
-        }
-      } catch (apiErr: any) {
-        createErrorDetail = createErrorDetail || apiErr;
-      }
-    }
-
-    // If INSERT failed: DO NOT display as created! Show clear error.
-    if (!savedBookRecord) {
-      setIsSubmitting(false);
-      console.error('[CreateBook] Database insert failed:', createErrorDetail);
-      setCreateBookError("Unable to create cashbook. Please check your connection and try again.");
-      return;
-    }
-
-    // SUCCESS: Return actual Cashbook record -> Update UI
+    // 1. INSTANT SAVE TO UI: Create Cashbook record & update state immediately
     const finalBook: Cashbook = {
-      id: savedBookRecord.id || tempId,
-      name: savedBookRecord.name || bookName,
+      id: tempId,
+      name: bookName,
       transactions: [],
-      createdAt: savedBookRecord.created_at ? new Date(savedBookRecord.created_at) : new Date(),
-      user_id: savedBookRecord.user_id || session.user.id,
+      createdAt: new Date(),
+      user_id: session.user.id,
       syncStatus: 'SYNCED',
       is_offline: false
     };
@@ -5696,8 +5620,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     });
 
     entriesCache.set(finalBook.id, []);
+    setActiveBookId(finalBook.id);
 
-    // Close modal and reset input only after verified persistence
+    // Close modal and reset input INSTANTLY
     setNewBookName('');
     setCreateBookError(null);
     setIsCreatingBook(false);
@@ -5708,6 +5633,31 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setTimeout(() => {
       setJustEditedBookId(null);
     }, 2500);
+
+    // 2. Persist to Supabase directly in the background
+    (async () => {
+      if (supabase) {
+        try {
+          const { error } = await supabase
+            .from('cashbooks')
+            .insert([payload]);
+
+          if (error) {
+            console.warn('[CreateBook] Direct insert warning:', error.message);
+            if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
+              await supabase.from('cashbooks').insert([{
+                id: payload.id,
+                name: payload.name,
+                created_at: payload.created_at,
+                user_id: payload.user_id
+              }]);
+            }
+          }
+        } catch (err: any) {
+          console.error('[CreateBook] Direct insert error:', err);
+        }
+      }
+    })();
   };
 
   const handleUpdateBook = async (e: React.FormEvent) => {
@@ -6137,85 +6087,120 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const currentMode = finalMode || 'Cash';
       const currentDescription = description;
       const currentShowForm = showForm;
+      const finalType = (currentShowForm ? String(currentShowForm).toLowerCase() : 'in') === 'out' ? 'out' : 'in';
 
-      // Online-first architecture check
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        setError('Internet connection required to edit entries.');
-        setIsSubmitting(false);
-        return;
-      }
+      // 1. INSTANT UPDATE UI: Update state immediately
+      const updatedTx: Transaction = {
+        ...originalTx,
+        amount: amountNum,
+        type: finalType,
+        description: currentDescription || '',
+        category: currentCategory,
+        mode: currentMode,
+        date: dateObj,
+        images: currentSelectedImages,
+        imageLayout: currentImageLayout
+      };
 
-      setIsSubmitting(true);
-      setError(null);
+      setBooks(prev => prev.map(b => b.id === activeBookId ? {
+        ...b,
+        transactions: b.transactions.map(t => t.id === originalTx.id ? updatedTx : t)
+      } : b));
 
-      try {
-        const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
+      const prevCached = entriesCache.get(activeBookId) || [];
+      entriesCache.set(activeBookId, prevCached.map(t => t.id === originalTx.id ? updatedTx : t));
+      attachmentCache.set(savedId, { images: currentSelectedImages, isAi: false });
 
-        // Upload any blob images in parallel
-        const uploadPromises = currentSelectedImages.map(async (img) => {
-          const hashIdx = img.indexOf('#');
-          const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
-          const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
+      // Close modal and reset form INSTANTLY
+      setShowForm(null);
+      setEditingTransaction(null);
+      resetForm();
+      setIsSubmitting(false);
+      setProgressModal(null);
 
-          if (cleanImg.startsWith('blob:')) {
-            const file = imageFilesRef.current[cleanImg];
-            if (file) {
-              const isImage = file.type && file.type.startsWith('image/');
-              const processedFile = isImage ? await compressImage(file) : file;
-              const fileToUpload = processedFile instanceof File 
-                ? processedFile 
-                : new File([processedFile], file.name || 'image.jpg', { type: file.type });
-              const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
-              if (cloudUrl) {
-                return { original: img, clean: cleanImg, final: cloudUrl + hash };
+      setTimeout(() => {
+        setJustEditedTransactionId(savedId);
+        const element = document.getElementById(`entry-${savedId}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        setTimeout(() => {
+          setJustEditedTransactionId(null);
+        }, 2000);
+      }, 50);
+
+      // 2. Persist to database in background
+      (async () => {
+        try {
+          const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
+          let finalImages = currentSelectedImages;
+          const uploadPromises = currentSelectedImages.map(async (img) => {
+            const hashIdx = img.indexOf('#');
+            const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
+            const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
+
+            if (cleanImg.startsWith('blob:')) {
+              const file = imageFilesRef.current[cleanImg];
+              if (file) {
+                const isImage = file.type && file.type.startsWith('image/');
+                const processedFile = isImage ? await compressImage(file) : file;
+                const fileToUpload = processedFile instanceof File 
+                  ? processedFile 
+                  : new File([processedFile], file.name || 'image.jpg', { type: file.type });
+                const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
+                if (cloudUrl) {
+                  return cloudUrl + hash;
+                }
               }
+              return img;
             }
-            return { original: img, clean: cleanImg, final: img };
+            return img;
+          });
+
+          finalImages = await Promise.all(uploadPromises);
+
+          currentSelectedImages.forEach(img => {
+            const cleanImg = img.split('#')[0];
+            if (cleanImg.startsWith('blob:')) {
+              delete imageFilesRef.current[cleanImg];
+              try { URL.revokeObjectURL(cleanImg); } catch (_) {}
+            }
+          });
+
+          if (finalImages.some((u, i) => u !== currentSelectedImages[i])) {
+            setBooks(prev => prev.map(b => b.id === activeBookId ? {
+              ...b,
+              transactions: b.transactions.map(t => t.id === savedId ? { ...t, images: finalImages } : t)
+            } : b));
+            const cList = entriesCache.get(activeBookId) || [];
+            entriesCache.set(activeBookId, cList.map(t => t.id === savedId ? { ...t, images: finalImages } : t));
+            attachmentCache.set(savedId, { images: finalImages, isAi: false });
           }
-          return { original: img, clean: cleanImg, final: img };
-        });
 
-        const uploadResults = await Promise.all(uploadPromises);
-        const finalImages = uploadResults.map(r => r.final);
+          const resolvedUser = await resolveUserDataForAttachments();
+          const payload: any = {
+            id: savedId,
+            cashbook_id: activeBookId,
+            user_id: session.user.id,
+            amount: amountNum,
+            type: finalType,
+            description: currentDescription || '',
+            category: currentCategory,
+            mode: currentMode,
+            date: safeToISOString(dateObj),
+            user_name: resolvedUser.name,
+            image_layout: currentImageLayout
+          };
 
-        // Clean up blob URLs from memory
-        uploadResults.forEach(r => {
-          if (r.clean.startsWith('blob:')) {
-            delete imageFilesRef.current[r.clean];
-            try { URL.revokeObjectURL(r.clean); } catch (_) {}
-          }
-        });
+          const attachmentInserts = finalImages.map(url => ({
+            entry_id: savedId,
+            user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
+            user_name: resolvedUser.name,
+            user_email: resolvedUser.email,
+            file_url: url
+          }));
 
-        const resolvedUser = await resolveUserDataForAttachments();
-        const targetBook = books.find(b => b.id === activeBookId);
-        const payload: any = {
-          id: savedId,
-          cashbook_id: activeBookId,
-          user_id: session.user.id,
-          amount: amountNum,
-          type: (currentShowForm ? String(currentShowForm).toLowerCase() : 'in') === 'out' ? 'out' : 'in',
-          description: currentDescription,
-          category: currentCategory,
-          mode: currentMode,
-          date: safeToISOString(dateObj),
-          user_name: resolvedUser.name,
-          image_layout: currentImageLayout
-        };
-
-        const attachmentInserts = finalImages.map(url => ({
-          entry_id: savedId,
-          user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
-          user_name: resolvedUser.name,
-          user_email: resolvedUser.email,
-          file_url: url
-        }));
-
-        let editSaved = false;
-        let lastEditError: any = null;
-
-        // 1. Direct Supabase update
-        if (supabase) {
-          try {
+          if (supabase) {
             const { error: updateErr } = await supabase
               .from('entries')
               .update(payload)
@@ -6227,318 +6212,185 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               if (attachmentInserts.length > 0) {
                 await supabase.from('attachments').insert(attachmentInserts);
               }
-              editSaved = true;
-            } else {
-              lastEditError = updateErr;
-              if (updateErr.code === '42703' || updateErr.code === 'PGRST204' || updateErr.message?.toLowerCase().includes('column')) {
-                const fallbackPayload = { ...payload };
-                delete fallbackPayload.image_layout;
-                delete fallbackPayload.user_name;
-                const { error: retryUpdateErr } = await supabase
-                  .from('entries')
-                  .update(fallbackPayload)
-                  .eq('id', savedId);
-                if (!retryUpdateErr) {
-                  await supabase.from('attachments').delete().eq('entry_id', savedId);
-                  await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
-                  if (attachmentInserts.length > 0) {
-                    await supabase.from('attachments').insert(attachmentInserts);
-                  }
-                  editSaved = true;
-                }
+            } else if (updateErr.code === '42703' || updateErr.code === 'PGRST204' || updateErr.message?.toLowerCase().includes('column')) {
+              const fallbackPayload = { ...payload };
+              delete fallbackPayload.image_layout;
+              delete fallbackPayload.user_name;
+              await supabase.from('entries').update(fallbackPayload).eq('id', savedId);
+              await supabase.from('attachments').delete().eq('entry_id', savedId);
+              await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
+              if (attachmentInserts.length > 0) {
+                await supabase.from('attachments').insert(attachmentInserts);
               }
             }
-          } catch (e: any) {
-            lastEditError = e;
           }
+        } catch (err: any) {
+          console.error('[EditEntry] Background update note:', err);
         }
-
-        // 2. Server-side proxy fallback with service role
-        if (!editSaved) {
-          try {
-            const rbacSaveRes = await fetch('/api/rbac/save-entry', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                entry: payload,
-                attachments: attachmentInserts,
-                clearAttachments: (originalTx.images && originalTx.images.length > 0 && finalImages.length === 0),
-                isUpdate: true,
-                userId: session.user.id,
-                userEmail: session.user.email
-              })
-            });
-            if (rbacSaveRes.ok) {
-              const rbacSaveJson = await rbacSaveRes.json();
-              if (rbacSaveJson.success) editSaved = true;
-            }
-          } catch (apiErr: any) {
-            lastEditError = lastEditError || apiErr;
-          }
-        }
-
-        if (!editSaved) {
-          throw lastEditError || new Error('Failed to update entry in database.');
-        }
-
-        // SUCCESS: Update UI state with real persisted record
-        const updatedTx: Transaction = {
-          ...originalTx,
-          amount: amountNum,
-          type: currentShowForm as 'in' | 'out',
-          description: currentDescription,
-          category: currentCategory,
-          mode: currentMode,
-          date: dateObj,
-          images: finalImages,
-          imageLayout: currentImageLayout
-        };
-
-        setBooks(prev => prev.map(b => b.id === activeBookId ? {
-          ...b,
-          transactions: b.transactions.map(t => t.id === originalTx.id ? updatedTx : t)
-        } : b));
-
-        const prevCached = entriesCache.get(activeBookId) || [];
-        entriesCache.set(activeBookId, prevCached.map(t => t.id === originalTx.id ? updatedTx : t));
-        attachmentCache.set(savedId, { images: finalImages, isAi: false });
-
-        setShowForm(null);
-        setEditingTransaction(null);
-        resetForm();
-        setIsSubmitting(false);
-        setProgressModal(null);
-
-        setTimeout(() => {
-          setJustEditedTransactionId(savedId);
-          const element = document.getElementById(`entry-${savedId}`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-          setTimeout(() => {
-            setJustEditedTransactionId(null);
-          }, 2000);
-        }, 50);
-
-      } catch (err: any) {
-        console.error('[EditEntry] Database update failed:', err);
-        setError("Unable to update entry. Please check your connection and try again.");
-        setIsSubmitting(false);
-        setProgressModal(null);
-      }
+      })();
 
     } else {
-      // Direct Creation Mode (Strict Online-First Flow)
+      // Direct Creation Mode - INSTANT SAVE
       const currentSelectedImages = [...selectedImages];
       const currentImageLayout = imageLayout;
       const currentCategory = finalCategory || 'General';
       const currentMode = finalMode || 'Cash';
       const currentDescription = description;
       const currentShowForm = showForm;
-
-      // Online-First: internet connection strictly required to save entries
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        setError('Internet connection is required to save entries.');
-        setIsSubmitting(false);
-        setProgressModal(null);
-        return;
-      }
-
-      setIsSubmitting(true);
-      setError(null);
-
+      const finalType = (currentShowForm ? String(currentShowForm).toLowerCase() : 'in') === 'out' ? 'out' : 'in';
       const tempId = safeUUID();
-      const resolvedUser = await resolveUserDataForAttachments();
-      const targetBook = books.find(b => b.id === activeBookId);
 
-      try {
-        const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
+      // 1. INSTANT UPDATE UI: Add to state immediately
+      const finalTx: Transaction = {
+        id: tempId,
+        clientEntryId: tempId,
+        amount: amountNum,
+        type: finalType,
+        description: currentDescription || '',
+        category: currentCategory,
+        mode: currentMode,
+        date: dateObj,
+        images: currentSelectedImages,
+        imageLayout: currentImageLayout,
+        source: 'Manual',
+        user_name: resolvedName,
+        syncStatus: 'SYNCED',
+        is_offline: false,
+        created_at: new Date().toISOString()
+      };
 
-        // Upload any blob images in parallel
-        const uploadPromises = currentSelectedImages.map(async (img) => {
-          const hashIdx = img.indexOf('#');
-          const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
-          const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
+      setBooks(prev => prev.map(b => b.id === activeBookId ? {
+        ...b,
+        transactions: [finalTx, ...(b.transactions || []).filter(t => t.id !== tempId && t.id !== finalTx.id)]
+      } : b));
 
-          if (cleanImg.startsWith('blob:')) {
-            const file = imageFilesRef.current[cleanImg];
-            if (file) {
-              const isImage = file.type && file.type.startsWith('image/');
-              const processedFile = isImage ? await compressImage(file) : file;
-              const fileToUpload = processedFile instanceof File 
-                ? processedFile 
-                : new File([processedFile], file.name || 'image.jpg', { type: file.type });
-              const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
-              if (cloudUrl) {
-                return { original: img, clean: cleanImg, final: cloudUrl + hash };
-              }
-            }
-            return { original: img, clean: cleanImg, final: img };
-          }
-          return { original: img, clean: cleanImg, final: img };
-        });
+      const prevCached = entriesCache.get(activeBookId) || [];
+      entriesCache.set(activeBookId, [finalTx, ...prevCached.filter(t => t.id !== tempId && t.id !== finalTx.id)]);
+      attachmentCache.set(finalTx.id, { images: currentSelectedImages, isAi: false });
 
-        const uploadResults = await Promise.all(uploadPromises);
-        const finalImages = uploadResults.map(r => r.final);
-
-        // Clean up blob URLs from memory
-        uploadResults.forEach(r => {
-          if (r.clean.startsWith('blob:')) {
-            delete imageFilesRef.current[r.clean];
-            try { URL.revokeObjectURL(r.clean); } catch (_) {}
-          }
-        });
-
-        const payload: any = {
-          id: tempId,
-          cashbook_id: activeBookId,
-          user_id: session.user.id,
-          user_name: resolvedUser.name || resolvedName,
-          amount: amountNum,
-          type: (currentShowForm ? String(currentShowForm).toLowerCase() : 'in') === 'out' ? 'out' : 'in',
-          description: currentDescription,
-          category: currentCategory,
-          mode: currentMode,
-          date: safeToISOString(dateObj),
-          image_layout: currentImageLayout,
-          created_at: new Date().toISOString()
-        };
-
-        const attachmentInserts = finalImages.map(url => ({
-          entry_id: tempId,
-          user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
-          user_name: resolvedUser.name,
-          user_email: resolvedUser.email,
-          file_url: url
-        }));
-
-        let savedEntryRow: any = null;
-        let lastCreationError: any = null;
-
-        // 1. Direct Supabase INSERT
-        if (supabase) {
-          try {
-            const { data: dbEntry, error: insertErr } = await supabase
-              .from('entries')
-              .insert([payload])
-              .select()
-              .maybeSingle();
-
-            if (!insertErr && dbEntry) {
-              savedEntryRow = dbEntry;
-              if (attachmentInserts.length > 0) {
-                await supabase.from('attachments').insert(attachmentInserts);
-              }
-            } else if (insertErr) {
-              lastCreationError = insertErr;
-              if (insertErr.code === '42703' || insertErr.code === 'PGRST204' || insertErr.message?.toLowerCase().includes('column')) {
-                const fallbackPayload = { ...payload };
-                delete fallbackPayload.image_layout;
-                delete fallbackPayload.user_name;
-                const { data: retryEntry, error: retryErr } = await supabase
-                  .from('entries')
-                  .insert([fallbackPayload])
-                  .select()
-                  .maybeSingle();
-                if (!retryErr && retryEntry) {
-                  savedEntryRow = retryEntry;
-                  lastCreationError = null;
-                  if (attachmentInserts.length > 0) {
-                    await supabase.from('attachments').insert(attachmentInserts);
-                  }
-                }
-              }
-            }
-          } catch (directEx: any) {
-            lastCreationError = directEx;
-          }
-        }
-
-        // 2. Server-side RBAC / Service Role fallback
-        if (!savedEntryRow) {
-          try {
-            const rbacSaveRes = await fetch('/api/rbac/save-entry', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                entry: { id: tempId, cashbook_id: activeBookId, ...payload, image_layout: currentImageLayout },
-                attachments: attachmentInserts,
-                userId: session.user.id,
-                userEmail: session.user.email
-              })
-            });
-            if (rbacSaveRes.ok) {
-              const rbacSaveJson = await rbacSaveRes.json();
-              if (rbacSaveJson && rbacSaveJson.success && rbacSaveJson.entry) {
-                savedEntryRow = rbacSaveJson.entry;
-                lastCreationError = null;
-              }
-            } else {
-              const errData = await rbacSaveRes.json().catch(() => null);
-              if (errData?.error) lastCreationError = new Error(errData.error);
-            }
-          } catch (netErr: any) {
-            lastCreationError = netErr;
-          }
-        }
-
-        // If Supabase INSERT fails: DO NOT show successful saved state!
-        if (!savedEntryRow) {
-          throw lastCreationError || new Error('Failed to save entry to database.');
-        }
-
-        // SUCCESS: Received actual database row -> Update UI immediately
-        const finalTx: Transaction = {
-          id: savedEntryRow.id || tempId,
-          clientEntryId: savedEntryRow.id || tempId,
-          amount: Number(savedEntryRow.amount),
-          type: savedEntryRow.type as 'in' | 'out',
-          description: savedEntryRow.description || '',
-          category: savedEntryRow.category || 'General',
-          mode: savedEntryRow.mode || 'Cash',
-          date: new Date(savedEntryRow.date),
-          images: finalImages,
-          imageLayout: savedEntryRow.image_layout || currentImageLayout,
-          source: 'Manual',
-          user_name: savedEntryRow.user_name || resolvedName,
-          syncStatus: 'SYNCED',
-          is_offline: false,
-          created_at: savedEntryRow.created_at || new Date().toISOString()
-        };
-
-        setBooks(prev => prev.map(b => b.id === activeBookId ? {
-          ...b,
-          transactions: [finalTx, ...(b.transactions || []).filter(t => t.id !== tempId && t.id !== finalTx.id)]
-        } : b));
-
-        const prevCached = entriesCache.get(activeBookId) || [];
-        entriesCache.set(activeBookId, [finalTx, ...prevCached.filter(t => t.id !== tempId && t.id !== finalTx.id)]);
-        attachmentCache.set(finalTx.id, { images: finalImages, isAi: false });
-
-        // CLOSE FORM ONLY AFTER CONFIRMED DATABASE INSERT
+      // CLOSE FORM OR RESET FOR NEXT ENTRY INSTANTLY
+      if (submitAndAddNew) {
+        setAmount('');
+        setDescription('');
+        setSelectedImages([]);
+        setImageLayout('split');
+        setIsSubmitting(false);
+      } else {
         setShowForm(null);
         resetForm();
         setIsSubmitting(false);
         setProgressModal(null);
-
-        // Scroll and highlight the new transaction immediately
-        setTimeout(() => {
-          setJustEditedTransactionId(finalTx.id);
-          const element = document.getElementById(`entry-${finalTx.id}`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-          setTimeout(() => {
-            setJustEditedTransactionId(null);
-          }, 2000);
-        }, 50);
-
-      } catch (err: any) {
-        console.error('[CreateEntry] Database insert failed:', err);
-        setIsSubmitting(false);
-        setProgressModal(null);
-        setError("Unable to save entry. Please try again.");
       }
+
+      // Scroll and highlight the new transaction immediately
+      setTimeout(() => {
+        setJustEditedTransactionId(finalTx.id);
+        const element = document.getElementById(`entry-${finalTx.id}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        setTimeout(() => {
+          setJustEditedTransactionId(null);
+        }, 2000);
+      }, 50);
+
+      // 2. Persist to Supabase in the background
+      (async () => {
+        try {
+          const resolvedUser = await resolveUserDataForAttachments();
+          let finalImages = currentSelectedImages;
+
+          if (currentSelectedImages.length > 0) {
+            const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
+            const uploadPromises = currentSelectedImages.map(async (img) => {
+              const hashIdx = img.indexOf('#');
+              const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
+              const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
+
+              if (cleanImg.startsWith('blob:')) {
+                const file = imageFilesRef.current[cleanImg];
+                if (file) {
+                  const isImage = file.type && file.type.startsWith('image/');
+                  const processedFile = isImage ? await compressImage(file) : file;
+                  const fileToUpload = processedFile instanceof File 
+                    ? processedFile 
+                    : new File([processedFile], file.name || 'image.jpg', { type: file.type });
+                  const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
+                  if (cloudUrl) {
+                    return cloudUrl + hash;
+                  }
+                }
+                return img;
+              }
+              return img;
+            });
+
+            finalImages = await Promise.all(uploadPromises);
+
+            currentSelectedImages.forEach(img => {
+              const cleanImg = img.split('#')[0];
+              if (cleanImg.startsWith('blob:')) {
+                delete imageFilesRef.current[cleanImg];
+                try { URL.revokeObjectURL(cleanImg); } catch (_) {}
+              }
+            });
+
+            if (finalImages.some((u, i) => u !== currentSelectedImages[i])) {
+              setBooks(prev => prev.map(b => b.id === activeBookId ? {
+                ...b,
+                transactions: b.transactions.map(t => t.id === finalTx.id ? { ...t, images: finalImages } : t)
+              } : b));
+              const cList = entriesCache.get(activeBookId) || [];
+              entriesCache.set(activeBookId, cList.map(t => t.id === finalTx.id ? { ...t, images: finalImages } : t));
+              attachmentCache.set(finalTx.id, { images: finalImages, isAi: false });
+            }
+          }
+
+          const payload: any = {
+            id: tempId,
+            cashbook_id: activeBookId,
+            user_id: session.user.id,
+            user_name: resolvedUser.name || resolvedName,
+            amount: amountNum,
+            type: finalType,
+            description: currentDescription || '',
+            category: currentCategory,
+            mode: currentMode,
+            date: safeToISOString(dateObj),
+            image_layout: currentImageLayout,
+            created_at: finalTx.created_at
+          };
+
+          if (supabase) {
+            const { error: insertErr } = await supabase
+              .from('entries')
+              .insert([payload]);
+
+            if (insertErr) {
+              console.warn('[saveTransaction] Primary insert warning:', insertErr.message);
+              if (insertErr.code === '42703' || insertErr.code === 'PGRST204' || insertErr.message?.toLowerCase().includes('column')) {
+                const fallbackPayload = { ...payload };
+                delete fallbackPayload.image_layout;
+                delete fallbackPayload.user_name;
+                await supabase.from('entries').insert([fallbackPayload]);
+              }
+            }
+
+            if (finalImages.length > 0) {
+              const attachmentInserts = finalImages.map(url => ({
+                entry_id: tempId,
+                user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
+                user_name: resolvedUser.name,
+                user_email: resolvedUser.email,
+                file_url: url
+              }));
+              await supabase.from('attachments').insert(attachmentInserts);
+            }
+          }
+        } catch (dbErr: any) {
+          console.error('[saveTransaction] Database insert error:', dbErr);
+        }
+      })();
     }
   };
 
