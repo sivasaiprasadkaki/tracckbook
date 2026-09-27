@@ -272,8 +272,10 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({ theme = 'light
               </span>
             )}
           </div>
-          {/* Online/Offline text ONLY on desktop view */}
-          <span className="hidden sm:inline truncate text-red-600 dark:text-red-400 font-bold">Offline</span>
+          <span className="inline-flex items-center gap-1 truncate text-red-600 dark:text-red-400 font-bold">
+            <span className="text-[10px]">🔴</span>
+            <span className="hidden sm:inline">Offline</span>
+          </span>
         </button>
         {renderDetailPopover()}
       </div>
@@ -380,8 +382,11 @@ export const SyncStatusBadge: React.FC<SyncStatusBadgeProps> = ({ theme = 'light
           )}
         </div>
 
-        {/* "Online" text is ONLY visible on desktop view */}
-        <span className="hidden sm:inline">Online</span>
+        {/* "Good Connection" text on desktop view */}
+        <span className="hidden sm:inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
+          <span className="text-[10px]">🟢</span>
+          <span>Good Connection</span>
+        </span>
 
         {/* Optional latency display on desktop view */}
         {signal.latency && (

@@ -2402,17 +2402,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     openDisableModal: openMpinDisableModal
   } = useMpinSecurity();
 
-  // Network state observer
+  // Network state observer & automatic offline detection
   useEffect(() => {
     const handleNetworkChange = (state: any) => {
-      const offline = state === 'offline';
+      const offline = state === 'offline' || (typeof navigator !== 'undefined' && !navigator.onLine);
       setIsOffline(prev => {
         if (!prev && offline) {
+          setShowForm(null);
+          setIsCreatingBook(false);
+          setIsEditingBook(null);
+          setShowImportModal(false);
+          setShowOfflineDialog(true);
           preserveAndMergeLocalCache();
         } else if (prev && !offline) {
           setShowOfflineDialog(false);
           setShowOfflinePdfDialog(false);
-          setReconnectedToast('Internet connection restored! Synced.');
+          setReconnectedToast('🟢 Back Online');
           setTimeout(() => setReconnectedToast(null), 3500);
           syncManager.triggerSync().then(() => {
             window.dispatchEvent(new CustomEvent('trackbook_refresh_cashbooks'));
@@ -3551,6 +3556,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       // Quick Save shortcut: Ctrl+Enter, Cmd+Enter, or Alt+S while form is open
       if ((((e.ctrlKey || e.metaKey) && e.key === 'Enter') || (e.altKey && key === 'S')) && showFormRef.current) {
         e.preventDefault();
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          vibrate(50);
+          setShowOfflineDialog(true);
+          return;
+        }
         saveTransactionRef.current?.();
         return;
       }
@@ -3559,6 +3569,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       if (e.altKey && !e.ctrlKey && !e.metaKey) {
         if (key === 'I' && canAddEntries(currentUserRoleRef.current)) {
           e.preventDefault();
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            vibrate(50);
+            setShowOfflineDialog(true);
+            return;
+          }
           setShowForm('in');
           if (!showFormRef.current) {
             setTransactionDate(safeToDateTimeLocal(new Date()));
@@ -3568,6 +3583,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         }
         if (key === 'O' && canAddEntries(currentUserRoleRef.current)) {
           e.preventDefault();
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            vibrate(50);
+            setShowOfflineDialog(true);
+            return;
+          }
           setShowForm('out');
           if (!showFormRef.current) {
             setTransactionDate(safeToDateTimeLocal(new Date()));
@@ -3619,10 +3639,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       if (lastKey === 'C') {
         if (key === 'B') {
           e.preventDefault();
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            vibrate(50);
+            setShowOfflineDialog(true);
+            lastKey = '';
+            return;
+          }
           setIsCreatingBook(true);
           lastKey = '';
         } else if (key === 'I' && (activeBookId || showFormRef.current) && canAddEntries(currentUserRoleRef.current)) {
           e.preventDefault();
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            vibrate(50);
+            setShowOfflineDialog(true);
+            lastKey = '';
+            return;
+          }
           setShowForm('in');
           if (!showFormRef.current) {
             setTransactionDate(safeToDateTimeLocal(new Date()));
@@ -3631,6 +3663,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           setTimeout(() => amountInputRef.current?.focus(), 60);
         } else if (key === 'O' && (activeBookId || showFormRef.current) && canAddEntries(currentUserRoleRef.current)) {
           e.preventDefault();
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            vibrate(50);
+            setShowOfflineDialog(true);
+            lastKey = '';
+            return;
+          }
           setShowForm('out');
           if (!showFormRef.current) {
             setTransactionDate(safeToDateTimeLocal(new Date()));
@@ -3641,12 +3679,24 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       } else if (lastKey === 'A') {
         if (key === 'U' && activeBookId && canAddEntries(currentUserRoleRef.current)) {
           e.preventDefault();
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            vibrate(50);
+            setShowOfflineDialog(true);
+            lastKey = '';
+            return;
+          }
           setShowAiWarning(true);
           lastKey = '';
         }
       } else if (lastKey === 'I') {
         if (key === 'M' && canAddEntries(currentUserRoleRef.current)) {
           e.preventDefault();
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            vibrate(50);
+            setShowOfflineDialog(true);
+            lastKey = '';
+            return;
+          }
           setShowImportModal(true);
           setImportCode('');
           setImportError('');
@@ -5580,6 +5630,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     e.preventDefault();
     if (!newBookName.trim() || !session) return;
     
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      return;
+    }
+
     // Prevent creating duplicate book names (case-insensitive, trimmed)
     const normalizedNewName = newBookName.trim().toLowerCase();
     const isDuplicate = books.some(b => b.name.trim().toLowerCase() === normalizedNewName);
@@ -5663,6 +5719,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const handleUpdateBook = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editBookName.trim() || !isEditingBook || !session) return;
+
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      return;
+    }
 
     // Prevent renaming to a duplicate book name (case-insensitive, trimmed)
     const normalizedEditName = editBookName.trim().toLowerCase();
@@ -5877,12 +5939,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const handleDeleteBook = (id: string) => {
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      return;
+    }
     vibrate(50);
     setDeleteConfirmId(id);
     setDeleteConfirmed(false);
   };
 
   const confirmDeleteBook = async () => {
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      return;
+    }
     const targetId = deleteConfirmId;
     if (targetId && session) {
       const bookToDeleteObj = books.find(b => b.id === targetId);
@@ -5911,6 +5983,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const handleBulkDeleteBooks = async () => {
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      return;
+    }
     if (selectedBooks.size === 0 || !session) return;
 
     const booksToDelete = Array.from(selectedBooks).map(id => {
@@ -6017,6 +6094,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   const saveTransaction = async () => {
     saveTransactionRef.current = saveTransaction;
+
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      setIsSubmitting(false);
+      return;
+    }
+
     const isAmountEmpty = !amount || !amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0;
     const isDetailsEmpty = !description || !description.trim();
 
@@ -6396,6 +6481,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   const handleAddTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      return;
+    }
     if (isSubmitting) return;
 
     const isAmountEmpty = !amount || !amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0;
@@ -6420,12 +6510,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const handleDeleteTransaction = useCallback((id: string) => {
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      return;
+    }
     vibrate(50);
     setTransactionToDelete(id);
     setDeleteConfirmed(false);
-  }, []);
+  }, [isOffline]);
 
   const confirmDeleteTransaction = async () => {
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      return;
+    }
     if (!activeBookId || !transactionToDelete || !session) return;
 
     const idToDelete = transactionToDelete;
@@ -6508,6 +6608,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const openMergeDialog = () => {
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      return;
+    }
     if (!activeBookId) return;
     const activeBook = books.find(b => b.id === activeBookId);
     if (!activeBook) return;
@@ -6526,6 +6631,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const handleMergeTransactions = async () => {
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      return;
+    }
     if (!activeBookId || selectedTransactions.size < 2 || !session) return;
     setIsMerging(true);
     setError(null);
@@ -6684,6 +6794,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const handleEditTransaction = useCallback((t: Transaction) => {
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
+      vibrate(50);
+      setShowOfflineDialog(true);
+      return;
+    }
     setEditingTransaction(t);
     setShowForm(t.type);
     setAmount(t.amount.toString());
@@ -8856,36 +8971,43 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 type="button"
                 onClick={() => setShowOfflineDialog(false)}
                 className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-500/10 text-slate-400 transition-colors cursor-pointer"
+                title="Dismiss (View saved data in read-only mode)"
               >
                 <X size={18} />
               </button>
 
-              {/* Offline Vector / Visual Illustration Image */}
-              <div className="relative mx-auto w-28 h-28 sm:w-32 sm:h-32 mb-4 flex items-center justify-center">
-                <div className="absolute inset-0 rounded-full bg-amber-500/10 dark:bg-amber-500/15 animate-pulse" />
-                <svg viewBox="0 0 160 160" className="w-full h-full" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="80" cy="80" r="65" stroke="currentColor" strokeWidth="2" strokeDasharray="6 6" className="text-amber-500/30" />
-                  <path d="M45 95C45 83 55 73 67 73C70 60 82 50 96 50C111 50 123 61 125 76C134 78 140 85 140 95C140 106 131 115 120 115H50C39 115 30 106 30 95C30 85 37 77 47 75" fill="currentColor" className="text-amber-500/15" />
-                  <path d="M48 95C48 85 56 77 66 77C69 66 79 58 91 58C104 58 114 67 116 79C124 81 130 87 130 95C130 104 122 112 112 112H52C43 112 36 104 36 95" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500" />
-                  <circle cx="80" cy="95" r="4" fill="currentColor" className="text-rose-500" />
-                  <path d="M68 83C75 76 85 76 92 83" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="text-rose-400" />
-                  <path d="M58 73C70 61 90 61 102 73" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="text-rose-400/60" />
-                  <path d="M35 35L125 125" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="text-rose-500" />
-                </svg>
+              {/* Offline Icon Container */}
+              <div className="relative mx-auto w-24 h-24 sm:w-28 sm:h-28 mb-4 flex items-center justify-center">
+                <div className="absolute inset-0 rounded-full bg-rose-500/10 dark:bg-rose-500/15 animate-ping opacity-30" />
+                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-rose-50 dark:bg-rose-950/40 border-2 border-rose-200 dark:border-rose-900/60 flex items-center justify-center text-rose-500">
+                  <WifiOff size={40} className="text-rose-500" />
+                </div>
               </div>
 
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[11px] font-black uppercase tracking-wider mb-2">
-                <WifiOff size={13} />
-                <span>Offline Mode • No Internet</span>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-[11px] font-black uppercase tracking-wider mb-2">
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                </span>
+                <span>Offline Mode • Read-Only</span>
               </div>
 
               <h3 className="text-xl sm:text-2xl font-black tracking-tight mt-1 mb-2">
-                No Internet Connection
+                You're Offline
               </h3>
               
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium leading-relaxed max-w-sm mx-auto mb-6">
-                You're offline. You can still add entries, but images and PDF attachments cannot be added until you're back online. All added entries will automatically sync once your internet connection is restored.
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium leading-relaxed max-w-sm mx-auto mb-3">
+                No internet connection detected. Connect to the internet to continue.
               </p>
+
+              <div className="mb-5 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs font-semibold text-center">
+                Adding entries, creating cashbooks, editing, and deleting are disabled while offline.
+              </div>
+
+              <div className="flex items-center justify-center gap-2 text-xs font-semibold text-slate-400 dark:text-slate-500 mb-5">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                <span>Waiting for connection...</span>
+              </div>
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
@@ -8920,7 +9042,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       : "bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200"
                   )}
                 >
-                  Continue Offline
+                  View Loaded Data
                 </button>
               </div>
             </motion.div>
@@ -9259,15 +9381,24 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           >
               {isOffline && (
                 <div className={cn(
-                  "flex items-center gap-2.5 px-4 py-2.5 rounded-none text-xs font-medium border transition-all animate-fade-in shadow-xs",
+                  "flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-xs font-semibold border transition-all animate-fade-in shadow-xs",
                   theme === 'dark' 
-                    ? "bg-amber-950/20 border-amber-800/40 text-amber-300" 
-                    : "bg-amber-50 border-amber-200 text-amber-800"
+                    ? "bg-rose-950/20 border-rose-800/40 text-rose-300" 
+                    : "bg-rose-50 border-rose-200 text-rose-800"
                 )}>
-                  <CloudOff size={15} className="text-amber-500 shrink-0 animate-pulse" />
-                  <span className="leading-tight">
-                    <strong className="font-semibold">Offline Mode:</strong> Viewing cached cashbooks. You can open any cashbook and record entries normally — everything will automatically sync when connected.
-                  </span>
+                  <div className="flex items-center gap-2.5">
+                    <CloudOff size={16} className="text-rose-500 shrink-0 animate-pulse" />
+                    <span className="leading-tight">
+                      <strong className="font-bold">Offline Mode:</strong> Viewing cached cashbooks in read-only mode. Connect to the internet to create cashbooks or entries.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRetryConnection}
+                    className="px-3 py-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold shrink-0 cursor-pointer"
+                  >
+                    Retry
+                  </button>
                 </div>
               )}
 
@@ -9294,7 +9425,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <div className="flex items-center gap-3 sm:gap-4 shrink-0">
                   {selectedBooks.size > 0 ? (
                     <button
-                      onClick={() => { vibrate(); setShowBulkDeleteConfirm(true); setDeleteConfirmed(false); }}
+                      onClick={() => {
+                        if (isOffline) {
+                          vibrate(50);
+                          setShowOfflineDialog(true);
+                          return;
+                        }
+                        vibrate();
+                        setShowBulkDeleteConfirm(true);
+                        setDeleteConfirmed(false);
+                      }}
                       className={cn(
                         "flex-1 sm:flex-none py-2 sm:py-2.5 px-4 sm:px-6 bg-rose-600 hover:bg-rose-700 text-white rounded-none font-bold transition-all flex items-center justify-center gap-2 text-sm sm:text-base animate-in fade-in zoom-in duration-200 cursor-pointer shadow-xs",
                         theme === 'dark' ? "shadow-none" : ""
@@ -9306,7 +9446,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   ) : (
                     books.length > 0 && (
                       <button
-                        onClick={() => { vibrate(); setIsCreatingBook(true); }}
+                        onClick={() => {
+                          if (isOffline) {
+                            vibrate(50);
+                            setShowOfflineDialog(true);
+                            return;
+                          }
+                          vibrate();
+                          setIsCreatingBook(true);
+                        }}
                         className={cn(
                           "group/shortcut relative py-2 sm:py-2.5 px-4 sm:px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-none font-semibold transition-colors inline-flex items-center justify-center gap-1.5 text-xs sm:text-sm active:scale-[0.98] duration-150 cursor-pointer w-auto shrink-0 shadow-xs",
                           theme === 'dark' ? "shadow-none" : ""
@@ -9346,7 +9494,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   </p>
                   {!searchQuery && (
                     <button
-                      onClick={() => { vibrate(); setIsCreatingBook(true); }}
+                      onClick={() => {
+                        if (isOffline) {
+                          vibrate(50);
+                          setShowOfflineDialog(true);
+                          return;
+                        }
+                        vibrate();
+                        setIsCreatingBook(true);
+                      }}
                       className="mt-6 inline-flex items-center justify-center gap-2 py-2 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-none font-semibold text-xs sm:text-sm transition-colors cursor-pointer shadow-xs"
                     >
                       <Plus size={16} />
@@ -9373,11 +9529,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         onPress={handleBookPress}
                         onEdit={(b, e) => {
                           e.stopPropagation();
+                          if (isOffline) {
+                            vibrate(50);
+                            setShowOfflineDialog(true);
+                            return;
+                          }
                           setIsEditingBook(b.id);
                           setEditBookName(b.name);
                         }}
                         onDelete={(id, e) => {
                           e.stopPropagation();
+                          if (isOffline) {
+                            vibrate(50);
+                            setShowOfflineDialog(true);
+                            return;
+                          }
                           handleDeleteBook(id);
                         }}
                         onOpen={handleSelectBook}
@@ -9721,7 +9887,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               {canAddEntries(currentUserRole) ? (
                 <div className="hidden lg:flex items-center gap-3">
                   <button
-                    onClick={() => { vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
+                    onClick={() => {
+                      if (isOffline) {
+                        vibrate(50);
+                        setShowOfflineDialog(true);
+                        return;
+                      }
+                      vibrate();
+                      setShowForm('in');
+                      setTransactionDate(safeToDateTimeLocal(new Date()));
+                    }}
                     className={cn(
                       "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
                       theme === 'dark' 
@@ -9736,7 +9911,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </span>
                   </button>
                   <button
-                    onClick={() => { vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
+                    onClick={() => {
+                      if (isOffline) {
+                        vibrate(50);
+                        setShowOfflineDialog(true);
+                        return;
+                      }
+                      vibrate();
+                      setShowForm('out');
+                      setTransactionDate(safeToDateTimeLocal(new Date()));
+                    }}
                     className={cn(
                       "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
                       theme === 'dark' 
@@ -9752,6 +9936,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   </button>
                   <button
                     onClick={() => { 
+                      if (isOffline) {
+                        vibrate(50);
+                        setShowOfflineDialog(true);
+                        return;
+                      }
                       vibrate(); 
                       setShowAiWarning(true);
                     }}
@@ -10031,12 +10220,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <div className={cn(
                         "flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-xs font-medium border transition-all animate-fade-in shadow-xs",
                         theme === 'dark' 
-                          ? "bg-amber-950/20 border-amber-800/40 text-amber-300" 
-                          : "bg-amber-50 border-amber-200 text-amber-800"
+                          ? "bg-rose-950/20 border-rose-800/40 text-rose-300" 
+                          : "bg-rose-50 border-rose-200 text-rose-800"
                       )}>
-                        <CloudOff size={15} className="text-amber-500 shrink-0 animate-pulse" />
+                        <CloudOff size={15} className="text-rose-500 shrink-0 animate-pulse" />
                         <span className="leading-tight">
-                          <strong className="font-semibold">Offline Mode:</strong> Viewing cached entries. You can record new entries normally — they will automatically sync when your connection returns.
+                          <strong className="font-bold">Offline Mode:</strong> Viewing cached entries in read-only mode. Adding, editing, or deleting entries is disabled until internet is restored.
                         </span>
                       </div>
                     )}
@@ -10063,10 +10252,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     )}>
                       {isOffline ? (
                         <>
-                          <CloudOff size={36} className="mx-auto text-amber-500 animate-pulse" />
+                          <CloudOff size={36} className="mx-auto text-rose-500 animate-pulse" />
                           <h4 className="text-sm font-bold">No Entries Found</h4>
                           <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed max-w-xs mx-auto">
-                            No entries recorded yet for this cashbook. You can create entries offline anytime — they will sync automatically once connected.
+                            No entries recorded yet for this cashbook. Connect to the internet to record transactions.
                           </p>
                         </>
                       ) : (
@@ -10231,12 +10420,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                 <div className="flex flex-col items-center justify-center space-y-3 max-w-md mx-auto">
                                   {isOffline ? (
                                     <>
-                                      <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-950/40 text-amber-500 flex items-center justify-center">
+                                      <div className="w-12 h-12 rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-500 flex items-center justify-center">
                                         <CloudOff size={24} className="animate-pulse" />
                                       </div>
                                       <h4 className="text-sm font-bold">No Entries Found</h4>
                                       <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
-                                        No entries recorded yet for this cashbook. You can create entries offline anytime — they will sync automatically once connected.
+                                        No entries recorded yet for this cashbook. Connect to the internet to record transactions.
                                       </p>
                                     </>
                                   ) : (
@@ -10354,7 +10543,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           whileHover={{ scale: 1.015 }}
                           whileTap={{ scale: 0.95 }}
                           transition={{ duration: 0.12 }}
-                          onClick={() => { vibrate(); vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
+                          onClick={() => {
+                            if (isOffline) {
+                              vibrate(50);
+                              setShowOfflineDialog(true);
+                              return;
+                            }
+                            vibrate();
+                            setShowForm('in');
+                            setTransactionDate(safeToDateTimeLocal(new Date()));
+                          }}
                           className={cn(
                             "relative flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm cursor-pointer text-xs sm:text-sm border transition-colors duration-200",
                             theme === 'dark' 
@@ -10372,7 +10570,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           whileHover={{ scale: 1.015 }}
                           whileTap={{ scale: 0.95 }}
                           transition={{ duration: 0.12 }}
-                          onClick={() => { vibrate(); vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
+                          onClick={() => {
+                            if (isOffline) {
+                              vibrate(50);
+                              setShowOfflineDialog(true);
+                              return;
+                            }
+                            vibrate();
+                            setShowForm('out');
+                            setTransactionDate(safeToDateTimeLocal(new Date()));
+                          }}
                           className={cn(
                             "relative flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm cursor-pointer text-xs sm:text-sm border transition-colors duration-200",
                             theme === 'dark' 
@@ -12685,6 +12892,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </button>
               </div>
               <form onSubmit={handleCreateBook} className="space-y-4">
+                {isOffline && (
+                  <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl flex items-start gap-2 text-xs font-semibold dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400">
+                    <CloudOff size={15} className="shrink-0 text-rose-500 mt-0.5" />
+                    <span className="flex-1 leading-relaxed">You are offline. Cashbooks cannot be created while offline.</span>
+                  </div>
+                )}
                 {createBookError && (
                   <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl flex items-start gap-2 text-xs font-semibold dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400 animate-shake">
                     <AlertCircle size={15} className="shrink-0 text-rose-500 mt-0.5 dark:text-rose-400" />
@@ -12722,12 +12935,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
                 <button
                   type="submit"
+                  disabled={isOffline || !newBookName.trim()}
                   className={cn(
-                    "w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all",
-                    theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
+                    "w-full py-4 rounded-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed text-white",
+                    isOffline ? "bg-slate-400 dark:bg-slate-700" : (
+                      theme === 'dark' ? "bg-indigo-600 hover:bg-indigo-700 shadow-none" : "bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100"
+                    )
                   )}
                 >
-                  Create Cashbook
+                  {isOffline ? "Offline (Cannot Create)" : "Create Cashbook"}
                 </button>
               </form>
             </motion.div>
@@ -12761,6 +12977,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </button>
               </div>
               <form onSubmit={handleUpdateBook} className="space-y-4">
+                {isOffline && (
+                  <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl flex items-start gap-2 text-xs font-semibold dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400">
+                    <CloudOff size={15} className="shrink-0 text-rose-500 mt-0.5" />
+                    <span className="flex-1 leading-relaxed">You are offline. Cashbooks cannot be renamed while offline.</span>
+                  </div>
+                )}
                 {editBookError && (
                   <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl flex items-start gap-2 text-xs font-semibold dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400 animate-shake">
                     <AlertCircle size={15} className="shrink-0 text-rose-500 mt-0.5 dark:text-rose-400" />
@@ -12785,12 +13007,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
                 <button
                   type="submit"
+                  disabled={isOffline || !editBookName.trim()}
                   className={cn(
-                    "w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all",
-                    theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
+                    "w-full py-4 rounded-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed text-white",
+                    isOffline ? "bg-slate-400 dark:bg-slate-700" : (
+                      theme === 'dark' ? "bg-indigo-600 hover:bg-indigo-700 shadow-none" : "bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100"
+                    )
                   )}
                 >
-                  Save Changes
+                  {isOffline ? "Offline (Cannot Save)" : "Save Changes"}
                 </button>
               </form>
             </motion.div>
@@ -14157,9 +14382,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       )}
                       
                       {isOffline && (
-                        <div className="mb-3 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs font-semibold flex items-center gap-2.5">
-                          <CloudOff size={18} className="shrink-0 text-amber-500" />
-                          <span>Attachments are unavailable while offline. You can still add your entry without an image or PDF, and it will sync automatically once you are back online.</span>
+                        <div className="mb-4 p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 text-xs font-bold flex items-center gap-2.5">
+                          <CloudOff size={18} className="shrink-0 text-rose-500" />
+                          <span>You are offline. Adding or editing entries is disabled until internet connection is restored.</span>
                         </div>
                       )}
 
@@ -14221,8 +14446,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   <button
                     type="submit"
                     tabIndex={6}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isOffline}
                     onClick={(e) => {
+                      if (isOffline) {
+                        e.preventDefault();
+                        vibrate(50);
+                        setShowOfflineDialog(true);
+                        return;
+                      }
                       vibrate(30);
                       setSubmitAndAddNew(false);
                       const isAmountEmpty = !amount || !amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0;
@@ -14240,14 +14471,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     }}
                     className={cn(
                       "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed",
-                      isSubmitting ? "bg-slate-400" : (
+                      (isSubmitting || isOffline) ? "bg-slate-400 dark:bg-slate-700" : (
                         showForm === 'in' 
                           ? (theme === 'dark' ? "bg-emerald-600 hover:bg-emerald-700 shadow-none" : "bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-100")
                           : (theme === 'dark' ? "bg-rose-600 hover:bg-rose-700 shadow-none" : "bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-100")
                       )
                     )}
                   >
-                    {isSubmitting ? "Saving..." : (editingTransaction ? 'Save Changes' : 'Save')}
+                    {isOffline ? "Offline (Cannot Save)" : (isSubmitting ? "Saving..." : (editingTransaction ? 'Save Changes' : 'Save'))}
                   </button>
                 </div>
               </form>

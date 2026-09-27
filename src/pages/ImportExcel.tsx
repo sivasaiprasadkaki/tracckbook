@@ -106,6 +106,19 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && !navigator.onLine);
+
+  useEffect(() => {
+    const handleStatus = () => {
+      setIsOffline(typeof navigator !== 'undefined' && !navigator.onLine);
+    };
+    window.addEventListener('online', handleStatus);
+    window.addEventListener('offline', handleStatus);
+    return () => {
+      window.removeEventListener('online', handleStatus);
+      window.removeEventListener('offline', handleStatus);
+    };
+  }, []);
 
   // 1. Fetch user's cashbooks
   useEffect(() => {
@@ -176,6 +189,11 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
 
   // 2. Parse Excel file when uploaded
   const handleFileProcess = async (selectedFile: File) => {
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      vibrate(50);
+      setParsingError("You are offline. Importing Excel entries is disabled until internet is restored.");
+      return;
+    }
     setParsingError(null);
     setIsParsing(true);
     setFile(selectedFile);
@@ -519,6 +537,12 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
     setShowConfirmModal(false);
     if (!selectedBookId || !canImport || !session?.user?.id) return;
 
+    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      vibrate(50);
+      setParsingError("You are offline. Importing Excel entries is disabled until internet is restored.");
+      return;
+    }
+
     setIsImporting(true);
     setImportProgress(0);
     setImportedCount(0);
@@ -749,6 +773,19 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
           </div>
         )}
 
+        {/* Offline Banner */}
+        {isOffline && (
+          <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 text-xs font-semibold flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-2.5 w-2.5 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+              </span>
+              <span><strong>Offline Mode:</strong> Importing Excel entries is disabled while offline. Connect to the internet to proceed.</span>
+            </div>
+          </div>
+        )}
+
         {/* Parsing Error Banner */}
         {parsingError && (
           <motion.div 
@@ -777,7 +814,14 @@ export default function ImportExcel({ session, theme }: ImportExcelProps) {
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
             onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              if (isOffline) {
+                vibrate(50);
+                setParsingError("Cannot import Excel while offline. Please connect to the internet to continue.");
+                return;
+              }
+              fileInputRef.current?.click();
+            }}
             className={cn(
               "border-2 border-dashed rounded-3xl p-8 sm:p-12 text-center transition-all cursor-pointer relative overflow-hidden group",
               dragActive 
