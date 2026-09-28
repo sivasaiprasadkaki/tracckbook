@@ -29,17 +29,23 @@ import rbacHandler, {
   handleSaveCashbookEntry,
   handleBatchSaveCashbookEntries
 } from "./api/rbac.ts";
-import syncHandler, { handleSyncOfflineEntry, handleBatchSyncOfflineEntries, handleSyncCashbook, handleDeleteCashbook } from "./api/sync.ts";
+import syncHandler, { handleSyncOfflineEntry, handleBatchSyncOfflineEntries, handleSyncCashbook, handleDeleteCashbook, handleDeleteEntry } from "./api/sync.ts";
 import { handleCheckUserStatus, handleGetAdminUsers, handleSetUserStatus } from "./api/user-status.ts";
 
+const initialPort = process.env.PORT;
 const envConfig = dotenv.config();
 if (envConfig.parsed) {
   for (const key in envConfig.parsed) {
+    if (key === "PORT" && initialPort) continue; // Never override system/Cloud Run assigned PORT
     if (envConfig.parsed[key]) {
       process.env[key] = envConfig.parsed[key];
     }
   }
 }
+if (initialPort) {
+  process.env.PORT = initialPort;
+}
+
 
 // Startup health check for Gemini API Key configuration
 const getActiveApiKey = (): string => {
@@ -115,6 +121,7 @@ app.all("/api/sync", syncHandler);
 app.post("/api/sync/offline-entry", handleSyncOfflineEntry);
 app.post("/api/sync/cashbook", handleSyncCashbook);
 app.post("/api/sync/delete-cashbook", handleDeleteCashbook);
+app.post("/api/sync/delete-entry", handleDeleteEntry);
 app.post("/api/sync/batch", handleBatchSyncOfflineEntries);
 app.delete("/api/rbac/members", handleRemoveMember);
 app.get("/api/rbac/members", handleGetMembers);
@@ -367,6 +374,7 @@ const server = app.listen(PORT, "0.0.0.0", () => {
 
 server.on("error", (err: any) => {
   console.error(`[Server] Critical listen error on port ${PORT}:`, err);
+  process.exit(1);
 });
 
 const handleShutdown = () => {

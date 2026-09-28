@@ -5629,8 +5629,30 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     let saveSuccess = false;
     let savedRow: any = null;
 
-    // 1. Send INSERT to Supabase and WAIT for confirmed database persistence
-    if (supabase) {
+    // 1. Authoritative Backend Service Role Persistence (prevents client RLS 42501 errors on Postgres)
+    try {
+      const res = await fetch('/api/sync?action=cashbook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'cashbook',
+          ...payload,
+          user_email: session.user.email
+        })
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.success) {
+          saveSuccess = true;
+          savedRow = json.cashbook || payload;
+        }
+      }
+    } catch (proxyErr) {
+      console.warn('[CreateBook] Primary proxy insert warning:', proxyErr);
+    }
+
+    // 2. Direct Supabase insert fallback only if backend proxy endpoint failed
+    if (!saveSuccess && supabase) {
       try {
         const { data, error } = await supabase
           .from('cashbooks')
@@ -5641,53 +5663,26 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         if (!error && data) {
           saveSuccess = true;
           savedRow = data;
-        } else if (error) {
-          console.warn('[CreateBook] Primary insert warning:', error.message);
-          if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
-            const fallbackPayload = {
-              id: payload.id,
-              name: payload.name,
-              created_at: payload.created_at,
-              user_id: payload.user_id
-            };
-            const { data: fbData, error: fbError } = await supabase
-              .from('cashbooks')
-              .insert([fallbackPayload])
-              .select()
-              .single();
+        } else if (error && (error.code === '42703' || error.message?.toLowerCase().includes('column'))) {
+          const fallbackPayload = {
+            id: payload.id,
+            name: payload.name,
+            created_at: payload.created_at,
+            user_id: payload.user_id
+          };
+          const { data: fbData, error: fbError } = await supabase
+            .from('cashbooks')
+            .insert([fallbackPayload])
+            .select()
+            .single();
 
-            if (!fbError && fbData) {
-              saveSuccess = true;
-              savedRow = fbData;
-            }
+          if (!fbError && fbData) {
+            saveSuccess = true;
+            savedRow = fbData;
           }
         }
       } catch (err: any) {
-        console.error('[CreateBook] Direct insert error:', err);
-      }
-    }
-
-    // 2. Secondary fallback via RBAC/Sync endpoint
-    if (!saveSuccess) {
-      try {
-        const res = await fetch('/api/sync?action=cashbook', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'cashbook',
-            ...payload,
-            user_email: session.user.email
-          })
-        });
-        if (res.ok) {
-          const json = await res.json();
-          if (json?.success) {
-            saveSuccess = true;
-            savedRow = json.cashbook || payload;
-          }
-        }
-      } catch (proxyErr) {
-        console.warn('[CreateBook] Proxy insert error:', proxyErr);
+        console.error('[CreateBook] Direct insert fallback error:', err);
       }
     }
 
@@ -6248,27 +6243,54 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           file_url: url
         }));
 
-        if (supabase) {
-          const { error: updateErr } = await supabase
-            .from('entries')
-            .update(payload)
-            .eq('id', savedId);
+        // 1. Authoritative Backend Service Role Persistence (prevents client RLS 42501 errors on Postgres)
+        let updateSucceeded = false;
+        try {
+          const rbacRes = await fetch('/api/rbac?action=save-entry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              entry: payload,
+              isUpdate: true,
+              attachments: finalImages,
+              userId: session.user.id,
+              userEmail: session.user.email
+            })
+          });
+          if (rbacRes.ok) {
+            const rbacJson = await rbacRes.json();
+            if (rbacJson?.success) {
+              updateSucceeded = true;
+            }
+          }
+        } catch (rbacErr) {
+          console.warn('[saveTransaction] Primary RBAC update warning:', rbacErr);
+        }
 
-          if (updateErr) {
-            console.warn('[saveTransaction] Update warning:', updateErr.message);
-            if (updateErr.code === '42703' || updateErr.code === 'PGRST204' || updateErr.message?.toLowerCase().includes('column')) {
+        // 2. Direct Supabase update fallback only if proxy failed
+        if (!updateSucceeded && supabase) {
+          try {
+            const { error: updateErr } = await supabase
+              .from('entries')
+              .update(payload)
+              .eq('id', savedId);
+
+            if (!updateErr) {
+              updateSucceeded = true;
+            } else if (updateErr.code === '42703' || updateErr.code === 'PGRST204' || updateErr.message?.toLowerCase().includes('column')) {
               const fallbackPayload = { ...payload };
               delete fallbackPayload.image_layout;
               delete fallbackPayload.user_name;
-              await supabase.from('entries').update(fallbackPayload).eq('id', savedId);
+              const { error: fbErr } = await supabase.from('entries').update(fallbackPayload).eq('id', savedId);
+              if (!fbErr) updateSucceeded = true;
             }
-          }
+          } catch (_) {}
+        }
 
-          await supabase.from('attachments').delete().eq('entry_id', savedId);
-          await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
-          if (attachmentInserts.length > 0) {
-            await supabase.from('attachments').insert(attachmentInserts);
-          }
+        if (!updateSucceeded) {
+          setIsSubmitting(false);
+          setError("Failed to update entry in the database. Please check your internet connection and try again.");
+          return;
         }
 
         const updatedTx: Transaction = {
@@ -6386,20 +6408,42 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         let insertSucceeded = false;
         let insertedRow: any = null;
 
-        // 2. Insert into Supabase and AWAIT confirmed database response
-        if (supabase) {
-          const { data: insData, error: insertErr } = await supabase
-            .from('entries')
-            .insert([payload])
-            .select()
-            .single();
+        // 1. Authoritative Backend Service Role Persistence (bypasses RLS safely and saves entry + attachments atomically)
+        try {
+          const rbacRes = await fetch('/api/rbac?action=save-entry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              entry: payload,
+              attachments: finalImages,
+              userId: session.user.id,
+              userEmail: session.user.email
+            })
+          });
+          if (rbacRes.ok) {
+            const rbacJson = await rbacRes.json();
+            if (rbacJson?.success) {
+              insertSucceeded = true;
+              insertedRow = rbacJson.entry || payload;
+            }
+          }
+        } catch (proxyErr) {
+          console.warn('[saveTransaction] Primary RBAC insert warning:', proxyErr);
+        }
 
-          if (!insertErr && insData) {
-            insertSucceeded = true;
-            insertedRow = insData;
-          } else if (insertErr) {
-            console.warn('[saveTransaction] Primary insert warning:', insertErr.message);
-            if (insertErr.code === '42703' || insertErr.code === 'PGRST204' || insertErr.message?.toLowerCase().includes('column')) {
+        // 2. Direct Supabase fallback only if backend proxy endpoint failed
+        if (!insertSucceeded && supabase) {
+          try {
+            const { data: insData, error: insertErr } = await supabase
+              .from('entries')
+              .insert([payload])
+              .select()
+              .single();
+
+            if (!insertErr && insData) {
+              insertSucceeded = true;
+              insertedRow = insData;
+            } else if (insertErr && (insertErr.code === '42703' || insertErr.code === 'PGRST204' || insertErr.message?.toLowerCase().includes('column'))) {
               const fallbackPayload = { ...payload };
               delete fallbackPayload.image_layout;
               delete fallbackPayload.user_name;
@@ -6414,29 +6458,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 insertedRow = fbData;
               }
             }
+          } catch (err: any) {
+            console.error('[saveTransaction] Direct insert fallback error:', err);
           }
-        }
-
-        // Secondary fallback via RBAC proxy if direct failed
-        if (!insertSucceeded) {
-          try {
-            const rbacRes = await fetch('/api/rbac?action=save-entry', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                entry: payload,
-                userId: session.user.id,
-                userEmail: session.user.email
-              })
-            });
-            if (rbacRes.ok) {
-              const rbacJson = await rbacRes.json();
-              if (rbacJson?.success) {
-                insertSucceeded = true;
-                insertedRow = rbacJson.entry || payload;
-              }
-            }
-          } catch (_) {}
         }
 
         if (!insertSucceeded) {
@@ -6445,8 +6469,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           return;
         }
 
-        // 3. Save attachments to attachments table safely (does not destroy entry on partial attachment error)
-        if (finalImages.length > 0 && supabase) {
+        // 3. Fallback client-side attachment insert only if direct Supabase path was used
+        if (finalImages.length > 0 && supabase && !insertedRow?.attachments_saved) {
           const attachmentInserts = finalImages.map(url => ({
             entry_id: insertedRow?.id || tempId,
             user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
@@ -6455,14 +6479,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             file_url: url
           }));
           try {
-            const { error: attError } = await supabase.from('attachments').insert(attachmentInserts);
-            if (attError) {
-              console.warn('[saveTransaction] Attachment insert notice, retrying:', attError.message);
-              await supabase.from('attachments').insert(attachmentInserts);
-            }
-          } catch (attErr) {
-            console.warn('[saveTransaction] Attachment insert exception (entry is safely preserved):', attErr);
-          }
+            await supabase.from('attachments').insert(attachmentInserts);
+          } catch (_) {}
         }
 
         // 4. ONLY AFTER CONFIRMED DATABASE INSERT: Update UI state
