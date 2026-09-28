@@ -1,6 +1,6 @@
-const CACHE_VERSION = 'trackbook-app-shell-v1';
-const DYNAMIC_CACHE = 'trackbook-dynamic-v1';
-const FONT_CACHE = 'trackbook-fonts-v1';
+const CACHE_VERSION = 'trackbook-app-shell-v3';
+const DYNAMIC_CACHE = 'trackbook-dynamic-v3';
+const FONT_CACHE = 'trackbook-fonts-v3';
 const VALID_CACHES = [CACHE_VERSION, DYNAMIC_CACHE, FONT_CACHE];
 
 // Check if running in a development environment (e.g. AI Studio preview dev server or localhost)

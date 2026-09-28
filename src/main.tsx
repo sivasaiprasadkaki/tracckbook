@@ -7,6 +7,11 @@ import { clearSupabaseAuthStorage } from './lib/supabase';
 
 // Global error handlers to intercept and recover from transient network drops and stale auth tokens
 if (typeof window !== 'undefined') {
+  // Canonical domain redirect: ensure trackbook.vercel.app points to production domain trackbook.xyz
+  if (window.location.hostname === 'trackbook.vercel.app') {
+    window.location.replace(`https://trackbook.xyz${window.location.pathname}${window.location.search}${window.location.hash}`);
+  }
+
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason;
     const msg = (typeof reason === 'string' ? reason : reason?.message || reason?.name || '') + '';
@@ -54,6 +59,14 @@ if (typeof window !== 'undefined') {
 
 if ('serviceWorker' in navigator) {
   if (import.meta.env.PROD) {
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
+    });
+
     const registerSW = () => {
       navigator.serviceWorker
         .register('/sw.js', { scope: '/' })
@@ -61,6 +74,16 @@ if ('serviceWorker' in navigator) {
           console.log('[TrackBook] SW registered with scope:', registration.scope);
           // Check for updates on load so new deployments show immediately
           registration.update().catch(() => {});
+          registration.onupdatefound = () => {
+            const installingWorker = registration.installing;
+            if (installingWorker) {
+              installingWorker.onstatechange = () => {
+                if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  installingWorker.postMessage({ type: 'SKIP_WAITING' });
+                }
+              };
+            }
+          };
         })
         .catch((registrationError) => {
           console.warn('[TrackBook] SW registration failed:', registrationError);

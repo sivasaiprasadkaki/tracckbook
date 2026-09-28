@@ -163,11 +163,20 @@ export function resolveAttachmentUrl(
   // Extract hash parameter to append later
   const hashIdx = url.indexOf('#');
   const hash = hashIdx !== -1 ? url.substring(hashIdx) : '';
-  const cleanUrl = hashIdx !== -1 ? url.substring(0, hashIdx) : url;
+  let cleanUrl = hashIdx !== -1 ? url.substring(0, hashIdx) : url;
 
   // 1. Direct pass-through for local references
   if (cleanUrl.startsWith('data:') || cleanUrl.startsWith('blob:') || cleanUrl.startsWith('local-img-')) {
     return cleanUrl + hash;
+  }
+
+  // Normalize protocol for any domain references
+  if (cleanUrl.startsWith('//')) {
+    cleanUrl = 'https:' + cleanUrl;
+  } else if (cleanUrl.startsWith('res.cloudinary.com')) {
+    cleanUrl = 'https://' + cleanUrl;
+  } else if (cleanUrl.startsWith('cloudinary.com')) {
+    cleanUrl = 'https://' + cleanUrl;
   }
 
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'dd2kcpetc';
@@ -190,6 +199,9 @@ export function resolveAttachmentUrl(
 
   // 2. If it's a non-Cloudinary external URL, proxy it through Cloudinary Fetch for egress protection
   if (!cleanUrl.includes('cloudinary.com')) {
+    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      return cleanUrl + hash;
+    }
     if (!transformation) {
       return cleanUrl + hash;
     }
@@ -231,9 +243,21 @@ export function resolveAttachmentUrl(
   }
 
   const parts = cleanUrl.split(splitter);
-  if (parts.length < 2) return cleanUrl + hash;
+  if (parts.length < 2) {
+    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      cleanUrl = 'https://' + cleanUrl.replace(/^\/+/, '');
+    }
+    return cleanUrl + hash;
+  }
 
-  const prefix = parts[0]; // e.g. "https://res.cloudinary.com/dd2kcpetc"
+  let prefix = parts[0]; // e.g. "https://res.cloudinary.com/dd2kcpetc"
+  if (!prefix.startsWith('http://') && !prefix.startsWith('https://')) {
+    if (prefix.startsWith('//')) {
+      prefix = 'https:' + prefix;
+    } else {
+      prefix = 'https://' + prefix.replace(/^\/+/, '');
+    }
+  }
   const remaining = parts[1]; // e.g. "v1700000000/trackbook/test@example.com/receipt123.jpg"
 
   if (!remaining) return cleanUrl + hash;

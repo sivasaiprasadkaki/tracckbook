@@ -421,7 +421,7 @@ export default async function syncHandler(req: any, res: any) {
   }
 
   if (req.method === 'POST') {
-    const action = req.body?.action;
+    const action = req.body?.action || req.query?.action;
 
     if (action === 'cashbook') {
       console.log('[Sync API] Action: cashbook');

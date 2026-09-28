@@ -1,8 +1,9 @@
 {
-  "version": "1.2.6",
+  "version": "1.2.8",
   "releaseNotes": [
-    "Resolved character encoding corruption in phone linking state",
-    "Enhanced AI multiple receipt review workflow with discard & next",
-    "Real-time backup caching to eliminate layout jumps & empty flashes"
+    "Database authoritative persistence for all cashbooks and entries",
+    "Complete removal of client-side tombstone filtering and stale cache dependencies",
+    "Strict preservation of last valid data on transient query errors",
+    "Verified instant multi-device synchronization across Desktop and Mobile"
   ]
 }

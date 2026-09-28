@@ -435,12 +435,17 @@ async function compressImage(file: File): Promise<Blob | File> {
 function getCloudinaryThumbnail(url: string): string {
   if (!url || typeof url !== 'string') return url;
   if (url.startsWith('blob:')) return url; // Let blob URLs render directly
-  if (url.includes('res.cloudinary.com') && url.includes('/upload/')) {
-    if (!url.includes('/w_200')) {
-      return url.replace('/upload/', '/upload/w_200,q_auto,f_auto/');
+  let target = url;
+  if (target.startsWith('//')) target = 'https:' + target;
+  else if (target.startsWith('res.cloudinary.com')) target = 'https://' + target;
+  else if (target.startsWith('cloudinary.com')) target = 'https://' + target;
+
+  if (target.includes('res.cloudinary.com') && target.includes('/upload/')) {
+    if (!target.includes('/w_200')) {
+      return target.replace('/upload/', '/upload/w_200,q_auto,f_auto/');
     }
   }
-  return url;
+  return target;
 }
 
 // Ensure base64 string never lands in custom Supabase columns/attachments tables
@@ -2114,37 +2119,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   const [userName, setUserName] = useState(initialUserName);
 
-  // Persistent tombstone helpers to guarantee deleted cashbooks can NEVER reappear
-  const DELETED_BOOKS_KEY = 'trackbook_deleted_book_ids';
-
-  const getDeletedBookIds = (): Set<string> => {
+  // Clean up any legacy or stale tombstone markers from localStorage
+  useEffect(() => {
     try {
-      const raw = localStorage.getItem(DELETED_BOOKS_KEY);
-      if (!raw) return new Set<string>();
-      const parsed = JSON.parse(raw);
-      return new Set<string>(Array.isArray(parsed) ? parsed : []);
-    } catch {
-      return new Set<string>();
-    }
-  };
-
-  const recordDeletedBookId = (id: string) => {
-    if (!id) return;
-    try {
-      const set = getDeletedBookIds();
-      set.add(id);
-      localStorage.setItem(DELETED_BOOKS_KEY, JSON.stringify(Array.from(set)));
-    } catch {}
-  };
-
-  const removeDeletedBookId = (id: string) => {
-    if (!id) return;
-    try {
-      const set = getDeletedBookIds();
-      set.delete(id);
-      localStorage.setItem(DELETED_BOOKS_KEY, JSON.stringify(Array.from(set)));
-    } catch {}
-  };
+      localStorage.removeItem('trackbook_deleted_book_ids');
+      localStorage.removeItem('trackbook_cached_books');
+    } catch (_) {}
+  }, []);
 
   // Helper to ensure cashbooks are always sorted latest created first
   const sortCashbooksLatestFirst = (list: Cashbook[]): Cashbook[] => {
@@ -2161,7 +2142,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const loadCompleteLocalCashbooks = (userId?: string): Cashbook[] => {
     if (typeof window === 'undefined') return [];
     const mergedMap = new Map<string, Cashbook>();
-    const deletedIds = getDeletedBookIds();
 
     // 1. Load cached synced cashbooks strictly scoped to this user
     try {
@@ -2174,7 +2154,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
           parsed.forEach((b: any) => {
-            if (b && b.id && !deletedIds.has(b.id)) {
+            if (b && b.id) {
               mergedMap.set(b.id, {
                 ...b,
                 createdAt: b.createdAt ? new Date(b.createdAt) : (b.created_at ? new Date(b.created_at) : new Date()),
@@ -2226,18 +2206,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const prevUserIdRef = useRef<string | null>(currentUserId || null);
   useEffect(() => {
     if (currentUserId !== prevUserIdRef.current) {
+      const prevId = prevUserIdRef.current;
       prevUserIdRef.current = currentUserId || null;
       if (currentUserId) {
+        // Only clear if switching between two distinct, different users
+        if (prevId && prevId !== currentUserId) {
+          setBooks([]);
+        }
         const cached = loadCompleteLocalCashbooks(currentUserId);
         if (cached.length > 0) {
           setBooks(cached);
           setIsLoading(false);
-        } else {
-          // Reset books for new user until fetch completes
-          setBooks([]);
         }
-
-
       } else {
         // Only clear if user explicitly clicked sign out — NEVER on network loss or background disconnect
         const isExplicit = typeof localStorage !== 'undefined' && localStorage.getItem('trackbook_explicit_logout') === 'true';
@@ -2253,20 +2233,19 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     const effectiveUserId = currentUserId || (typeof localStorage !== 'undefined' ? localStorage.getItem('trackbook_last_user_id') || '' : '');
     const currentInMemory = booksRef.current || [];
     const local = loadCompleteLocalCashbooks(effectiveUserId);
-    const deletedIds = getDeletedBookIds();
 
     const mergedMap = new Map<string, Cashbook>();
 
     // 1. Populate with local cache (contains localStorage cached books + pending offline books + pending entries)
     local.forEach(b => {
-      if (b && b.id && !deletedIds.has(b.id)) {
+      if (b && b.id) {
         mergedMap.set(b.id, b);
       }
     });
 
     // 2. Layer in-memory books to ensure in-memory state, active transactions, and rich image arrays are never lost
     currentInMemory.forEach(b => {
-      if (b && b.id && !deletedIds.has(b.id)) {
+      if (b && b.id) {
         const localBook = mergedMap.get(b.id);
         const inMemoryTxs = (b.transactions && b.transactions.length > 0)
           ? b.transactions
@@ -2964,10 +2943,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     if (!targetId) return;
     const userId = session?.user?.id;
 
-    // 1. Tombstone permanently in localStorage
-    recordDeletedBookId(targetId);
-
-    // 2. Clear from React UI state, refs and caches
+    // 1. Clear from React UI state, refs and caches
     setBooks(prev => prev.filter(b => b.id !== targetId));
     booksRef.current = booksRef.current.filter(b => b.id !== targetId);
     if (activeBookId === targetId) {
@@ -3071,18 +3047,24 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         const { error } = await supabase
           .from('entries')
           .delete()
-          .eq('id', action.data.id)
-          .eq('user_id', session.user.id);
-        if (error) throw error;
+          .eq('id', action.data.id);
+        if (error) console.warn('[DelayedDelete] Supabase delete warning:', error.message);
+        try {
+          await supabase.from('attachments').delete().eq('entry_id', action.data.id);
+          await supabase.from('ai_attachments').delete().eq('entry_id', action.data.id);
+        } catch (_) {}
       } else if (action.type === 'bulk_transactions') {
         const ids = action.data.map((t: any) => t.id);
         console.log('[DelayedDelete] Committing bulk transaction deletion to database:', ids);
         const { error } = await supabase
           .from('entries')
           .delete()
-          .in('id', ids)
-          .eq('user_id', session.user.id);
-        if (error) throw error;
+          .in('id', ids);
+        if (error) console.warn('[DelayedDelete] Supabase bulk delete warning:', error.message);
+        try {
+          await supabase.from('attachments').delete().in('entry_id', ids);
+          await supabase.from('ai_attachments').delete().in('entry_id', ids);
+        } catch (_) {}
       }
     } catch (err) {
       console.error('[DelayedDelete] Failure committing database deletion:', err);
@@ -4444,67 +4426,46 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       let rawCashbooksList: any[] = [];
       let networkFetchSucceeded = false;
 
-      // 1. Fetch all user cashbooks (owned + member/joined) via RBAC Service Backend
-      try {
-        const rbacRes = await fetch(`/api/rbac/user-cashbooks?userId=${session.user.id}&userEmail=${encodeURIComponent(userEmail)}`);
-        if (rbacRes.ok) {
-          const rbacJson = await rbacRes.json();
-          if (rbacJson.success && Array.isArray(rbacJson.cashbooks)) {
-            rawCashbooksList = rbacJson.cashbooks;
-            networkFetchSucceeded = true;
-          }
-        }
-      } catch (rbacErr) {
-        console.warn('[Dashboard] Error calling rbac user-cashbooks:', rbacErr);
-      }
-
-      // 2. Direct Supabase fallback / merge for owned cashbooks
+      // 1. Direct Supabase Query for owned cashbooks (PRIMARY AUTHORITATIVE SOURCE OF TRUTH)
       try {
         const { data: rawOwnedCashbooks, error: ownedErr } = await supabase
           .from('cashbooks')
           .select('*')
           .eq('user_id', session.user.id);
 
-        if (!ownedErr && rawOwnedCashbooks) {
+        if (!ownedErr && Array.isArray(rawOwnedCashbooks)) {
           networkFetchSucceeded = true;
-          const existingIds = new Set(rawCashbooksList.map(c => c.id));
-          for (const cb of rawOwnedCashbooks) {
-            if (!existingIds.has(cb.id)) {
-              rawCashbooksList.push(cb);
-            }
-          }
+          rawCashbooksList = [...rawOwnedCashbooks];
+        } else if (ownedErr) {
+          console.warn('[Dashboard] Direct owned cashbooks query error:', ownedErr.message);
         }
       } catch (cbErr) {
-        console.warn('[Dashboard] Direct owned cashbooks query note:', cbErr);
+        console.warn('[Dashboard] Direct owned cashbooks query exception:', cbErr);
       }
 
-      // 3. Direct Supabase query for cashbook_members in case there are additional member cashbooks
+      // 2. Fetch shared/member cashbooks via RBAC Service Backend
       try {
-        const { data: memberRows, error: memErr } = await supabase
-          .from('cashbook_members')
-          .select('cashbook_id')
-          .or(`user_id.eq.${session.user.id},email.ilike.${userEmail}`)
-          .in('status', ['Active', 'active', 'Accepted', 'accepted']);
-
-        if (!memErr && memberRows) {
-          networkFetchSucceeded = true;
-          const existingIds = new Set(rawCashbooksList.map(c => c.id));
-          const missingIds = memberRows.map(m => m.cashbook_id).filter(id => id && !existingIds.has(id));
-
-          if (missingIds.length > 0) {
-            const { data: memberCashbooks } = await supabase
-              .from('cashbooks')
-              .select('*')
-              .in('id', missingIds);
-
-            if (memberCashbooks && memberCashbooks.length > 0) {
-              rawCashbooksList = [...rawCashbooksList, ...memberCashbooks];
+        const rbacRes = await fetch(`/api/rbac?action=user-cashbooks&userId=${session.user.id}&userEmail=${encodeURIComponent(userEmail)}`);
+        if (rbacRes.ok) {
+          const rbacJson = await rbacRes.json();
+          if (rbacJson.success && Array.isArray(rbacJson.cashbooks)) {
+            networkFetchSucceeded = true;
+            const existingIds = new Set(rawCashbooksList.map(c => c.id));
+            for (const cb of rbacJson.cashbooks) {
+              if (cb && cb.id && !existingIds.has(cb.id)) {
+                rawCashbooksList.push(cb);
+                existingIds.add(cb.id);
+              }
             }
           }
         }
-      } catch (memFetchErr) {
-        console.warn('[Dashboard] Direct cashbook_members query note:', memFetchErr);
+      } catch (rbacErr) {
+        console.warn('[Dashboard] Error calling rbac user-cashbooks:', rbacErr);
       }
+
+      // 3. Strict diagnostic logging for device consistency
+      const isMobileClient = typeof window !== 'undefined' && window.innerWidth < 640;
+      console.log(`[DATA_DIAGNOSTIC] CLIENT: ${isMobileClient ? 'MOBILE' : 'DESKTOP'} | USER_ID: ${session.user.id} | CASHBOOKS: [${rawCashbooksList.map(c => `${c.id} ("${c.name}")`).join(', ')}]`);
 
       // If all network queries failed (e.g. sudden network loss during request):
       if (!networkFetchSucceeded && booksRef.current.length > 0) {
@@ -4573,7 +4534,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
           // Secondary fallback / augmentation via RBAC Service Backend to ensure member entries are fully loaded
           try {
-            const rbacEntRes = await fetch('/api/rbac/cashbook-entries', {
+            const rbacEntRes = await fetch('/api/rbac?action=cashbook-entries', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ cashbookIds, cashbookId: cashbookIds })
@@ -4728,12 +4689,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             };
           });
 
-          // Only restore cached entries if entries network query actually failed
-          if (entryList.length === 0 && entFetchFailed) {
+          // Preserve cached/existing entries if server query returned empty and no explicit deletions occurred
+          if (entryList.length === 0) {
             const existingBook = booksRef.current.find(b => b.id === cb.id);
             const cached = entriesCache.get(cb.id) || existingBook?.transactions || [];
             if (cached.length > 0) {
-              entryList = cached;
+              entryList = cached.filter(t => !pendingEntryIds.has(t.id));
             }
           }
 
@@ -4767,26 +4728,29 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           };
         });
 
-        // Authoritative server books (excluding any deleted ones)
-        const deletedIds = getDeletedBookIds();
-        const cleanServerBooks = mappedBooks.filter(b => b && b.id && !deletedIds.has(b.id));
+        // Authoritative server books from database (SUPABASE IS SINGLE SOURCE OF TRUTH)
         const finalMap = new Map<string, Cashbook>();
         const existingNames = new Set<string>();
 
-        // 1. Authoritative server books from database (SUPABASE IS SINGLE SOURCE OF TRUTH)
-        cleanServerBooks.forEach(b => {
-          finalMap.set(b.id, b);
-          existingNames.add(b.name.trim().toLowerCase());
+        // 1. Authoritative server books from database
+        mappedBooks.forEach(b => {
+          if (b && b.id) {
+            finalMap.set(b.id, b);
+            existingNames.add(b.name.trim().toLowerCase());
+          }
         });
 
-        // 3. Preserve in-flight optimistic cashbooks so newly created cashbooks appear instantly with 0ms delay and never disappear
+        // Preserve any previously loaded in-memory books that were not explicitly deleted
+        for (const existing of booksRef.current) {
+          if (existing && existing.id && !finalMap.has(existing.id) && !pendingBookIds.has(existing.id)) {
+            finalMap.set(existing.id, existing);
+          }
+        }
+
+        // 2. Preserve in-flight optimistic cashbooks so newly created cashbooks appear instantly
         const nowBooks = Date.now();
         for (const [optId, { book: optBook, timestamp }] of optimisticCashbooksRef.current.entries()) {
-          if (deletedIds.has(optId)) {
-            optimisticCashbooksRef.current.delete(optId);
-            continue;
-          }
-          const matchingServerBook = cleanServerBooks.find(b => 
+          const matchingServerBook = mappedBooks.find(b => 
             b.id === optId || 
             (b.name.trim().toLowerCase() === optBook.name.trim().toLowerCase() && (b.user_id === optBook.user_id || (b as any).userId === optBook.user_id))
           );
@@ -4801,15 +4765,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           }
         }
 
-        // NO RESURRECTION OF DELETED BOOKS:
-        // Do NOT re-add books from booksRef.current! If a book is missing from Supabase, it is deleted!
-
         const finalMergedList = sortCashbooksLatestFirst(Array.from(finalMap.values()));
-        setBooks(prev => {
-          const reconciled = reconcileBooks(prev, finalMergedList);
-          booksRef.current = reconciled;
-          return reconciled;
-        });
+        setBooks(finalMergedList);
+        booksRef.current = finalMergedList;
         try {
           if (session?.user?.id) {
             localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(finalMergedList));
@@ -4883,7 +4841,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       console.log('[Dashboard] Native online event detected. Syncing in background.');
       setIsOffline(false);
       setShowOfflinePdfDialog(false);
+      setShowOfflineDialog(false);
       syncManager.network.updateState('good');
+      if (session?.user?.id) {
+        reconcileAndMigrateOfflineData(session)
+          .then((res) => {
+            if (res.migratedBooks > 0 || res.migratedEntries > 0) {
+              console.log(`[Dashboard] Reconciled and migrated ${res.migratedBooks} books and ${res.migratedEntries} entries to Supabase.`);
+              fetchData(true);
+            }
+          })
+          .catch((err) => console.warn('[Dashboard] Reconnect data reconciliation notice:', err));
+      }
       syncManager.triggerSync().then(() => {
         fetchData(true);
         setTimeout(() => fetchData(true), 1500);
@@ -4947,7 +4916,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           if (payload.eventType === 'DELETE') {
             const deletedId = payload.old?.id;
             if (deletedId) {
-              recordDeletedBookId(deletedId);
               setBooks(prev => prev.filter(b => b.id !== deletedId));
               booksRef.current = booksRef.current.filter(b => b.id !== deletedId);
               entriesCache.delete(deletedId);
@@ -4970,9 +4938,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           } else if (payload.eventType === 'INSERT') {
             const newRow = payload.new;
             if (newRow && (newRow.user_id === currentUserId || (currentUserEmail && newRow.user_email?.toLowerCase() === currentUserEmail))) {
-              const deletedIds = getDeletedBookIds();
-              if (deletedIds.has(newRow.id)) return;
-
               setBooks(prev => {
                 if (prev.some(b => b.id === newRow.id)) return prev;
                 // Reconcile optimistic cashbook if matching by name
@@ -5644,6 +5609,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return;
     }
 
+    setIsSubmitting(true);
+    setCreateBookError(null);
+
     const tempId = safeUUID();
     const bookName = newBookName.trim();
     const resolvedUserName = session.user.user_metadata?.full_name || 
@@ -5658,27 +5626,99 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       user_name: resolvedUserName
     };
 
-    // 1. INSTANT SAVE TO UI: Create Cashbook record & update state immediately
+    let saveSuccess = false;
+    let savedRow: any = null;
+
+    // 1. Send INSERT to Supabase and WAIT for confirmed database persistence
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('cashbooks')
+          .insert([payload])
+          .select()
+          .single();
+
+        if (!error && data) {
+          saveSuccess = true;
+          savedRow = data;
+        } else if (error) {
+          console.warn('[CreateBook] Primary insert warning:', error.message);
+          if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
+            const fallbackPayload = {
+              id: payload.id,
+              name: payload.name,
+              created_at: payload.created_at,
+              user_id: payload.user_id
+            };
+            const { data: fbData, error: fbError } = await supabase
+              .from('cashbooks')
+              .insert([fallbackPayload])
+              .select()
+              .single();
+
+            if (!fbError && fbData) {
+              saveSuccess = true;
+              savedRow = fbData;
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error('[CreateBook] Direct insert error:', err);
+      }
+    }
+
+    // 2. Secondary fallback via RBAC/Sync endpoint
+    if (!saveSuccess) {
+      try {
+        const res = await fetch('/api/sync?action=cashbook', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.success) {
+            saveSuccess = true;
+            savedRow = json.cashbook || payload;
+          }
+        }
+      } catch (proxyErr) {
+        console.warn('[CreateBook] Proxy insert error:', proxyErr);
+      }
+    }
+
+    if (!saveSuccess) {
+      setIsSubmitting(false);
+      setCreateBookError("Failed to save cashbook to the database. Please check your internet connection and try again.");
+      return;
+    }
+
+    // 3. ONLY ON CONFIRMED DATABASE PERSISTENCE: Update UI state with real database record
+    const confirmedId = savedRow?.id || tempId;
     const finalBook: Cashbook = {
-      id: tempId,
-      name: bookName,
+      id: confirmedId,
+      name: savedRow?.name || bookName,
       transactions: [],
-      createdAt: new Date(),
-      user_id: session.user.id,
+      createdAt: savedRow?.created_at ? new Date(savedRow.created_at) : new Date(),
+      user_id: savedRow?.user_id || session.user.id,
       syncStatus: 'SYNCED',
-      is_offline: false
+      is_offline: false,
+      user_name: savedRow?.user_name || resolvedUserName
     };
 
     setBooks(prev => {
       const next = [finalBook, ...prev.filter(b => b.id !== finalBook.id)];
       booksRef.current = next;
+      try {
+        localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
+      } catch (_) {}
       return next;
     });
 
     entriesCache.set(finalBook.id, []);
     setActiveBookId(finalBook.id);
 
-    // Close modal and reset input INSTANTLY
+    // Close modal and reset input
     setNewBookName('');
     setCreateBookError(null);
     setIsCreatingBook(false);
@@ -5689,31 +5729,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setTimeout(() => {
       setJustEditedBookId(null);
     }, 2500);
-
-    // 2. Persist to Supabase directly in the background
-    (async () => {
-      if (supabase) {
-        try {
-          const { error } = await supabase
-            .from('cashbooks')
-            .insert([payload]);
-
-          if (error) {
-            console.warn('[CreateBook] Direct insert warning:', error.message);
-            if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
-              await supabase.from('cashbooks').insert([{
-                id: payload.id,
-                name: payload.name,
-                created_at: payload.created_at,
-                user_id: payload.user_id
-              }]);
-            }
-          }
-        } catch (err: any) {
-          console.error('[CreateBook] Direct insert error:', err);
-        }
-      }
-    })();
   };
 
   const handleUpdateBook = async (e: React.FormEvent) => {
@@ -6174,51 +6189,153 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const currentShowForm = showForm;
       const finalType = (currentShowForm ? String(currentShowForm).toLowerCase() : 'in') === 'out' ? 'out' : 'in';
 
-      // 1. INSTANT UPDATE UI: Update state immediately
-      const updatedTx: Transaction = {
-        ...originalTx,
-        amount: amountNum,
-        type: finalType,
-        description: currentDescription || '',
-        category: currentCategory,
-        mode: currentMode,
-        date: dateObj,
-        images: currentSelectedImages,
-        imageLayout: currentImageLayout
-      };
+      setIsSubmitting(true);
 
-      setBooks(prev => prev.map(b => b.id === activeBookId ? {
-        ...b,
-        transactions: b.transactions.map(t => t.id === originalTx.id ? updatedTx : t)
-      } : b));
+      try {
+        const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
+        let finalImages = currentSelectedImages;
+        const uploadPromises = currentSelectedImages.map(async (img) => {
+          const hashIdx = img.indexOf('#');
+          const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
+          const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
 
-      const prevCached = entriesCache.get(activeBookId) || [];
-      entriesCache.set(activeBookId, prevCached.map(t => t.id === originalTx.id ? updatedTx : t));
-      attachmentCache.set(savedId, { images: currentSelectedImages, isAi: false });
+          if (cleanImg.startsWith('blob:')) {
+            const file = imageFilesRef.current[cleanImg];
+            if (file) {
+              const isImage = file.type && file.type.startsWith('image/');
+              const processedFile = isImage ? await compressImage(file) : file;
+              const fileToUpload = processedFile instanceof File 
+                ? processedFile 
+                : new File([processedFile], file.name || 'image.jpg', { type: file.type });
+              const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
+              if (cloudUrl) {
+                return cloudUrl + hash;
+              }
+            }
+            return img;
+          }
+          return img;
+        });
 
-      // Close modal and reset form INSTANTLY
-      setShowForm(null);
-      setEditingTransaction(null);
-      resetForm();
-      setIsSubmitting(false);
-      setProgressModal(null);
+        finalImages = await Promise.all(uploadPromises);
 
-      setTimeout(() => {
-        setJustEditedTransactionId(savedId);
-        const element = document.getElementById(`entry-${savedId}`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        currentSelectedImages.forEach(img => {
+          const cleanImg = img.split('#')[0];
+          if (cleanImg.startsWith('blob:')) {
+            delete imageFilesRef.current[cleanImg];
+            try { URL.revokeObjectURL(cleanImg); } catch (_) {}
+          }
+        });
+
+        const resolvedUser = await resolveUserDataForAttachments();
+        const payload: any = {
+          id: savedId,
+          cashbook_id: activeBookId,
+          user_id: session.user.id,
+          amount: amountNum,
+          type: finalType,
+          description: currentDescription || '',
+          category: currentCategory,
+          mode: currentMode,
+          date: safeToISOString(dateObj),
+          user_name: resolvedUser.name,
+          image_layout: currentImageLayout
+        };
+
+        const attachmentInserts = finalImages.map(url => ({
+          entry_id: savedId,
+          user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
+          user_name: resolvedUser.name,
+          user_email: resolvedUser.email,
+          file_url: url
+        }));
+
+        if (supabase) {
+          const { error: updateErr } = await supabase
+            .from('entries')
+            .update(payload)
+            .eq('id', savedId);
+
+          if (updateErr) {
+            console.warn('[saveTransaction] Update warning:', updateErr.message);
+            if (updateErr.code === '42703' || updateErr.code === 'PGRST204' || updateErr.message?.toLowerCase().includes('column')) {
+              const fallbackPayload = { ...payload };
+              delete fallbackPayload.image_layout;
+              delete fallbackPayload.user_name;
+              await supabase.from('entries').update(fallbackPayload).eq('id', savedId);
+            }
+          }
+
+          await supabase.from('attachments').delete().eq('entry_id', savedId);
+          await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
+          if (attachmentInserts.length > 0) {
+            await supabase.from('attachments').insert(attachmentInserts);
+          }
         }
-        setTimeout(() => {
-          setJustEditedTransactionId(null);
-        }, 2000);
-      }, 50);
 
-      // 2. Persist to database in background
-      (async () => {
-        try {
+        const updatedTx: Transaction = {
+          ...originalTx,
+          amount: amountNum,
+          type: finalType,
+          description: currentDescription || '',
+          category: currentCategory,
+          mode: currentMode,
+          date: dateObj,
+          images: finalImages,
+          imageLayout: currentImageLayout
+        };
+
+        setBooks(prev => prev.map(b => b.id === activeBookId ? {
+          ...b,
+          transactions: b.transactions.map(t => t.id === originalTx.id ? updatedTx : t)
+        } : b));
+
+        const prevCached = entriesCache.get(activeBookId) || [];
+        entriesCache.set(activeBookId, prevCached.map(t => t.id === originalTx.id ? updatedTx : t));
+        attachmentCache.set(savedId, { images: finalImages, isAi: false });
+
+        setShowForm(null);
+        setEditingTransaction(null);
+        resetForm();
+        setIsSubmitting(false);
+
+        setTimeout(() => {
+          setJustEditedTransactionId(savedId);
+          const element = document.getElementById(`entry-${savedId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          setTimeout(() => {
+            setJustEditedTransactionId(null);
+          }, 2000);
+        }, 50);
+
+      } catch (err: any) {
+        console.error('[EditEntry] Save error:', err);
+        setIsSubmitting(false);
+        setError('Failed to save changes to the database. Please try again.');
+      }
+
+    } else {
+      // Direct Creation Mode - PERMANENT SUPABASE PERSISTENCE
+      const currentSelectedImages = [...selectedImages];
+      const currentImageLayout = imageLayout;
+      const currentCategory = finalCategory || 'General';
+      const currentMode = finalMode || 'Cash';
+      const currentDescription = description;
+      const currentShowForm = showForm;
+      const finalType = (currentShowForm ? String(currentShowForm).toLowerCase() : 'in') === 'out' ? 'out' : 'in';
+      const tempId = safeUUID();
+
+      setIsSubmitting(true);
+
+      try {
+        const resolvedUser = await resolveUserDataForAttachments();
+        let finalImages = currentSelectedImages;
+
+        // 1. Upload any attached images/PDF to Cloudinary first
+        if (currentSelectedImages.length > 0) {
           const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
-          let finalImages = currentSelectedImages;
           const uploadPromises = currentSelectedImages.map(async (img) => {
             const hashIdx = img.indexOf('#');
             const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
@@ -6251,231 +6368,162 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               try { URL.revokeObjectURL(cleanImg); } catch (_) {}
             }
           });
+        }
 
-          if (finalImages.some((u, i) => u !== currentSelectedImages[i])) {
-            setBooks(prev => prev.map(b => b.id === activeBookId ? {
-              ...b,
-              transactions: b.transactions.map(t => t.id === savedId ? { ...t, images: finalImages } : t)
-            } : b));
-            const cList = entriesCache.get(activeBookId) || [];
-            entriesCache.set(activeBookId, cList.map(t => t.id === savedId ? { ...t, images: finalImages } : t));
-            attachmentCache.set(savedId, { images: finalImages, isAi: false });
+        const payload: any = {
+          id: tempId,
+          cashbook_id: activeBookId,
+          user_id: session.user.id,
+          user_name: resolvedUser.name || resolvedName,
+          amount: amountNum,
+          type: finalType,
+          description: currentDescription || '',
+          category: currentCategory,
+          mode: currentMode,
+          date: safeToISOString(dateObj),
+          image_layout: currentImageLayout,
+          created_at: new Date().toISOString()
+        };
+
+        let insertSucceeded = false;
+        let insertedRow: any = null;
+
+        // 2. Insert into Supabase and AWAIT confirmed database response
+        if (supabase) {
+          const { data: insData, error: insertErr } = await supabase
+            .from('entries')
+            .insert([payload])
+            .select()
+            .single();
+
+          if (!insertErr && insData) {
+            insertSucceeded = true;
+            insertedRow = insData;
+          } else if (insertErr) {
+            console.warn('[saveTransaction] Primary insert warning:', insertErr.message);
+            if (insertErr.code === '42703' || insertErr.code === 'PGRST204' || insertErr.message?.toLowerCase().includes('column')) {
+              const fallbackPayload = { ...payload };
+              delete fallbackPayload.image_layout;
+              delete fallbackPayload.user_name;
+              const { data: fbData, error: fbErr } = await supabase
+                .from('entries')
+                .insert([fallbackPayload])
+                .select()
+                .single();
+
+              if (!fbErr && fbData) {
+                insertSucceeded = true;
+                insertedRow = fbData;
+              }
+            }
           }
+        }
 
-          const resolvedUser = await resolveUserDataForAttachments();
-          const payload: any = {
-            id: savedId,
-            cashbook_id: activeBookId,
-            user_id: session.user.id,
-            amount: amountNum,
-            type: finalType,
-            description: currentDescription || '',
-            category: currentCategory,
-            mode: currentMode,
-            date: safeToISOString(dateObj),
-            user_name: resolvedUser.name,
-            image_layout: currentImageLayout
-          };
+        // Secondary fallback via RBAC proxy if direct failed
+        if (!insertSucceeded) {
+          try {
+            const rbacRes = await fetch('/api/rbac?action=save-entry', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                entry: payload,
+                userId: session.user.id,
+                userEmail: session.user.email
+              })
+            });
+            if (rbacRes.ok) {
+              const rbacJson = await rbacRes.json();
+              if (rbacJson?.success) {
+                insertSucceeded = true;
+                insertedRow = rbacJson.entry || payload;
+              }
+            }
+          } catch (_) {}
+        }
 
+        if (!insertSucceeded) {
+          setIsSubmitting(false);
+          setError("Failed to save entry to the database. Please check your internet connection and try again.");
+          return;
+        }
+
+        // 3. Save attachments to attachments table safely (does not destroy entry on partial attachment error)
+        if (finalImages.length > 0 && supabase) {
           const attachmentInserts = finalImages.map(url => ({
-            entry_id: savedId,
+            entry_id: insertedRow?.id || tempId,
             user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
             user_name: resolvedUser.name,
             user_email: resolvedUser.email,
             file_url: url
           }));
-
-          if (supabase) {
-            const { error: updateErr } = await supabase
-              .from('entries')
-              .update(payload)
-              .eq('id', savedId);
-
-            if (!updateErr) {
-              await supabase.from('attachments').delete().eq('entry_id', savedId);
-              await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
-              if (attachmentInserts.length > 0) {
-                await supabase.from('attachments').insert(attachmentInserts);
-              }
-            } else if (updateErr.code === '42703' || updateErr.code === 'PGRST204' || updateErr.message?.toLowerCase().includes('column')) {
-              const fallbackPayload = { ...payload };
-              delete fallbackPayload.image_layout;
-              delete fallbackPayload.user_name;
-              await supabase.from('entries').update(fallbackPayload).eq('id', savedId);
-              await supabase.from('attachments').delete().eq('entry_id', savedId);
-              await supabase.from('ai_attachments').delete().eq('entry_id', savedId);
-              if (attachmentInserts.length > 0) {
-                await supabase.from('attachments').insert(attachmentInserts);
-              }
-            }
-          }
-        } catch (err: any) {
-          console.error('[EditEntry] Background update note:', err);
-        }
-      })();
-
-    } else {
-      // Direct Creation Mode - INSTANT SAVE
-      const currentSelectedImages = [...selectedImages];
-      const currentImageLayout = imageLayout;
-      const currentCategory = finalCategory || 'General';
-      const currentMode = finalMode || 'Cash';
-      const currentDescription = description;
-      const currentShowForm = showForm;
-      const finalType = (currentShowForm ? String(currentShowForm).toLowerCase() : 'in') === 'out' ? 'out' : 'in';
-      const tempId = safeUUID();
-
-      // 1. INSTANT UPDATE UI: Add to state immediately
-      const finalTx: Transaction = {
-        id: tempId,
-        clientEntryId: tempId,
-        amount: amountNum,
-        type: finalType,
-        description: currentDescription || '',
-        category: currentCategory,
-        mode: currentMode,
-        date: dateObj,
-        images: currentSelectedImages,
-        imageLayout: currentImageLayout,
-        source: 'Manual',
-        user_name: resolvedName,
-        syncStatus: 'SYNCED',
-        is_offline: false,
-        created_at: new Date().toISOString()
-      };
-
-      setBooks(prev => prev.map(b => b.id === activeBookId ? {
-        ...b,
-        transactions: [finalTx, ...(b.transactions || []).filter(t => t.id !== tempId && t.id !== finalTx.id)]
-      } : b));
-
-      const prevCached = entriesCache.get(activeBookId) || [];
-      entriesCache.set(activeBookId, [finalTx, ...prevCached.filter(t => t.id !== tempId && t.id !== finalTx.id)]);
-      attachmentCache.set(finalTx.id, { images: currentSelectedImages, isAi: false });
-
-      // CLOSE FORM OR RESET FOR NEXT ENTRY INSTANTLY
-      if (submitAndAddNew) {
-        setAmount('');
-        setDescription('');
-        setSelectedImages([]);
-        setImageLayout('split');
-        setIsSubmitting(false);
-      } else {
-        setShowForm(null);
-        resetForm();
-        setIsSubmitting(false);
-        setProgressModal(null);
-      }
-
-      // Scroll and highlight the new transaction immediately
-      setTimeout(() => {
-        setJustEditedTransactionId(finalTx.id);
-        const element = document.getElementById(`entry-${finalTx.id}`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-        setTimeout(() => {
-          setJustEditedTransactionId(null);
-        }, 2000);
-      }, 50);
-
-      // 2. Persist to Supabase in the background
-      (async () => {
-        try {
-          const resolvedUser = await resolveUserDataForAttachments();
-          let finalImages = currentSelectedImages;
-
-          if (currentSelectedImages.length > 0) {
-            const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
-            const uploadPromises = currentSelectedImages.map(async (img) => {
-              const hashIdx = img.indexOf('#');
-              const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
-              const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
-
-              if (cleanImg.startsWith('blob:')) {
-                const file = imageFilesRef.current[cleanImg];
-                if (file) {
-                  const isImage = file.type && file.type.startsWith('image/');
-                  const processedFile = isImage ? await compressImage(file) : file;
-                  const fileToUpload = processedFile instanceof File 
-                    ? processedFile 
-                    : new File([processedFile], file.name || 'image.jpg', { type: file.type });
-                  const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
-                  if (cloudUrl) {
-                    return cloudUrl + hash;
-                  }
-                }
-                return img;
-              }
-              return img;
-            });
-
-            finalImages = await Promise.all(uploadPromises);
-
-            currentSelectedImages.forEach(img => {
-              const cleanImg = img.split('#')[0];
-              if (cleanImg.startsWith('blob:')) {
-                delete imageFilesRef.current[cleanImg];
-                try { URL.revokeObjectURL(cleanImg); } catch (_) {}
-              }
-            });
-
-            if (finalImages.some((u, i) => u !== currentSelectedImages[i])) {
-              setBooks(prev => prev.map(b => b.id === activeBookId ? {
-                ...b,
-                transactions: b.transactions.map(t => t.id === finalTx.id ? { ...t, images: finalImages } : t)
-              } : b));
-              const cList = entriesCache.get(activeBookId) || [];
-              entriesCache.set(activeBookId, cList.map(t => t.id === finalTx.id ? { ...t, images: finalImages } : t));
-              attachmentCache.set(finalTx.id, { images: finalImages, isAi: false });
-            }
-          }
-
-          const payload: any = {
-            id: tempId,
-            cashbook_id: activeBookId,
-            user_id: session.user.id,
-            user_name: resolvedUser.name || resolvedName,
-            amount: amountNum,
-            type: finalType,
-            description: currentDescription || '',
-            category: currentCategory,
-            mode: currentMode,
-            date: safeToISOString(dateObj),
-            image_layout: currentImageLayout,
-            created_at: finalTx.created_at
-          };
-
-          if (supabase) {
-            const { error: insertErr } = await supabase
-              .from('entries')
-              .insert([payload]);
-
-            if (insertErr) {
-              console.warn('[saveTransaction] Primary insert warning:', insertErr.message);
-              if (insertErr.code === '42703' || insertErr.code === 'PGRST204' || insertErr.message?.toLowerCase().includes('column')) {
-                const fallbackPayload = { ...payload };
-                delete fallbackPayload.image_layout;
-                delete fallbackPayload.user_name;
-                await supabase.from('entries').insert([fallbackPayload]);
-              }
-            }
-
-            if (finalImages.length > 0) {
-              const attachmentInserts = finalImages.map(url => ({
-                entry_id: tempId,
-                user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
-                user_name: resolvedUser.name,
-                user_email: resolvedUser.email,
-                file_url: url
-              }));
+          try {
+            const { error: attError } = await supabase.from('attachments').insert(attachmentInserts);
+            if (attError) {
+              console.warn('[saveTransaction] Attachment insert notice, retrying:', attError.message);
               await supabase.from('attachments').insert(attachmentInserts);
             }
+          } catch (attErr) {
+            console.warn('[saveTransaction] Attachment insert exception (entry is safely preserved):', attErr);
           }
-        } catch (dbErr: any) {
-          console.error('[saveTransaction] Database insert error:', dbErr);
         }
-      })();
+
+        // 4. ONLY AFTER CONFIRMED DATABASE INSERT: Update UI state
+        const confirmedId = insertedRow?.id || tempId;
+        const finalTx: Transaction = {
+          id: confirmedId,
+          clientEntryId: confirmedId,
+          amount: amountNum,
+          type: finalType,
+          description: currentDescription || '',
+          category: currentCategory,
+          mode: currentMode,
+          date: dateObj,
+          images: finalImages,
+          imageLayout: currentImageLayout,
+          syncStatus: 'SYNCED',
+          is_offline: false,
+          created_at: insertedRow?.created_at || payload.created_at,
+          user_name: resolvedUser.name || resolvedName
+        };
+
+        setBooks(prev => prev.map(b => b.id === activeBookId ? {
+          ...b,
+          transactions: [finalTx, ...(b.transactions || []).filter(t => t.id !== finalTx.id)]
+        } : b));
+
+        const cached = entriesCache.get(activeBookId) || [];
+        entriesCache.set(activeBookId, [finalTx, ...cached.filter(t => t.id !== finalTx.id)]);
+        attachmentCache.set(finalTx.id, { images: finalImages, isAi: false });
+
+        if (submitAndAddNew) {
+          setAmount('');
+          setDescription('');
+          setSelectedImages([]);
+          setImageLayout('split');
+          setIsSubmitting(false);
+        } else {
+          setShowForm(null);
+          resetForm();
+          setIsSubmitting(false);
+          setProgressModal(null);
+        }
+
+        setTimeout(() => {
+          setJustEditedTransactionId(finalTx.id);
+          const element = document.getElementById(`entry-${finalTx.id}`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          setTimeout(() => {
+            setJustEditedTransactionId(null);
+          }, 2000);
+        }, 50);
+
+      } catch (dbErr: any) {
+        console.error('[saveTransaction] Database insert error:', dbErr);
+        setIsSubmitting(false);
+        setError("Failed to save entry. Please check your connection and try again.");
+      }
     }
   };
 
@@ -16217,7 +16265,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           const book = undoAction.data.book || undoAction.data;
                           const bookId = book?.id;
                           if (bookId) {
-                            removeDeletedBookId(bookId);
                             if (supabase && session?.user?.id) {
                               Promise.resolve(supabase.from('cashbooks').insert([{
                                 id: book.id,
@@ -16253,7 +16300,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                               const book = pair.item.book;
                               const bId = book?.id;
                               if (bId) {
-                                removeDeletedBookId(bId);
                                 if (supabase && session?.user?.id) {
                                   Promise.resolve(supabase.from('cashbooks').insert([{
                                     id: book.id,

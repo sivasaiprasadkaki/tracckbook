@@ -1,5 +1,55 @@
 {
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "trackbook.vercel.app"
+        }
+      ],
+      "destination": "https://trackbook.xyz/$1",
+      "permanent": true
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate, proxy-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/((?!assets/).*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    }
+  ],
   "rewrites": [
+    {
+      "source": "/api/rbac/(.*)",
+      "destination": "/api/rbac?action=$1"
+    },
+    {
+      "source": "/api/sync/(.*)",
+      "destination": "/api/sync?action=$1"
+    },
     {
       "source": "/api/(.*)",
       "destination": "/api/$1"

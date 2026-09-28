@@ -10,7 +10,7 @@ import dotenv from "dotenv";
 import parseReceiptHandler from "./api/gemini/parse-receipt.ts";
 import shareWhatsappHandler from "./api/reports/share-whatsapp.ts";
 import cloudinaryUploadHandler from "./api/cloudinary/upload.ts";
-import { 
+import rbacHandler, { 
   handleCreateInvitation, 
   handleVerifyInvitation, 
   handleAcceptInvitation, 
@@ -119,6 +119,7 @@ app.post("/api/sync/batch", handleBatchSyncOfflineEntries);
 app.delete("/api/rbac/members", handleRemoveMember);
 app.get("/api/rbac/members", handleGetMembers);
 app.post("/api/rbac/revoke-invitation", handleRevokeInvitation);
+app.all("/api/rbac", rbacHandler);
 
 // User Account Status & Admin Management Endpoints
 app.post("/api/auth/check-status", handleCheckUserStatus);
@@ -278,6 +279,24 @@ app.use((req, res, next) => {
     res.setHeader("Expires", "0");
     res.setHeader("Service-Worker-Allowed", "/");
   }
+  next();
+});
+
+// Guard middleware: prevent unhandled relative image/asset requests from hitting Vite transform middleware
+app.use((req, res, next) => {
+  if (req.path.startsWith("/res.cloudinary.com") || req.path.startsWith("/api.cloudinary.com")) {
+    const cleanTarget = req.originalUrl.replace(/^\/+/, "");
+    return res.redirect(301, `https://${cleanTarget}`);
+  }
+
+  if (req.path.startsWith("/api/")) {
+    return res.status(404).json({ error: `API route ${req.method} ${req.path} not found` });
+  }
+
+  if (/\.(com|org|net|io|co|in)$/i.test(req.path) && !req.headers.accept?.includes("text/html")) {
+    return res.status(404).send("Not Found");
+  }
+
   next();
 });
 

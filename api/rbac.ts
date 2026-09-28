@@ -1264,17 +1264,19 @@ export async function handleGetUserCashbooks(req: Request, res: Response) {
       if (cb1) ownedCashbooks = cb1;
     }
     if (userEmail) {
-      const { data: cb2 } = await supabaseAdmin
-        .from('cashbooks')
-        .select('*')
-        .ilike('user_email', userEmail);
-      if (cb2) {
-        cb2.forEach(c => {
-          if (!ownedCashbooks.some(o => o.id === c.id)) {
-            ownedCashbooks.push(c);
-          }
-        });
-      }
+      try {
+        const { data: cb2, error: cb2Err } = await supabaseAdmin
+          .from('cashbooks')
+          .select('*')
+          .ilike('user_email', userEmail);
+        if (!cb2Err && cb2) {
+          cb2.forEach(c => {
+            if (!ownedCashbooks.some(o => o.id === c.id)) {
+              ownedCashbooks.push(c);
+            }
+          });
+        }
+      } catch (_) {}
     }
 
     // 2. Fetch cashbook_members where user is an active member

@@ -202,6 +202,14 @@ const workerBlobCode = `
       return cleanUrl + hash;
     }
 
+    if (cleanUrl.startsWith('//')) {
+      cleanUrl = 'https:' + cleanUrl;
+    } else if (cleanUrl.startsWith('res.cloudinary.com')) {
+      cleanUrl = 'https://' + cleanUrl;
+    } else if (cleanUrl.startsWith('cloudinary.com')) {
+      cleanUrl = 'https://' + cleanUrl;
+    }
+
     let transformation = '';
     if (type === 'preview') {
       transformation = 'f_auto,q_auto,w_300';
@@ -218,6 +226,9 @@ const workerBlobCode = `
     }
 
     if (!cleanUrl.includes('cloudinary.com')) {
+      if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+        return cleanUrl + hash;
+      }
       if (!transformation) {
         return cleanUrl + hash;
       }
@@ -254,9 +265,21 @@ const workerBlobCode = `
     }
 
     const parts = cleanUrl.split(splitter);
-    if (parts.length < 2) return cleanUrl + hash;
+    if (parts.length < 2) {
+      if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+        cleanUrl = 'https://' + cleanUrl.replace(/^\/+/, '');
+      }
+      return cleanUrl + hash;
+    }
 
-    const prefix = parts[0];
+    let prefix = parts[0];
+    if (!prefix.startsWith('http://') && !prefix.startsWith('https://')) {
+      if (prefix.startsWith('//')) {
+        prefix = 'https:' + prefix;
+      } else {
+        prefix = 'https://' + prefix.replace(/^\/+/, '');
+      }
+    }
     const remaining = parts[1];
     if (!remaining) return cleanUrl + hash;
 
