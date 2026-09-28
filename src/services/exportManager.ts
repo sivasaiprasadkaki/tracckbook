@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { addPdfBrandingFooter } from '../utils/pdfBranding';
 import XLSX from 'xlsx-js-style';
 import { uploadToCloudinary, getUserCloudinaryFolder, getExportOptimizedCloudinaryUrl } from './cloudinary';
@@ -267,7 +268,7 @@ const workerBlobCode = `
     const parts = cleanUrl.split(splitter);
     if (parts.length < 2) {
       if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-        cleanUrl = 'https://' + cleanUrl.replace(/^\/+/, '');
+        cleanUrl = 'https://' + cleanUrl.replace(/^[/]+/, '');
       }
       return cleanUrl + hash;
     }
@@ -277,7 +278,7 @@ const workerBlobCode = `
       if (prefix.startsWith('//')) {
         prefix = 'https:' + prefix;
       } else {
-        prefix = 'https://' + prefix.replace(/^\/+/, '');
+        prefix = 'https://' + prefix.replace(/^[/]+/, '');
       }
     }
     const remaining = parts[1];
@@ -329,13 +330,20 @@ const workerBlobCode = `
             return;
           }
 
-          const response = await fetch(targetUrl);
+          const controller = new AbortController();
+          const timerId = setTimeout(() => {
+            try { controller.abort(); } catch (_) {}
+          }, 4500);
+
+          const response = await fetch(targetUrl, { signal: controller.signal });
+          clearTimeout(timerId);
+
           if (!response.ok) throw new Error('HTTP ' + response.status);
           const blob = await response.blob();
           const buffer = await blob.arrayBuffer();
           results[url] = { buffer, type: blob.type };
         } catch (err) {
-          console.warn('[Worker debug] Fetch failed:', url, err);
+          console.warn('[Worker debug] Fetch failed or timed out:', url, err);
           results[url] = { error: err.message || 'Error downloading image' };
         }
       }));
@@ -370,6 +378,7 @@ export class BackgroundExportManager {
   private worker: Worker | null = null;
   private isProcessing = false;
   private cloudName = 'dd2kcpetc';
+  private blobCache = new Map<string, Blob>();
   
   public onReviewAiScan?: (results: any[], taskId?: string) => void;
   private notifications: JobNotification[] = [];
@@ -781,15 +790,20 @@ export class BackgroundExportManager {
         // Build jsPDF instance inside core thread with absolute safety
         const pdfBlob = await this.generatePdfBlob(task, transactions, imageMap);
 
-        // Save output blob to IndexedDB
-        await this.db.saveBlob(task.id, pdfBlob);
+        // Keep in memory blobCache immediately!
+        this.blobCache.set(task.id, pdfBlob);
+
+        // Save output blob to IndexedDB safely
+        await this.db.saveBlob(task.id, pdfBlob).catch(err => {
+          console.warn('[ExportManager] Non-fatal saveBlob to IndexedDB error:', err);
+        });
 
         // Complete task
         task.status = 'completed';
         task.progress = 100;
         task.completedAt = new Date().toISOString();
         task.durationMs = Date.now() - startTime;
-        task.message = 'PDF saved to local storage!';
+        task.message = 'PDF ready for download!';
         await this.db.saveTask(task);
         this.notifyListeners();
 
@@ -858,14 +872,19 @@ export class BackgroundExportManager {
         const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
         const excelBlob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 
-        // Save output blob to IndexedDB
-        await this.db.saveBlob(task.id, excelBlob);
+        // Keep in memory blobCache immediately!
+        this.blobCache.set(task.id, excelBlob);
+
+        // Save output blob to IndexedDB safely
+        await this.db.saveBlob(task.id, excelBlob).catch(err => {
+          console.warn('[ExportManager] Non-fatal saveBlob to IndexedDB error:', err);
+        });
 
         task.status = 'completed';
         task.progress = 100;
         task.completedAt = new Date().toISOString();
         task.durationMs = Date.now() - startTime;
-        task.message = 'Excel saved to local storage!';
+        task.message = 'Excel ready for download!';
         await this.db.saveTask(task);
         this.notifyListeners();
 
@@ -1169,14 +1188,34 @@ export class BackgroundExportManager {
     }
   }
 
-  // Web Worker execution engine
+  // Web Worker execution engine with robust timeouts and graceful fallbacks
   private downloadImagesInWorker(task: ExportTask, urls: string[]): Promise<{ [url: string]: string }> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
+      let isDone = false;
+      const finish = (result: { [url: string]: string }) => {
+        if (!isDone) {
+          isDone = true;
+          clearTimeout(timeoutId);
+          resolve(result);
+        }
+      };
+
+      // 10-second safety net timeout to prevent background worker hanging
+      const timeoutId = setTimeout(() => {
+        console.warn('[ExportManager] downloadImagesInWorker safety timeout reached. Proceeding with export.');
+        finish({});
+      }, 10000);
+
       try {
         if (!this.worker) {
           const blob = new Blob([workerBlobCode], { type: 'application/javascript' });
           this.worker = new Worker(URL.createObjectURL(blob));
         }
+
+        this.worker.onerror = (err) => {
+          console.warn('[ExportManager] Worker error caught:', err);
+          finish({});
+        };
 
         const isStrongCompression = task.transactionsCount >= 80;
 
@@ -1187,25 +1226,30 @@ export class BackgroundExportManager {
           if (type === 'progress') {
             task.progress = progress;
             task.message = message;
-            await this.db.saveTask(task);
+            await this.db.saveTask(task).catch(() => {});
             this.notifyListeners();
           } else if (type === 'complete') {
-            // Clean up listener
-            this.worker!.removeEventListener('message', onProgressMessage);
+            try {
+              this.worker?.removeEventListener('message', onProgressMessage);
+            } catch (_) {}
             
             // Convert ArrayBuffers back to Object URLs in main thread
             const resolvedMap: { [url: string]: string } = {};
-            for (const [url, data] of Object.entries(results as any)) {
+            for (const [url, data] of Object.entries((results || {}) as any)) {
               if (typeof data === 'string') {
                 resolvedMap[url] = data; // Data URL or base64
               } else if (data && (data as any).buffer) {
-                const blob = new Blob([(data as any).buffer], { type: (data as any).type });
-                resolvedMap[url] = URL.createObjectURL(blob);
+                try {
+                  const blob = new Blob([(data as any).buffer], { type: (data as any).type || 'image/jpeg' });
+                  resolvedMap[url] = URL.createObjectURL(blob);
+                } catch (_) {
+                  resolvedMap[url] = url;
+                }
               } else {
-                resolvedMap[url] = url; // Fallback to rawUrl
+                resolvedMap[url] = url;
               }
             }
-            resolve(resolvedMap);
+            finish(resolvedMap);
           }
         };
 
@@ -1221,43 +1265,191 @@ export class BackgroundExportManager {
         });
 
       } catch (err) {
-        reject(err);
+        console.warn('[ExportManager] Could not instantiate worker, proceeding directly:', err);
+        finish({});
       }
     });
   }
 
-  // Pure jsPDF assembler
+  // Pure jsPDF assembler with complete statement table and attachments
   private async generatePdfBlob(task: ExportTask, transactions: any[], imageMap: { [url: string]: string }): Promise<Blob> {
     const isOriginalQuality = !task.isCompressed;
-    const isStrongCompression = task.transactionsCount >= 80;
-    const doc = new jsPDF({ compress: !isOriginalQuality });
-    
-    const transactionsWithImages = transactions.filter(t => t.images && t.images.length > 0);
-    const totalImages = transactionsWithImages.reduce((acc, t) => acc + (t.images?.length || 0), 0);
-    
-    // Canvas helper to add optimized image to doc
-    const addOptimizedImageToDoc = (
-      pdfDoc: jsPDF,
-      src: string,
-      alias: string,
-      x: number,
-      y: number,
-      w: number,
-      h: number
-    ) => {
-      let format = 'JPEG';
-      let payload: string | HTMLImageElement = src;
-      if (src.startsWith('data:image/png')) format = 'PNG';
-      else if (src.startsWith('data:image/webp')) format = 'WEBP';
-      
-      if (typeof src === 'string' && src.includes('base64,')) {
-        payload = src.split('base64,')[1];
-      }
-      const compression = isOriginalQuality ? 'NONE' : 'FAST';
-      pdfDoc.addImage(payload, format as any, x, y, w, h, alias, compression);
-    };
+    const doc = new jsPDF({ compress: !isOriginalQuality, unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
 
+    const sortedTxs = [...transactions].sort((a, b) => {
+      const dateA = new Date(a.date || a.created_at || 0).getTime();
+      const dateB = new Date(b.date || b.created_at || 0).getTime();
+      return dateA - dateB;
+    });
+
+    const totalIn = sortedTxs.filter(t => t.type === 'in').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    const totalOut = sortedTxs.filter(t => t.type === 'out').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    const netBalance = totalIn - totalOut;
+
+    const dates = sortedTxs
+      .map(t => new Date(t.date || t.created_at || 0).getTime())
+      .filter(ts => !isNaN(ts) && ts > 0);
+    const dateRangeStr = dates.length > 0
+      ? `${new Date(Math.min(...dates)).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} – ${new Date(Math.max(...dates)).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
+      : 'All Transactions';
+
+    const nowFormatted = new Date().toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    // 1. Top Indigo Accent Line
+    doc.setFillColor(79, 70, 229);
+    doc.rect(14, 10, pageWidth - 28, 2, 'F');
+
+    // 2. TrackBook Brand & Title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(79, 70, 229);
+    doc.text('TrackBook', 14, 20);
+
+    doc.setFontSize(12);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`CASHBOOK STATEMENT — ${task.cashbookName.toUpperCase()}`, 14, 27);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Statement Period: ${dateRangeStr}  |  Generated: ${nowFormatted}  |  Entries: ${sortedTxs.length}`, 14, 33);
+
+    // 3. Three Financial Summary Cards
+    const margin = 14;
+    const cardGap = 4;
+    const cardWidth = (pageWidth - (margin * 2) - (cardGap * 2)) / 3;
+    const cardY = 37;
+    const cardHeight = 15;
+
+    // Total Cash In Card
+    doc.setFillColor(236, 253, 245);
+    doc.setDrawColor(167, 243, 208);
+    doc.roundedRect(margin, cardY, cardWidth, cardHeight, 2, 2, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(5, 150, 105);
+    doc.text('TOTAL CASH IN', margin + 3.5, cardY + 5);
+    doc.setFontSize(10);
+    doc.text(`Rs. ${totalIn.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, margin + 3.5, cardY + 11.5);
+
+    // Total Cash Out Card
+    const card2X = margin + cardWidth + cardGap;
+    doc.setFillColor(255, 241, 242);
+    doc.setDrawColor(254, 205, 211);
+    doc.roundedRect(card2X, cardY, cardWidth, cardHeight, 2, 2, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(225, 29, 72);
+    doc.text('TOTAL CASH OUT', card2X + 3.5, cardY + 5);
+    doc.setFontSize(10);
+    doc.text(`Rs. ${totalOut.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, card2X + 3.5, cardY + 11.5);
+
+    // Net Balance Card
+    const card3X = margin + (cardWidth + cardGap) * 2;
+    doc.setFillColor(238, 242, 255);
+    doc.setDrawColor(199, 210, 254);
+    doc.roundedRect(card3X, cardY, cardWidth, cardHeight, 2, 2, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(67, 56, 202);
+    doc.text('NET BALANCE', card3X + 3.5, cardY + 5);
+    doc.setFontSize(10);
+    const balancePrefix = netBalance >= 0 ? '+' : '';
+    doc.text(`${balancePrefix}Rs. ${netBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, card3X + 3.5, cardY + 11.5);
+
+    // 4. Build Transactions Table with Running Balance
+    let runningBalance = 0;
+    const tableBody = sortedTxs.map((t, idx) => {
+      const isIn = t.type === 'in';
+      const amt = Number(t.amount) || 0;
+      if (isIn) {
+        runningBalance += amt;
+      } else {
+        runningBalance -= amt;
+      }
+
+      const formattedIn = isIn ? `Rs. ${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-';
+      const formattedOut = !isIn ? `Rs. ${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-';
+      const formattedBal = `${runningBalance >= 0 ? '' : '-'}Rs. ${Math.abs(runningBalance).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const hasReceipt = t.images && t.images.length > 0 ? `Yes (${t.images.length})` : '-';
+
+      return [
+        idx + 1,
+        safeFormatDate(t.date || t.created_at),
+        t.description || 'Entry',
+        t.category || 'General',
+        t.mode || 'Cash',
+        formattedIn,
+        formattedOut,
+        formattedBal,
+        hasReceipt
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 56,
+      margin: { left: 14, right: 14, bottom: 20 },
+      head: [['#', 'Date', 'Details / Description', 'Category', 'Mode', 'Cash In', 'Cash Out', 'Balance', 'Bill']],
+      body: tableBody,
+      theme: 'striped',
+      headStyles: {
+        fillColor: [30, 41, 59],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 7.5,
+        halign: 'left'
+      },
+      styles: {
+        fontSize: 7.5,
+        cellPadding: 2,
+        textColor: [30, 41, 59],
+        overflow: 'linebreak'
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      columnStyles: {
+        0: { halign: 'center', cellWidth: 8 },
+        1: { cellWidth: 20 },
+        2: { cellWidth: 'auto' },
+        3: { cellWidth: 20 },
+        4: { cellWidth: 16 },
+        5: { halign: 'right', fontStyle: 'bold', textColor: [5, 150, 105], cellWidth: 22 },
+        6: { halign: 'right', fontStyle: 'bold', textColor: [225, 29, 72], cellWidth: 22 },
+        7: { halign: 'right', fontStyle: 'bold', cellWidth: 22 },
+        8: { halign: 'center', cellWidth: 14 }
+      },
+      foot: [[
+        '',
+        '',
+        'TOTAL / BALANCE',
+        '',
+        '',
+        `Rs. ${totalIn.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        `Rs. ${totalOut.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        `${balancePrefix}Rs. ${Math.abs(netBalance).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        ''
+      ]],
+      footStyles: {
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        fontStyle: 'bold',
+        fontSize: 8,
+        halign: 'right'
+      }
+    });
+
+    // 5. Helpers for image attachments
     const parseUrlMetadata = (url: string) => {
+      if (!url || typeof url !== 'string') return { rotate: 0, fit: 'original' as const };
       const hashIdx = url.indexOf('#');
       const hash = hashIdx !== -1 ? url.substring(hashIdx + 1) : '';
       const params = new URLSearchParams(hash);
@@ -1266,291 +1458,209 @@ export class BackgroundExportManager {
       return { rotate, fit };
     };
 
-    const getRotatedPdfImage = (src: string, rotate: number): Promise<{ src: string; width: number; height: number }> => {
+    const getRotatedPdfImage = (src: string, rotate: number): Promise<{ src: string; width: number; height: number; isDataUrl: boolean }> => {
       return new Promise((resolve) => {
+        if (!src) {
+          resolve({ src: '', width: 300, height: 400, isDataUrl: false });
+          return;
+        }
+        let resolved = false;
+        const finish = (res: { src: string; width: number; height: number; isDataUrl: boolean }) => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(tId);
+            resolve(res);
+          }
+        };
+        const tId = setTimeout(() => {
+          finish({ src, width: 300, height: 400, isDataUrl: src.startsWith('data:') });
+        }, 3000);
+
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
           try {
-            const origWidth = img.naturalWidth || img.width;
-            const origHeight = img.naturalHeight || img.height;
+            const origWidth = img.naturalWidth || img.width || 300;
+            const origHeight = img.naturalHeight || img.height || 400;
             
-            if (rotate === 0) {
-              resolve({ src, width: origWidth, height: origHeight });
-              return;
-            }
-
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             if (!ctx) {
-              resolve({ src, width: origWidth, height: origHeight });
+              finish({ src, width: origWidth, height: origHeight, isDataUrl: src.startsWith('data:') });
               return;
             }
 
-            const angleRad = (rotate * Math.PI) / 180;
+            const angleRad = ((rotate || 0) * Math.PI) / 180;
             const is90or270 = rotate === 90 || rotate === 270;
-
             const targetWidth = is90or270 ? origHeight : origWidth;
             const targetHeight = is90or270 ? origWidth : origHeight;
 
             canvas.width = targetWidth;
             canvas.height = targetHeight;
 
-            ctx.translate(targetWidth / 2, targetHeight / 2);
-            ctx.rotate(angleRad);
-            ctx.drawImage(img, -origWidth / 2, -origHeight / 2, origWidth, origHeight);
+            if (rotate !== 0) {
+              ctx.translate(targetWidth / 2, targetHeight / 2);
+              ctx.rotate(angleRad);
+              ctx.drawImage(img, -origWidth / 2, -origHeight / 2, origWidth, origHeight);
+            } else {
+              ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+            }
 
-            const quality = isOriginalQuality ? 1.0 : 0.85;
+            const quality = isOriginalQuality ? 0.95 : 0.8;
             const rotatedSrc = canvas.toDataURL('image/jpeg', quality);
-            resolve({ src: rotatedSrc, width: targetWidth, height: targetHeight });
-          } catch (err) {
-            console.error('[ExportManager] Canvas rotation failed:', err);
-            resolve({ src, width: 300, height: 400 });
+            finish({ src: rotatedSrc, width: targetWidth, height: targetHeight, isDataUrl: true });
+          } catch (_) {
+            finish({ src, width: 300, height: 400, isDataUrl: src.startsWith('data:') });
           }
         };
         img.onerror = () => {
-          resolve({ src, width: 300, height: 400 });
+          finish({ src, width: 300, height: 400, isDataUrl: src.startsWith('data:') });
         };
         img.src = src;
       });
     };
 
+    const addOptimizedImageToDoc = (
+      pdfDoc: jsPDF,
+      src: string,
+      alias: string,
+      x: number,
+      y: number,
+      w: number,
+      h: number,
+      isDataUrl: boolean
+    ) => {
+      try {
+        if (isDataUrl || src.startsWith('data:')) {
+          let format = 'JPEG';
+          let payload = src;
+          if (src.startsWith('data:image/png')) format = 'PNG';
+          else if (src.startsWith('data:image/webp')) format = 'WEBP';
+          if (typeof src === 'string' && src.includes('base64,')) {
+            payload = src.split('base64,')[1];
+          }
+          const compression = isOriginalQuality ? 'NONE' : 'FAST';
+          pdfDoc.addImage(payload, format as any, x, y, w, h, alias, compression);
+        } else {
+          // Render a clean visual card with link to view the receipt
+          pdfDoc.setFillColor(248, 250, 252);
+          pdfDoc.setDrawColor(226, 232, 240);
+          pdfDoc.roundedRect(x, y, w, Math.min(h, 40), 3, 3, 'FD');
+          pdfDoc.setFont('helvetica', 'bold');
+          pdfDoc.setFontSize(9);
+          pdfDoc.setTextColor(79, 70, 229);
+          pdfDoc.text('Click here to view receipt attachment online', x + 10, y + 18);
+          if (src.startsWith('http://') || src.startsWith('https://')) {
+            pdfDoc.textWithLink('(External Cloud Receipt Link)', x + 10, y + 28, { url: src });
+          }
+        }
+      } catch (e) {
+        console.warn('[ExportManager] addImage fallback:', e);
+      }
+    };
+
+    // 6. Attachment Pages (if any transactions have receipt images)
+    const transactionsWithImages = sortedTxs.filter(t => t.images && t.images.length > 0);
     if (transactionsWithImages.length > 0) {
-      let processedImages = 0;
-      let isFirstPage = true;
-
+      let receiptNumber = 0;
       for (const t of transactionsWithImages) {
-        // cooperative yielding
-        await new Promise(r => setTimeout(r, 10));
+        if (!t.images || t.images.length === 0) continue;
+        const layout = t.imageLayout || 'split';
 
-        if (t.images) {
-          const layout = t.imageLayout || 'split';
-          
-          if (layout === 'merge') {
-            for (let i = 0; i < t.images.length; i += 2) {
-              await new Promise(r => setTimeout(r, 10));
+        if (layout === 'merge') {
+          for (let i = 0; i < t.images.length; i += 2) {
+            doc.addPage();
+            receiptNumber++;
 
-              if (!isFirstPage) doc.addPage();
-              isFirstPage = false;
+            doc.setFillColor(79, 70, 229);
+            doc.rect(14, 10, pageWidth - 28, 1.5, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(30, 41, 59);
+            doc.text(`Receipt Attachment #${receiptNumber} — Transaction: ${t.description || 'Entry'} (${t.type === 'in' ? '+' : '-'}Rs. ${t.amount}) • ${safeFormatDate(t.date || t.created_at)}`, 14, 16);
 
-              const pageWidth = doc.internal.pageSize.getWidth();
-              const pageHeight = doc.internal.pageSize.getHeight();
-              const margin = 8;
-              const gap = 3;
-              const availableWidth = pageWidth - (margin * 2) - gap;
-              const imgWidth = availableWidth / 2;
-              
-              const safeTop = 15;
-              const safeBottom = pageHeight - 18;
-              const availableHeight = safeBottom - safeTop;
-              const imgHeight = availableHeight;
+            const gap = 4;
+            const availableW = pageWidth - 28 - gap;
+            const slotW = availableW / 2;
+            const slotH = pageHeight - 45;
+            const safeY = 22;
 
-              // Add header text
-              doc.setFontSize(10);
-              doc.setTextColor(80);
-              doc.text(`Transaction: ${t.description} (${t.amount}) - ${safeFormatDate(t.date)}`, 10, 10);
-
-              // 1st image
-              try {
-                const rawImg1 = t.images[i];
-                const resolvedSrc = imageMap[rawImg1] || rawImg1;
-                
-                const { rotate, fit } = parseUrlMetadata(rawImg1);
-                const rotatedData = await getRotatedPdfImage(resolvedSrc, rotate);
-                
-                const ar = rotatedData.width / rotatedData.height;
-                let w = imgWidth;
-                let h = imgWidth / ar;
-                
-                if (fit === 'width') {
-                  w = imgWidth;
-                  h = imgWidth / ar;
-                  if (h > imgHeight) {
-                    h = imgHeight;
-                    w = imgHeight * ar;
-                  }
-                } else if (fit === 'height') {
-                  h = imgHeight;
-                  w = imgHeight * ar;
-                  if (w > imgWidth) {
-                    w = imgWidth;
-                    h = imgWidth / ar;
-                  }
-                } else { // original contain
-                  w = imgWidth;
-                  h = imgWidth / ar;
-                  if (h > imgHeight) {
-                    h = imgHeight;
-                    w = imgHeight * ar;
-                  }
-                }
-                
-                if (h > imgHeight) {
-                  h = imgHeight;
-                  w = imgHeight * ar;
-                }
-                if (w > imgWidth) {
-                  w = imgWidth;
-                  h = imgWidth / ar;
-                }
-                
-                const drawX = margin + (imgWidth - w) / 2;
-                const drawY = safeTop + (availableHeight - h) / 2;
-                
-                addOptimizedImageToDoc(doc, rotatedData.src, rawImg1, drawX, drawY, w, h);
-              } catch (e) {
-                console.error('[ExportManager] jsPDF addImage error:', e);
-              }
-              processedImages++;
-              
-              task.progress = Math.min(96, Math.round(88 + (processedImages / totalImages) * 8));
-              task.message = `Rendering attachment image ${processedImages}/${totalImages}...`;
-              await this.db.saveTask(task);
-              this.notifyListeners();
-
-              // 2nd image
-              if (i + 1 < t.images.length) {
-                try {
-                  const rawImg2 = t.images[i + 1];
-                  const resolvedSrc2 = imageMap[rawImg2] || rawImg2;
-                  
-                  const { rotate, fit } = parseUrlMetadata(rawImg2);
-                  const rotatedData = await getRotatedPdfImage(resolvedSrc2, rotate);
-                  
-                  const ar = rotatedData.width / rotatedData.height;
-                  let w = imgWidth;
-                  let h = imgWidth / ar;
-                  
-                  if (fit === 'width') {
-                    w = imgWidth;
-                    h = imgWidth / ar;
-                    if (h > imgHeight) {
-                      h = imgHeight;
-                      w = imgHeight * ar;
-                    }
-                  } else if (fit === 'height') {
-                    h = imgHeight;
-                    w = imgHeight * ar;
-                    if (w > imgWidth) {
-                      w = imgWidth;
-                      h = imgWidth / ar;
-                    }
-                  } else { // original contain
-                    w = imgWidth;
-                    h = imgWidth / ar;
-                    if (h > imgHeight) {
-                      h = imgHeight;
-                      w = imgHeight * ar;
-                    }
-                  }
-                  
-                  if (h > imgHeight) {
-                    h = imgHeight;
-                    w = imgHeight * ar;
-                  }
-                  if (w > imgWidth) {
-                    w = imgWidth;
-                    h = imgWidth / ar;
-                  }
-                  
-                  const drawX = margin + imgWidth + gap + (imgWidth - w) / 2;
-                  const drawY = safeTop + (availableHeight - h) / 2;
-                  
-                  addOptimizedImageToDoc(doc, rotatedData.src, rawImg2, drawX, drawY, w, h);
-                } catch (e) {
-                  console.error('[ExportManager] jsPDF addImage error:', e);
-                }
-                processedImages++;
-
-                task.progress = Math.min(96, Math.round(88 + (processedImages / totalImages) * 8));
-                task.message = `Rendering attachment image ${processedImages}/${totalImages}...`;
-                await this.db.saveTask(task);
-                this.notifyListeners();
-              }
+            const raw1 = t.images[i];
+            const src1 = imageMap[raw1] || raw1;
+            const { rotate: rot1 } = parseUrlMetadata(raw1);
+            const data1 = await getRotatedPdfImage(src1, rot1);
+            const ar1 = (data1.width || 300) / (data1.height || 400);
+            let w1 = slotW;
+            let h1 = slotW / ar1;
+            if (h1 > slotH) {
+              h1 = slotH;
+              w1 = slotH * ar1;
             }
-          } else {
-            // Split layout
-            for (const img of t.images) {
-              await new Promise(r => setTimeout(r, 10));
+            const drawX1 = 14 + (slotW - w1) / 2;
+            const drawY1 = safeY + (slotH - h1) / 2;
+            addOptimizedImageToDoc(doc, data1.src, raw1, drawX1, drawY1, w1, h1, data1.isDataUrl);
 
-              try {
-                if (!isFirstPage) doc.addPage();
-                isFirstPage = false;
-
-                const pageWidth = doc.internal.pageSize.getWidth();
-                const pageHeight = doc.internal.pageSize.getHeight();
-                
-                // Centered, tall and slim layout
-                const safeTop = 16;
-                const safeBottom = pageHeight - 25;
-                const availableHeight = safeBottom - safeTop;
-                
-                const maxWidth = pageWidth * 0.62;
-                const maxHeight = Math.min(pageHeight * 0.70, availableHeight);
-                const targetX = (pageWidth - maxWidth) / 2;
-                const targetY = safeTop + (availableHeight - maxHeight) / 2;
-
-                doc.setFontSize(10);
-                doc.setTextColor(80);
-                doc.text(`Transaction: ${t.description} (${t.amount}) - ${safeFormatDate(t.date)}`, 10, 10);
-
-                const resolvedSrc = imageMap[img] || img;
-                
-                const { rotate, fit } = parseUrlMetadata(img);
-                const rotatedData = await getRotatedPdfImage(resolvedSrc, rotate);
-                
-                const ar = rotatedData.width / rotatedData.height;
-                let w = maxWidth;
-                let h = maxWidth / ar;
-                
-                if (fit === 'width') {
-                  w = maxWidth;
-                  h = maxWidth / ar;
-                } else if (fit === 'height') {
-                  h = maxHeight;
-                  w = maxHeight * ar;
-                } else { // original contain
-                  w = maxWidth;
-                  h = maxWidth / ar;
-                  if (h > maxHeight) {
-                    h = maxHeight;
-                    w = maxHeight * ar;
-                  }
-                }
-                
-                if (h > maxHeight) {
-                  h = maxHeight;
-                  w = maxHeight * ar;
-                }
-                if (w > maxWidth) {
-                  w = maxWidth;
-                  h = maxWidth / ar;
-                }
-                
-                const drawX = targetX + (maxWidth - w) / 2;
-                const drawY = targetY + (maxHeight - h) / 2;
-
-                addOptimizedImageToDoc(doc, rotatedData.src, img, drawX, drawY, w, h);
-              } catch (e) {
-                console.error('[ExportManager] jsPDF addImage error:', e);
+            if (i + 1 < t.images.length) {
+              const raw2 = t.images[i + 1];
+              const src2 = imageMap[raw2] || raw2;
+              const { rotate: rot2 } = parseUrlMetadata(raw2);
+              const data2 = await getRotatedPdfImage(src2, rot2);
+              const ar2 = (data2.width || 300) / (data2.height || 400);
+              let w2 = slotW;
+              let h2 = slotW / ar2;
+              if (h2 > slotH) {
+                h2 = slotH;
+                w2 = slotH * ar2;
               }
-              processedImages++;
-
-              task.progress = Math.min(96, Math.round(88 + (processedImages / totalImages) * 8));
-              task.message = `Rendering attachment image ${processedImages}/${totalImages}...`;
-              await this.db.saveTask(task);
-              this.notifyListeners();
+              const drawX2 = 14 + slotW + gap + (slotW - w2) / 2;
+              const drawY2 = safeY + (slotH - h2) / 2;
+              addOptimizedImageToDoc(doc, data2.src, raw2, drawX2, drawY2, w2, h2, data2.isDataUrl);
             }
+          }
+        } else {
+          // Split layout: 1 image per page
+          for (const img of t.images) {
+            doc.addPage();
+            receiptNumber++;
+
+            doc.setFillColor(79, 70, 229);
+            doc.rect(14, 10, pageWidth - 28, 1.5, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(30, 41, 59);
+            doc.text(`Receipt Attachment #${receiptNumber} — Transaction: ${t.description || 'Entry'} (${t.type === 'in' ? '+' : '-'}Rs. ${t.amount}) • ${safeFormatDate(t.date || t.created_at)}`, 14, 16);
+
+            const maxW = pageWidth * 0.72;
+            const maxH = pageHeight - 50;
+            const targetX = (pageWidth - maxW) / 2;
+            const safeY = 22;
+
+            const resolvedSrc = imageMap[img] || img;
+            const { rotate } = parseUrlMetadata(img);
+            const rotatedData = await getRotatedPdfImage(resolvedSrc, rotate);
+
+            const ar = (rotatedData.width || 300) / (rotatedData.height || 400);
+            let w = maxW;
+            let h = maxW / ar;
+            if (h > maxH) {
+              h = maxH;
+              w = maxH * ar;
+            }
+            if (w > maxW) {
+              w = maxW;
+              h = maxW / ar;
+            }
+
+            const drawX = targetX + (maxW - w) / 2;
+            const drawY = safeY + (maxH - h) / 2;
+
+            addOptimizedImageToDoc(doc, rotatedData.src, img, drawX, drawY, w, h, rotatedData.isDataUrl);
           }
         }
       }
-    } else {
-      doc.setFontSize(12);
-      doc.text("No attachments found in this book report.", 14, 20);
-      await new Promise(r => setTimeout(r, 100));
     }
 
-    // Add page numbers and branding footer
+    // 7. Add professional TrackBook Branding Footer on every page
     const totalPages = doc.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i);
@@ -1558,8 +1668,8 @@ export class BackgroundExportManager {
     }
 
     task.progress = 98;
-    task.message = 'Completing background compression...';
-    await this.db.saveTask(task);
+    task.message = 'Completing document compression...';
+    await this.db.saveTask(task).catch(() => {});
     this.notifyListeners();
 
     return doc.output('blob');
@@ -1677,37 +1787,92 @@ export class BackgroundExportManager {
     }
   }
 
-  // Trigger web storage download on click
-  triggerDownload(fileName: string, blob: Blob) {
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // Retrieve generated blob from in-memory cache or IndexedDB
+  async getBlob(taskId: string): Promise<Blob | null> {
+    if (this.blobCache.has(taskId)) {
+      return this.blobCache.get(taskId)!;
+    }
+    try {
+      const blob = await this.db.getBlob(taskId);
+      if (blob) {
+        this.blobCache.set(taskId, blob);
+        return blob;
+      }
+    } catch (e) {
+      console.warn('[ExportManager] IDB getBlob failed:', e);
+    }
+    return null;
   }
 
-  // Download a previously completed report
+  // Trigger web storage download with robust link management
+  triggerDownload(fileName: string, blob: Blob) {
+    try {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        } catch (_) {}
+      }, 30000);
+    } catch (e) {
+      console.error('[ExportManager] triggerDownload error:', e);
+    }
+  }
+
+  // Download a previously completed report with self-healing fallback
   async downloadCompletedReport(taskId: string) {
     try {
       const task = this.tasks.find(t => t.id === taskId);
       if (!task) return;
       
-      const blob = await this.db.getBlob(taskId);
+      let blob = this.blobCache.get(taskId);
+      if (!blob) {
+        blob = await this.db.getBlob(taskId).catch(() => null) || undefined;
+        if (blob) this.blobCache.set(taskId, blob);
+      }
+      
       if (blob) {
         this.triggerDownload(task.fileName, blob);
         vibrateFeedback(40);
-      } else {
-        console.warn('File not found in local db for task:', taskId);
-        this.notifications = [{
-          id: 'notif_err_' + Date.now(),
-          type: 'pdf',
-          message: 'File not found in local database. Please retry the export.',
-          taskId,
-          timestamp: new Date().toISOString()
-        }, ...this.notifications];
-        this.notifyListeners();
+        return;
       }
+
+      // Self-healing fallback: re-generate on demand if transactions payload exists
+      const transactions = await this.db.getPayload(taskId).catch(() => null);
+      if (transactions && transactions.length > 0) {
+        if (task.type === 'excel') {
+          const { blob: excelBlob } = await this.generateExcelReportData(task.cashbookName, transactions);
+          this.blobCache.set(taskId, excelBlob);
+          await this.db.saveBlob(taskId, excelBlob).catch(() => {});
+          this.triggerDownload(task.fileName, excelBlob);
+          vibrateFeedback(40);
+          return;
+        } else {
+          const newPdfBlob = await this.generatePdfBlob(task, transactions, {});
+          this.blobCache.set(taskId, newPdfBlob);
+          await this.db.saveBlob(taskId, newPdfBlob).catch(() => {});
+          this.triggerDownload(task.fileName, newPdfBlob);
+          vibrateFeedback(40);
+          return;
+        }
+      }
+
+      console.warn('File not found in local db for task:', taskId);
+      this.notifications = [{
+        id: 'notif_err_' + Date.now(),
+        type: 'pdf',
+        message: 'File not found in cache. Please re-export from the Reports menu.',
+        taskId,
+        timestamp: new Date().toISOString()
+      }, ...this.notifications];
+      this.notifyListeners();
     } catch (err) {
       console.error('Error loading file from DB:', err);
       this.notifications = [{

@@ -292,7 +292,7 @@ export default function PdfPageSelectorModal({
       const sortedPageNums = Array.from(selectedPages).sort((a, b) => a - b);
       const convertedFiles: File[] = [];
       const pdf = pdfDocRef.current;
-      const baseName = file.name.replace(/\.[^/.]+$/, '').replace(/[\s-]+/g, '_');
+      const baseName = file.name.replace(/\.[^\/.]+$/, '').replace(/[\s-]+/g, '_');
 
       for (let idx = 0; idx < sortedPageNums.length; idx++) {
         const pageNum = sortedPageNums[idx];

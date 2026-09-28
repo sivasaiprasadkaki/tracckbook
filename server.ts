@@ -61,9 +61,9 @@ if (geminiApiKey !== "") {
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-// Health check endpoint (for container health checks and platform monitoring)
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok" });
+// Health check endpoints (for Cloud Run startup, liveness probes, and platform monitoring)
+app.get(["/health", "/healthz", "/api/health", "/ping"], (req, res) => {
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 // Body parser supporting larger images
@@ -337,14 +337,36 @@ if (!isProduction) {
   });
 } else {
   console.log("[Server] Configuring production static asset server from:", distPath);
-  app.use(express.static(distPath));
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+  }
   app.get("*", (req, res) => {
-    res.sendFile(path.join(distPath, "index.html"));
+    const distIndex = path.join(distPath, "index.html");
+    if (fs.existsSync(distIndex)) {
+      return res.sendFile(distIndex, (err) => {
+        if (err && !res.headersSent) {
+          res.status(200).send("<!doctype html><html><head><title>AI TrackBook</title></head><body><div id='root'></div><script type='module' src='/src/main.tsx'></script></body></html>");
+        }
+      });
+    }
+    const rootIndex = path.resolve(__dirname, "index.html");
+    if (fs.existsSync(rootIndex)) {
+      return res.sendFile(rootIndex, (err) => {
+        if (err && !res.headersSent) {
+          res.status(200).send("<!doctype html><html><head><title>AI TrackBook</title></head><body><div id='root'></div><script type='module' src='/src/main.tsx'></script></body></html>");
+        }
+      });
+    }
+    res.status(200).send("<!doctype html><html><head><title>AI TrackBook</title></head><body><div id='root'>AI TrackBook is ready</div></body></html>");
   });
 }
 
 const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`[Express] Running on http://0.0.0.0:${PORT} (Mode: ${isProduction ? "production" : "development"}, NODE_ENV: ${process.env.NODE_ENV || "unset"})`);
+});
+
+server.on("error", (err: any) => {
+  console.error(`[Server] Critical listen error on port ${PORT}:`, err);
 });
 
 const handleShutdown = () => {

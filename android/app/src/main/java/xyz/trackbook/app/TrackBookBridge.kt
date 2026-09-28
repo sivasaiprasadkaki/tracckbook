@@ -29,6 +29,11 @@ import org.json.JSONObject
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
+import android.os.Build
+import android.os.Environment
+import android.widget.Toast
+import java.io.File
+import java.io.FileOutputStream
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -507,5 +512,60 @@ class TrackBookBridge(
         val digest = MessageDigest.getInstance("SHA-256")
         val bytes = digest.digest(rawNonce.toByteArray(Charsets.UTF_8))
         return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    // =========================================================================
+    // 5. NATIVE FILE DOWNLOAD & SHARING
+    // =========================================================================
+
+    @JavascriptInterface
+    fun downloadBase64File(base64Data: String, fileName: String, mimeType: String): Boolean {
+        return try {
+            val cleanBase64 = if (base64Data.contains(",")) {
+                base64Data.substringAfter(",")
+            } else {
+                base64Data
+            }
+            val bytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val contentValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+                val resolver = activity.contentResolver
+                val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { os ->
+                        os.write(bytes)
+                        os.flush()
+                    }
+                    mainHandler.post {
+                        Toast.makeText(activity, "Saved to Downloads: $fileName", Toast.LENGTH_LONG).show()
+                    }
+                    return true
+                }
+            } else {
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (!downloadsDir.exists()) downloadsDir.mkdirs()
+                val file = File(downloadsDir, fileName)
+                FileOutputStream(file).use { os ->
+                    os.write(bytes)
+                    os.flush()
+                }
+                mainHandler.post {
+                    Toast.makeText(activity, "Saved to Downloads: $fileName", Toast.LENGTH_LONG).show()
+                }
+                return true
+            }
+            false
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to save file: ${e.message}", e)
+            mainHandler.post {
+                Toast.makeText(activity, "Download error: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+            false
+        }
     }
 }

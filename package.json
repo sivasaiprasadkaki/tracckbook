@@ -32,7 +32,10 @@
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.14.1",
     "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.1.14",
     "tesseract.js": "^7.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
     "vite": "^6.2.0",
     "xlsx": "^0.18.5",
     "xlsx-js-style": "^1.2.0"
@@ -45,10 +48,9 @@
     "@vercel/node": "^5.8.17",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.0",
-    "sharp": "^0.35.3",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "sharp": "^0.35.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
   }
 }

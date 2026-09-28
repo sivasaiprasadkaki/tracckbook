@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8",
+  "version": "1.2.9",
   "releaseNotes": [
     "Database authoritative persistence for all cashbooks and entries",
     "Complete removal of client-side tombstone filtering and stale cache dependencies",

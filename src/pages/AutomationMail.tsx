@@ -318,10 +318,6 @@ export default function AutomationMail({ session, theme, setTheme }: AutomationM
 
   const handleDownloadPDF = async () => {
     if (!selectedBook) return;
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      alert('You are currently offline. PDF reports cannot be downloaded without an active internet connection. Please reconnect to the internet to download your report.');
-      return;
-    }
     vibrate(10);
     // Delegate entirely to the existing reports module background generator with compression
     await backgroundExportManager.enqueueTask(selectedBook.id, selectedBook.name, selectedBook.transactions || [], true);

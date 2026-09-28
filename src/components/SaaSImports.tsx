@@ -242,7 +242,8 @@ export default function SaaSImports({
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -10 }}
             className="space-y-6"
-                      <div>
+          >
+            <div>
               <h3 className={cn("text-base font-semibold", theme === 'dark' ? "text-zinc-100" : "text-zinc-900")}>
                 Data Field Column Mapping
               </h3>

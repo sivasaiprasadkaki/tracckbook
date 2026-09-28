@@ -311,7 +311,7 @@ export default function ImageEditorModal({
         }
 
         // Create a new file preserving the name and type
-        const newFileName = file.name.replace(/\.[^/.]+$/, "") + '_edited.jpg';
+        const newFileName = file.name.replace(/\.[^\/.]+$/, "") + '_edited.jpg';
         const editedFile = new File([blob], newFileName, { type: 'image/jpeg' });
 
         setIsProcessing(false);

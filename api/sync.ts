@@ -5,7 +5,7 @@ let _adminClient: any = null;
 function getSupabaseAdmin() {
   if (!_adminClient) {
     const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://chbbaswtawmbmyquoiac.supabase.co';
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoYmJhc3d0YXdtYm15cXVvaWFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMjE5MTcsImV4cCI6MjA5MDY5NzkxN30.4qNJG7rjpEJ9vfyiGy_mteUI9_X1I6dNekEuXV26Xic';
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoYmJhc3d0YXdtYm15cXVvaWFjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTEyMTkxNywiZXhwIjoyMDkwNjk3OTE3fQ.jxxIH2KoO4S-O4hGrINDQ9Rh_2BmeD7MI_2B1P5KXgI';
     _adminClient = createClient(url, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false }
     });
@@ -378,14 +378,28 @@ export async function handleDeleteCashbook(req: Request, res: Response) {
       return res.status(400).json({ success: false, error: 'Missing cashbook id' });
     }
 
-    // 1. Delete all entries belonging to this cashbook
+    // 1. Delete all attachments belonging to this cashbook's entries
+    try {
+      const { data: cbEntries } = await supabaseAdmin.from('entries').select('id').eq('cashbook_id', id);
+      if (cbEntries && cbEntries.length > 0) {
+        const entryIds = cbEntries.map((e: any) => e.id);
+        await supabaseAdmin.from('attachments').delete().in('entry_id', entryIds);
+        try {
+          await supabaseAdmin.from('ai_attachments').delete().in('entry_id', entryIds);
+        } catch (_) {}
+      }
+    } catch (e: any) {
+      console.warn('[Sync Server] Warning deleting attachments for cashbook:', e.message);
+    }
+
+    // 2. Delete all entries belonging to this cashbook
     try {
       await supabaseAdmin.from('entries').delete().eq('cashbook_id', id);
     } catch (e: any) {
       console.warn('[Sync Server] Warning deleting entries for cashbook:', e.message);
     }
 
-    // 2. Delete all members belonging to this cashbook
+    // 3. Delete all members belonging to this cashbook
     try {
       await supabaseAdmin.from('cashbook_members').delete().eq('cashbook_id', id);
     } catch (e: any) {

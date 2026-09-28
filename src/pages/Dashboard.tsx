@@ -5673,7 +5673,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         const res = await fetch('/api/sync?action=cashbook', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify({
+            action: 'cashbook',
+            ...payload,
+            user_email: session.user.email
+          })
         });
         if (res.ok) {
           const json = await res.json();
@@ -5909,12 +5913,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     const txs = entriesCache.get(bookId) || book.transactions || [];
     if (format === 'excel') {
       await backgroundExportManager.enqueueExcelTask(book.id, book.name, txs);
-    } else {
-      if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-        vibrate(20);
-        setShowOfflinePdfDialog(true);
-        return;
-      }
       setPdfQualityModalState({
         isOpen: true,
         cashbookId: book.id,
@@ -11494,12 +11492,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   <div 
                     onClick={() => {
                       if (activeBook) {
-                        if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-                          vibrate(20);
-                          setShowOfflinePdfDialog(true);
-                          return;
-                        }
-                        if (!filteredTransactions || filteredTransactions.length === 0) {
+                        vibrate(15);
+                        const txs = (filteredTransactions && filteredTransactions.length > 0)
+                          ? filteredTransactions
+                          : (activeBook.transactions || []);
+                        if (!txs || txs.length === 0) {
                           showInAppAlert('No Transactions', 'No transactions found to export in this cashbook.', 'info');
                           return;
                         }
@@ -11507,7 +11504,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           isOpen: true,
                           cashbookId: activeBook.id,
                           cashbookName: activeBook.name,
-                          transactions: filteredTransactions
+                          transactions: txs
                         });
                       }
                     }}

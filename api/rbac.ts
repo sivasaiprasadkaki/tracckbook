@@ -8,7 +8,7 @@ let _adminClient: any = null;
 export function getSupabaseAdmin() {
   if (!_adminClient) {
     const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://chbbaswtawmbmyquoiac.supabase.co';
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoYmJhc3d0YXdtYm15cXVvaWFjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMjE5MTcsImV4cCI6MjA5MDY5NzkxN30.4qNJG7rjpEJ9vfyiGy_mteUI9_X1I6dNekEuXV26Xic';
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNoYmJhc3d0YXdtYm15cXVvaWFjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTEyMTkxNywiZXhwIjoyMDkwNjk3OTE3fQ.jxxIH2KoO4S-O4hGrINDQ9Rh_2BmeD7MI_2B1P5KXgI';
     _adminClient = createClient(url, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false }
     });

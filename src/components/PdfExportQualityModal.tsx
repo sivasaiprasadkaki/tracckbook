@@ -46,6 +46,8 @@ export function PdfExportQualityModal({
   const [progress, setProgress] = useState<number>(0);
   const [statusMessage, setStatusMessage] = useState<string>('Preparing your PDF...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [readyBlob, setReadyBlob] = useState<Blob | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   const [isOffline, setIsOffline] = useState(() => 
     (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline'
@@ -101,9 +103,16 @@ export function PdfExportQualityModal({
       setProgress(0);
       setErrorMessage(null);
       setStatusMessage('Preparing your PDF...');
+      setReadyBlob(null);
+      setBlobUrl(null);
       const offline = (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline';
       setIsOffline(offline);
       setShowOfflineModalWarning(false);
+    } else {
+      if (blobUrl) {
+        try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+        setBlobUrl(null);
+      }
     }
   }, [isOpen]);
 
@@ -129,6 +138,15 @@ export function PdfExportQualityModal({
       if (task.status === 'completed') {
         setProgress(100);
         setState('ready');
+        backgroundExportManager.getBlob(activeTaskId).then(b => {
+          if (b) {
+            setReadyBlob(b);
+            try {
+              const url = URL.createObjectURL(b);
+              setBlobUrl(url);
+            } catch (_) {}
+          }
+        });
       } else if (task.status === 'failed') {
         setErrorMessage(task.error || 'Export encountered an issue. Please try again.');
         setState('error');
@@ -143,12 +161,6 @@ export function PdfExportQualityModal({
   }, [activeTaskId, state, totalReceipts]);
 
   const handleStartExport = async () => {
-    const isCurrentlyOffline = isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline';
-    if (isCurrentlyOffline) {
-      handleOfflineAttempt();
-      return;
-    }
-
     try {
       setState('generating');
       setProgress(5);
@@ -157,7 +169,7 @@ export function PdfExportQualityModal({
           ? selectedQuality === 'original'
             ? `Preparing ${totalReceipts} original receipt${totalReceipts > 1 ? 's' : ''}...`
             : `Optimizing ${totalReceipts} receipt${totalReceipts > 1 ? 's' : ''}...`
-          : 'Preparing your PDF...'
+          : 'Compiling financial statement...'
       );
 
       const isCompressed = selectedQuality === 'smart_compressed';
@@ -178,16 +190,17 @@ export function PdfExportQualityModal({
   };
 
   const handleDownload = async () => {
-    if (!activeTaskId) return;
-    const isCurrentlyOffline = isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline';
-    if (isCurrentlyOffline) {
-      handleOfflineAttempt();
+    const filename = `${cashbookName.replace(/[^a-z0-9]/gi, '_')}.pdf`;
+    if (readyBlob) {
+      backgroundExportManager.triggerDownload(filename, readyBlob);
       return;
     }
-    try {
-      await backgroundExportManager.downloadCompletedReport(activeTaskId);
-    } catch (err) {
-      console.error('[PdfExportQualityModal] Download trigger error:', err);
+    if (activeTaskId) {
+      try {
+        await backgroundExportManager.downloadCompletedReport(activeTaskId);
+      } catch (err) {
+        console.error('[PdfExportQualityModal] Download trigger error:', err);
+      }
     }
   };
 
@@ -358,17 +371,6 @@ export function PdfExportQualityModal({
                   </motion.div>
                 </div>
 
-                {/* Actions */}
-                {isOffline && (
-                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 flex items-start gap-2.5 text-xs font-medium">
-                    <WifiOff size={16} className="shrink-0 mt-0.5 text-amber-500" />
-                    <div className="leading-relaxed">
-                      <span className="font-bold text-amber-800 dark:text-amber-300">Offline Notice: </span>
-                      You are currently offline, so PDF reports cannot be downloaded. An active internet connection is required to compile receipts and generate PDFs. As soon as you are back online, PDF export will work normally.
-                    </div>
-                  </div>
-                )}
-
                 <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-zinc-800">
                   <button
                     id="btn-cancel-quality-selection"
@@ -381,16 +383,11 @@ export function PdfExportQualityModal({
                     id="btn-export-pdf-confirm"
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={isOffline ? handleOfflineAttempt : handleStartExport}
-                    className={cn(
-                      "px-6 py-2.5 text-xs sm:text-sm font-semibold rounded-xl shadow-sm flex items-center gap-2 transition-all cursor-pointer",
-                      isOffline
-                        ? "bg-amber-600 hover:bg-amber-700 text-white shadow-amber-500/20"
-                        : "bg-indigo-600 hover:bg-indigo-700 text-white"
-                    )}
+                    onClick={handleStartExport}
+                    className="px-6 py-2.5 text-xs sm:text-sm font-semibold rounded-xl shadow-sm flex items-center gap-2 transition-all cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white"
                   >
-                    {isOffline ? <WifiOff size={16} /> : <Download size={16} />}
-                    {isOffline ? 'Offline (Download Blocked)' : 'Export PDF'}
+                    <Download size={16} />
+                    Export PDF
                   </motion.button>
                 </div>
               </div>
@@ -469,17 +466,23 @@ export function PdfExportQualityModal({
                     id="btn-download-pdf-ready"
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={isOffline ? handleOfflineAttempt : handleDownload}
-                    className={cn(
-                      "w-full py-3 px-4 rounded-xl font-semibold text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all",
-                      isOffline 
-                        ? "bg-amber-600 hover:bg-amber-700 text-white shadow-amber-500/20" 
-                        : "bg-indigo-600 hover:bg-indigo-700 text-white"
-                    )}
+                    onClick={handleDownload}
+                    className="w-full py-3 px-4 rounded-xl font-semibold text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all bg-indigo-600 hover:bg-indigo-700 text-white"
                   >
-                    {isOffline ? <WifiOff size={18} /> : <Download size={18} />}
-                    {isOffline ? 'Offline (Download Blocked)' : 'Download PDF'}
+                    <Download size={18} />
+                    Download PDF
                   </motion.button>
+                  {blobUrl && (
+                    <a
+                      href={blobUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-2 px-4 rounded-xl text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <ExternalLink size={14} />
+                      Preview / Open PDF
+                    </a>
+                  )}
                   <button
                     id="btn-done-pdf-modal"
                     onClick={onClose}

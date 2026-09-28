@@ -278,6 +278,19 @@ class MainActivity : AppCompatActivity() {
         // Native Download Listener for PDF, Excel, and CSV Reports
         webView.setDownloadListener { url, userAgent, contentDisposition, mimetype, contentLength ->
             try {
+                if (url.startsWith("data:")) {
+                    val mime = if (url.contains(";base64,")) url.substringAfter("data:").substringBefore(";base64,") else mimetype
+                    val base64Data = url.substringAfter("base64,")
+                    val fileName = "TrackBook_Report_" + System.currentTimeMillis() + (if (mime.contains("pdf")) ".pdf" else ".xlsx")
+                    bridge.downloadBase64File(base64Data, fileName, mime)
+                    return@setDownloadListener
+                }
+
+                if (url.startsWith("blob:")) {
+                    // Blob URLs are handled via JavaScript bridge downloadBase64File or in-app blob reader
+                    return@setDownloadListener
+                }
+
                 val request = DownloadManager.Request(Uri.parse(url)).apply {
                     setMimeType(mimetype)
                     addRequestHeader("User-Agent", userAgent)
