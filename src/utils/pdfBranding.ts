@@ -1,10 +1,8 @@
 import { jsPDF } from 'jspdf';
 
 export const TRACKBOOK_BRANDING = {
-  line1: "Powered by",
-  urlDisplay: "trackbook.xyz",
+  line1: "Powered by TrackBook, AI-Powered Expense Management",
   url: "https://trackbook.xyz",
-  legacyText: "Powered by trackbook.xyz"
 };
 
 /**
@@ -23,36 +21,30 @@ export function addPdfBrandingFooter(doc: jsPDF, pageNum: number, totalPages: nu
   const originalTextColor = doc.getTextColor();
 
   // 1. Draw thin, light gray divider line
-  doc.setDrawColor(230, 230, 230);
+  doc.setDrawColor(220, 220, 220);
   doc.setLineWidth(0.1);
-  doc.line(15, pageHeight - 16, pageWidth - 15, pageHeight - 16);
+  doc.line(15, pageHeight - 22, pageWidth - 15, pageHeight - 22);
 
   // 2. Set font styling for branding line
-  doc.setFont("Helvetica", "normal");
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
+  doc.setTextColor(140, 140, 140); // small professional light gray font
 
-  const prefix = "Powered by ";
-  const urlDisplay = "trackbook.xyz";
-  const fullUrl = "https://trackbook.xyz";
+  // 3. Center and render Line 1: "Powered by TrackBook, AI-Powered Expense Management"
+  const line1Text = TRACKBOOK_BRANDING.line1;
+  const line1Width = doc.getTextWidth(line1Text);
+  const line1X = (pageWidth - line1Width) / 2;
+  doc.text(line1Text, line1X, pageHeight - 17);
 
-  doc.setTextColor(140, 140, 140);
-  const prefixWidth = doc.getTextWidth(prefix);
+  // 4. Center and render Line 2: Clickable URL "https://trackbook.xyz"
+  const urlText = TRACKBOOK_BRANDING.url;
+  const urlWidth = doc.getTextWidth(urlText);
+  const urlX = (pageWidth - urlWidth) / 2;
+  
+  // Use textWithLink for native, perfectly overlayed clickable hyperlink
+  doc.setTextColor(79, 70, 229); // Modern Indigo color for the link to make it look clickable and premium
+  doc.textWithLink(urlText, urlX, pageHeight - 12, { url: urlText });
 
-  doc.setTextColor(79, 70, 229); // Indigo color for clickable link
-  const urlWidth = doc.getTextWidth(urlDisplay);
-
-  const totalBrandWidth = prefixWidth + urlWidth;
-  const brandX = (pageWidth - totalBrandWidth) / 2;
-
-  // Render "Powered by "
-  doc.setTextColor(140, 140, 140);
-  doc.text(prefix, brandX, pageHeight - 11);
-
-  // Render "trackbook.xyz" as clickable hyperlink
-  doc.setTextColor(79, 70, 229);
-  doc.textWithLink(urlDisplay, brandX + prefixWidth, pageHeight - 11, { url: fullUrl });
-
-  // 3. Draw the standard Page X of Y and Document title in a matching subtle style
+  // 5. Draw the standard Page X of Y and Document title in a matching subtle style
   doc.setFontSize(7.5);
   doc.setTextColor(160, 160, 160);
   

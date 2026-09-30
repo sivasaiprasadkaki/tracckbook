@@ -35,7 +35,19 @@ export default function DesktopSignIn({
   setMode,
   navigate
 }: DesktopSignInProps) {
-  const [rememberMe, setRememberMe] = useState(true);
+  const [rememberMe, setRememberMe] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('supabase_remember_me');
+      return saved === null ? true : saved === 'true';
+    }
+    return true;
+  });
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('supabase_remember_me', rememberMe ? 'true' : 'false');
+    }
+  }, [rememberMe]);
 
   // Validation: Check if email and password are valid
   const isEmailValid = Boolean(email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()));

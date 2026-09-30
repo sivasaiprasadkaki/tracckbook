@@ -1,9 +1,8 @@
 {
-  "version": "1.2.9",
+  "version": "1.2.5",
   "releaseNotes": [
-    "Database authoritative persistence for all cashbooks and entries",
-    "Complete removal of client-side tombstone filtering and stale cache dependencies",
-    "Strict preservation of last valid data on transient query errors",
-    "Verified instant multi-device synchronization across Desktop and Mobile"
+    "Ultra-fast background PDF compilation & optimization workers",
+    "Staggered wave load transitions for cashbook transactions",
+    "Real-time backup caching to eliminate layout jumps & empty flashes"
   ]
 }

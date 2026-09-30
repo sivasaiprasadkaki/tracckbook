@@ -11,9 +11,6 @@ import {
   Lock
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { checkUserAccountStatus } from '../services/userStatusService';
-import { clearSessionUnlocked } from '../services/mpinSecurityService';
-import { InAppDialog } from '../components/InAppDialog';
 
 export default function ResetPassword() {
   const [password, setPassword] = useState('');
@@ -23,7 +20,6 @@ export default function ResetPassword() {
   const [success, setSuccess] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [showBlockedDialog, setShowBlockedDialog] = useState(false);
   const [checking, setChecking] = useState(true);
   const navigate = useNavigate();
 
@@ -34,74 +30,20 @@ export default function ResetPassword() {
         setChecking(false);
         return;
       }
-      try {
-        const res = await supabase.auth.getSession();
-        const session = res?.data?.session || null;
-        if (session?.user) {
-          const statusRes = await checkUserAccountStatus({
-            userId: session.user.id,
-            email: session.user.email,
-          });
-
-          if (statusRes.status === 'blocked') {
-            console.warn('[ResetPassword] User account is BLOCKED in TrackBook.');
-            try {
-              sessionStorage.setItem('auth_blocked_notice', 'User blocked');
-              localStorage.setItem('trackbook_explicit_logout', 'true');
-              await supabase.auth.signOut();
-            } catch {}
-            clearSessionUnlocked();
-            setError('User blocked');
-            setShowBlockedDialog(true);
-            setChecking(false);
-            return;
-          }
-        } else {
-          // If no session, they might have accessed this page directly without a recovery token
-          // Or the token might have expired.
-          const hash = window.location.hash || '';
-          const search = window.location.search || '';
-          if (
-            !hash.includes('type=recovery') && 
-            !hash.includes('access_token=') && 
-            !search.includes('type=recovery') && 
-            !search.includes('code=')
-          ) {
-            setError('Invalid or expired reset link. Please request a new one.');
-          }
+      const res = await supabase.auth.getSession();
+      const session = res?.data?.session || null;
+      if (!session) {
+        // If no session, they might have accessed this page directly without a recovery token
+        // Or the token might have expired.
+        // We can check the URL for recovery tokens too, but Supabase usually handles this.
+        const hash = window.location.hash;
+        if (!hash.includes('type=recovery') && !hash.includes('access_token=')) {
+           setError('Invalid or expired reset link. Please request a new one.');
         }
-      } catch (err: any) {
-        console.warn('[ResetPassword] Session check note:', err);
       }
       setChecking(false);
     };
     checkSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        const statusRes = await checkUserAccountStatus({
-          userId: session.user.id,
-          email: session.user.email,
-        });
-        if (statusRes.status === 'blocked') {
-          try {
-            sessionStorage.setItem('auth_blocked_notice', 'User blocked');
-            localStorage.setItem('trackbook_explicit_logout', 'true');
-            await supabase?.auth.signOut();
-          } catch {}
-          clearSessionUnlocked();
-          setError('User blocked');
-          setShowBlockedDialog(true);
-          return;
-        }
-      }
-
-      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
-        setError(null);
-      }
-    });
-
-    return () => subscription.unsubscribe();
   }, []);
 
   const handleResetPassword = async (e: React.FormEvent) => {
@@ -127,49 +69,11 @@ export default function ResetPassword() {
     setSuccess(null);
 
     try {
-      // Check current user status before updating password
-      const sessionRes = await supabase.auth.getSession();
-      const currentSession = sessionRes?.data?.session;
-      if (currentSession?.user) {
-        const statusRes = await checkUserAccountStatus({
-          userId: currentSession.user.id,
-          email: currentSession.user.email,
-        });
-
-        if (statusRes.status === 'blocked') {
-          console.warn('[ResetPassword] Account is blocked. Password reset forbidden.');
-          try {
-            sessionStorage.setItem('auth_blocked_notice', 'User blocked');
-            localStorage.setItem('trackbook_explicit_logout', 'true');
-            await supabase.auth.signOut();
-          } catch {}
-          clearSessionUnlocked();
-          setError('User blocked');
-          setShowBlockedDialog(true);
-          setLoading(false);
-          return;
-        }
-      }
-
       const { error } = await supabase.auth.updateUser({
         password: password
       });
 
-      if (error) {
-        const lower = (error.message || '').toLowerCase();
-        const code = (error.code || '').toLowerCase();
-        if (
-          lower.includes('banned') ||
-          lower.includes('user is banned') ||
-          code === 'user_banned' ||
-          lower.includes('blocked')
-        ) {
-          setError('User blocked');
-          setShowBlockedDialog(true);
-          return;
-        }
-        throw error;
-      }
+      if (error) throw error;
 
       setSuccess('Password updated successfully! Redirecting to login...');
       setTimeout(() => {
@@ -177,13 +81,7 @@ export default function ResetPassword() {
       }, 3000);
     } catch (err: any) {
       console.error('Reset password error:', err);
-      const lower = (err?.message || '').toLowerCase();
-      if (lower.includes('banned') || lower.includes('blocked')) {
-        setError('User blocked');
-        setShowBlockedDialog(true);
-      } else {
-        setError(err.message || 'An error occurred while updating your password.');
-      }
+      setError(err.message || 'An error occurred while updating your password.');
     } finally {
       setLoading(false);
     }
@@ -293,25 +191,6 @@ export default function ResetPassword() {
           </button>
         </div>
       </motion.div>
-
-      {/* Blocked User Dialog */}
-      <InAppDialog
-        isOpen={showBlockedDialog}
-        options={{
-          title: 'User blocked',
-          message: 'Your TrackBook account has been blocked.',
-          type: 'error',
-          confirmText: 'OK',
-          onConfirm: () => {
-            setShowBlockedDialog(false);
-            navigate('/login', { replace: true, state: { error: 'User blocked' } });
-          },
-        }}
-        onClose={() => {
-          setShowBlockedDialog(false);
-          navigate('/login', { replace: true, state: { error: 'User blocked' } });
-        }}
-      />
     </div>
   );
 }

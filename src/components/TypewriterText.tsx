@@ -38,13 +38,16 @@ export default function TypewriterText({
       startTimeout = setTimeout(() => {
         if (isCancelled) return;
         let index = 0;
+
         intervalId = setInterval(() => {
           if (isCancelled) return;
           index++;
           setDisplayedText(text.slice(0, index));
+
           if (index >= text.length) {
             clearInterval(intervalId);
             setIsTyping(false);
+
             if (loop) {
               loopTimeout = setTimeout(() => {
                 if (!isCancelled) startTyping();

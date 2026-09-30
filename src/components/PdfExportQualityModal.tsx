@@ -15,7 +15,6 @@ import {
   WifiOff
 } from 'lucide-react';
 import { backgroundExportManager, ExportTask } from '../services/exportManager';
-import { syncManager } from '../services/syncManager';
 import { cn } from '../lib/utils';
 
 export interface PdfExportQualityModalProps {
@@ -48,9 +47,8 @@ export function PdfExportQualityModal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [readyBlob, setReadyBlob] = useState<Blob | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
-
   const [isOffline, setIsOffline] = useState(() => 
-    (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline'
+    typeof navigator !== 'undefined' ? !navigator.onLine : false
   );
   const [showOfflineModalWarning, setShowOfflineModalWarning] = useState(false);
 
@@ -74,19 +72,13 @@ export function PdfExportQualityModal({
     const handleOffline = () => {
       setIsOffline(true);
     };
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    const unsubNetwork = syncManager.network.subscribe(netState => {
-      const offline = netState === 'offline' || (typeof navigator !== 'undefined' && !navigator.onLine);
-      setIsOffline(offline);
-      if (!offline) {
-        setShowOfflineModalWarning(false);
-      }
-    });
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      unsubNetwork();
     };
   }, []);
 
@@ -105,7 +97,7 @@ export function PdfExportQualityModal({
       setStatusMessage('Preparing your PDF...');
       setReadyBlob(null);
       setBlobUrl(null);
-      const offline = (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline';
+      const offline = typeof navigator !== 'undefined' ? !navigator.onLine : false;
       setIsOffline(offline);
       setShowOfflineModalWarning(false);
     } else {
@@ -177,10 +169,8 @@ export function PdfExportQualityModal({
         cashbookId,
         cashbookName,
         transactions,
-        isCompressed,
-        selectedQuality === 'original' ? 'original' : 'compressed'
+        isCompressed
       );
-
       setActiveTaskId(taskId);
     } catch (err: any) {
       console.error('[PdfExportQualityModal] Error starting export:', err);
@@ -244,13 +234,11 @@ export function PdfExportQualityModal({
                 </p>
               </div>
             </div>
-
             {state !== 'generating' && (
               <button
                 id="btn-close-pdf-quality-modal"
                 onClick={onClose}
-                className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition-colors cursor-pointer"
-                title="Close"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-150 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -262,235 +250,196 @@ export function PdfExportQualityModal({
             {/* 1. SELECTION STATE */}
             {state === 'select' && (
               <div className="space-y-4">
-                <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-medium">
                   Select your preferred export quality. Your original cloud uploads remain permanently untouched.
                 </p>
 
-                {/* Options List */}
                 <div className="space-y-3 pt-1">
                   {/* Option 1: Original Quality */}
-                  <motion.div
-                    whileHover={{ scale: 1.01 }}
-                    whileTap={{ scale: 0.99 }}
-                    id="opt-quality-original"
+                  <div
                     onClick={() => setSelectedQuality('original')}
                     className={cn(
-                      "p-4 rounded-xl border-2 cursor-pointer transition-all flex items-start gap-3.5 relative",
+                      "p-4 rounded-xl border-2 cursor-pointer transition-all duration-150 relative flex items-start gap-3.5",
                       selectedQuality === 'original'
-                        ? theme === 'dark'
-                          ? "border-indigo-500 bg-indigo-950/25 shadow-xs"
-                          : "border-indigo-600 bg-indigo-50/60 shadow-xs"
-                        : theme === 'dark'
-                          ? "border-zinc-800 bg-zinc-900/40 hover:border-zinc-700"
-                          : "border-slate-200 bg-white hover:border-slate-300"
+                        ? "border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/20"
+                        : "border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 bg-transparent"
                     )}
                   >
-                    {/* Radio Indicator */}
-                    <div className="pt-0.5 shrink-0">
+                    <div className="pt-0.5">
                       <div className={cn(
-                        "w-5 h-5 rounded-full border flex items-center justify-center transition-all",
+                        "w-4 h-4 rounded-full border flex items-center justify-center transition-colors",
                         selectedQuality === 'original'
-                          ? "border-indigo-600 bg-indigo-600 text-white"
-                          : "border-slate-300 dark:border-zinc-600 bg-transparent"
+                          ? "border-indigo-600 bg-indigo-600"
+                          : "border-slate-400 dark:border-zinc-600"
                       )}>
                         {selectedQuality === 'original' && (
-                          <motion.div 
-                            initial={{ scale: 0 }}
-                            animate={{ scale: 1 }}
-                            className="w-2 h-2 rounded-full bg-white"
-                          />
+                          <div className="w-1.5 h-1.5 rounded-full bg-white" />
                         )}
                       </div>
                     </div>
-
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-                        <span className="font-semibold text-sm sm:text-base flex items-center gap-1.5">
-                          <Sparkles size={16} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Sparkles size={16} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
+                        <h4 className="font-bold text-sm text-slate-900 dark:text-white">
                           Original Quality
-                        </span>
-                        <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60 whitespace-nowrap">
+                        </h4>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 font-mono">
                           Best for records and archiving
                         </span>
                       </div>
-                      <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-normal">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
                         Export using the original uploaded files with maximum available quality.
                       </p>
                     </div>
-                  </motion.div>
+                  </div>
 
                   {/* Option 2: Smart Compressed */}
-                  <motion.div
-                    whileHover={{ scale: 1.01 }}
-                    whileTap={{ scale: 0.99 }}
-                    id="opt-quality-smart-compressed"
+                  <div
                     onClick={() => setSelectedQuality('smart_compressed')}
                     className={cn(
-                      "p-4 rounded-xl border-2 cursor-pointer transition-all flex items-start gap-3.5 relative",
+                      "p-4 rounded-xl border-2 cursor-pointer transition-all duration-150 relative flex items-start gap-3.5",
                       selectedQuality === 'smart_compressed'
-                        ? theme === 'dark'
-                          ? "border-emerald-500 bg-emerald-950/25 shadow-xs"
-                          : "border-emerald-600 bg-emerald-50/60 shadow-xs"
-                        : theme === 'dark'
-                          ? "border-zinc-800 bg-zinc-900/40 hover:border-zinc-700"
-                          : "border-slate-200 bg-white hover:border-slate-300"
+                        ? "border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/20"
+                        : "border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 bg-transparent"
                     )}
                   >
-                    {/* Radio Indicator */}
-                    <div className="pt-0.5 shrink-0">
+                    <div className="pt-0.5">
                       <div className={cn(
-                        "w-5 h-5 rounded-full border flex items-center justify-center transition-all",
+                        "w-4 h-4 rounded-full border flex items-center justify-center transition-colors",
                         selectedQuality === 'smart_compressed'
-                          ? "border-emerald-600 bg-emerald-600 text-white"
-                          : "border-slate-300 dark:border-zinc-600 bg-transparent"
+                          ? "border-indigo-600 bg-indigo-600"
+                          : "border-slate-400 dark:border-zinc-600"
                       )}>
                         {selectedQuality === 'smart_compressed' && (
-                          <motion.div 
-                            initial={{ scale: 0 }}
-                            animate={{ scale: 1 }}
-                            className="w-2 h-2 rounded-full bg-white"
-                          />
+                          <div className="w-1.5 h-1.5 rounded-full bg-white" />
                         )}
                       </div>
                     </div>
-
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-                        <span className="font-semibold text-sm sm:text-base flex items-center gap-1.5">
-                          <Zap size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Zap size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <h4 className="font-bold text-sm text-slate-900 dark:text-white">
                           Smart Compressed
-                        </span>
-                        <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60 whitespace-nowrap">
+                        </h4>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 font-mono">
                           Best for WhatsApp, email and quick sharing
                         </span>
                       </div>
-                      <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-normal">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
                         Reduce PDF file size while keeping receipts and text clearly readable.
                       </p>
                     </div>
-                  </motion.div>
+                  </div>
                 </div>
 
-                <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-zinc-800">
+                <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-zinc-800/80">
                   <button
-                    id="btn-cancel-quality-selection"
+                    type="button"
                     onClick={onClose}
-                    className="px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                    className="px-4 py-2.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-800 font-semibold text-xs sm:text-sm transition-colors cursor-pointer"
                   >
                     Cancel
                   </button>
-                  <motion.button
-                    id="btn-export-pdf-confirm"
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={handleStartExport}
-                    className="px-6 py-2.5 text-xs sm:text-sm font-semibold rounded-xl shadow-sm flex items-center gap-2 transition-all cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isOffline) {
+                        handleOfflineAttempt();
+                        return;
+                      }
+                      handleStartExport();
+                    }}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs sm:text-sm transition-colors flex items-center gap-2 shadow-sm cursor-pointer"
                   >
                     <Download size={16} />
-                    Export PDF
-                  </motion.button>
+                    <span>Export PDF</span>
+                  </button>
                 </div>
               </div>
             )}
 
-            {/* 2. GENERATING STATE */}
+            {/* 2. GENERATING PROGRESS STATE */}
             {state === 'generating' && (
-              <div className="py-6 flex flex-col items-center text-center space-y-5">
+              <div className="py-6 flex flex-col items-center text-center space-y-4">
                 <div className="relative">
-                  <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-100 dark:border-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-100 dark:border-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-sm">
                     <Loader2 size={32} className="animate-spin" />
                   </div>
                 </div>
 
                 <div className="space-y-1.5 max-w-sm">
-                  <h4 className="font-bold text-lg tracking-tight">
-                    Preparing your PDF...
+                  <h4 className="font-bold text-base text-slate-900 dark:text-white">
+                    Generating PDF Statement
                   </h4>
-                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium animate-pulse">
                     {statusMessage}
                   </p>
                 </div>
 
-                {/* Progress Bar */}
-                <div className="w-full max-w-sm space-y-2">
-                  <div className="w-full h-2.5 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                <div className="w-full max-w-xs space-y-1.5 pt-2">
+                  <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
                     <motion.div
                       className="h-full bg-indigo-600 rounded-full"
                       initial={{ width: 0 }}
-                      animate={{ width: `${Math.max(8, progress)}%` }}
-                      transition={{ duration: 0.2 }}
+                      animate={{ width: `${progress}%` }}
+                      transition={{ ease: "easeOut", duration: 0.2 }}
                     />
                   </div>
-                  <div className="flex justify-between items-center text-[11px] text-slate-400 font-medium px-0.5">
+                  <div className="flex justify-between text-[11px] text-slate-400 font-mono">
                     <span>{selectedQuality === 'original' ? 'Original Quality' : 'Smart Compressed'}</span>
                     <span>{progress}%</span>
                   </div>
                 </div>
 
-                {/* Non-blocking background option */}
-                <div className="pt-2">
-                  <button
-                    id="btn-run-in-background"
-                    onClick={onClose}
-                    className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
-                  >
-                    Continue in background
-                  </button>
-                </div>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 max-w-xs pt-1">
+                  You can keep TrackBook open; your download will trigger automatically when ready.
+                </p>
               </div>
             )}
 
             {/* 3. READY STATE */}
             {state === 'ready' && (
-              <div className="py-6 flex flex-col items-center text-center space-y-5">
-                <motion.div
-                  initial={{ scale: 0.6, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ type: 'spring', damping: 18 }}
-                  className="w-16 h-16 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-900/50 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-sm"
-                >
+              <div className="py-6 flex flex-col items-center text-center space-y-4">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-900/50 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-sm">
                   <CheckCircle2 size={36} />
-                </motion.div>
+                </div>
 
                 <div className="space-y-1.5 max-w-sm">
-                  <h4 className="font-bold text-xl tracking-tight text-slate-900 dark:text-white">
-                    PDF Ready
+                  <h4 className="font-bold text-lg text-slate-900 dark:text-white">
+                    PDF Statement Ready!
                   </h4>
                   <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-                    Your report for <span className="font-semibold text-slate-700 dark:text-slate-200">{cashbookName}</span> has been assembled in {selectedQuality === 'original' ? 'Original Quality' : 'Smart Compressed'} mode.
+                    Your financial statement was generated with {selectedQuality === 'original' ? 'maximum original quality' : 'smart compression'}.
                   </p>
                 </div>
 
-                <div className="pt-2 w-full max-w-xs space-y-2.5">
-                  <motion.button
-                    id="btn-download-pdf-ready"
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+                <div className="pt-3 flex flex-col sm:flex-row gap-2.5 w-full max-w-xs">
+                  <button
                     onClick={handleDownload}
-                    className="w-full py-3 px-4 rounded-xl font-semibold text-sm shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all bg-indigo-600 hover:bg-indigo-700 text-white"
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs sm:text-sm transition-colors flex items-center justify-center gap-2 shadow-sm cursor-pointer"
                   >
-                    <Download size={18} />
-                    Download PDF
-                  </motion.button>
+                    <Download size={16} />
+                    <span>Download PDF</span>
+                  </button>
                   {blobUrl && (
                     <a
                       href={blobUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="w-full py-2 px-4 rounded-xl text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      className="py-2.5 px-4 rounded-xl border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-zinc-800 font-semibold text-xs sm:text-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <ExternalLink size={14} />
-                      Preview / Open PDF
+                      <span>Preview</span>
                     </a>
                   )}
-                  <button
-                    id="btn-done-pdf-modal"
-                    onClick={onClose}
-                    className="w-full py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-                  >
-                    Done
-                  </button>
                 </div>
+
+                <button
+                  onClick={onClose}
+                  className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 pt-1 cursor-pointer"
+                >
+                  Done
+                </button>
               </div>
             )}
 
@@ -570,7 +519,6 @@ export function PdfExportQualityModal({
                     💡 <span className="font-semibold text-slate-800 dark:text-slate-200">Tip:</span> Excel (.xlsx) reports are fully supported offline.
                   </div>
                 </div>
-
                 <div className="pt-2">
                   <button
                     type="button"

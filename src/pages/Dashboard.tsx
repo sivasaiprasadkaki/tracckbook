@@ -14,23 +14,18 @@ import {
   ArrowDownCircle, 
   History, 
   BookOpen, 
-  BookMarked,
   Loader2,
   X,
   Image as ImageIcon,
   Search,
   User,
-  Clock,
   Settings,
   LogOut,
   LayoutGrid,
   Key,
   List,
   Download,
-  Filter,
   RotateCw,
-  RotateCcw,
-  RefreshCw,
   ZoomIn,
   ZoomOut,
   Check,
@@ -52,8 +47,6 @@ import {
   DownloadCloud,
   FileSpreadsheet,
   AlertCircle,
-  CloudOff,
-  Menu,
   HelpCircle,
   MessageSquare,
   Sun,
@@ -63,61 +56,33 @@ import {
   ArrowUpDown,
   MoreVertical,
   Users,
-  UserPlus,
-  ShieldCheck,
-  Shield,
-  ShieldOff,
-  KeyRound,
   Camera,
-  ImagePlus,
   Phone,
-  Crop,
   CheckCircle2,
   Mail,
-  Lock,
-  Merge,
-  Eye,
-  Fingerprint,
-  ScanFace,
-  WifiOff,
-  Wifi
+  Lock
 } from 'lucide-react';
-import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { cn, formatCurrency, vibrate } from '../lib/utils';
 import { parseReceipt, parseMultipleReceipts } from '../services/gemini';
 import { processAndOcrImage } from '../services/ocrService';
-import { supabase, executeAppLogout } from '../lib/supabase';
-import { uploadToCloudinary, getOptimizedCloudinaryUrl, getExportOptimizedCloudinaryUrl, getUserCloudinaryFolder, getUserProfileCloudinaryFolder, resolveAttachmentUrl } from '../services/cloudinary';
+import { supabase } from '../lib/supabase';
+import { uploadToCloudinary, getOptimizedCloudinaryUrl, getExportOptimizedCloudinaryUrl, getUserCloudinaryFolder } from '../services/cloudinary';
 import imageCompression from 'browser-image-compression';
 import XLSX from 'xlsx-js-style';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
-import { backgroundExportManager, buildTransactionsWorksheet } from '../services/exportManager';
-import { syncManager, offlineDb, OfflineEntry } from '../services/syncManager';
-import { reconcileAndMigrateOfflineData } from '../services/dataReconciliation';
-import { SyncStatusBadge } from '../components/SyncStatusBadge';
+import { backgroundExportManager } from '../services/exportManager';
 import DownloadCenter, { DownloadCenterTrigger } from '../components/DownloadCenter';
-import NotificationBell from '../components/NotificationBell';
-import MembersAccessManagement from '../components/MembersAccessManagement';
-import RolesPermissionsModal from '../components/RolesPermissionsModal';
-import { canAddEntries, canEditEntries, canDeleteEntries, canDeleteBook, canManageMembers, canAccessBookSettings, ALL_ROLES, Role } from '../lib/rbac';
 import MediaPickerSheet from '../components/MediaPickerSheet';
-import ImageEditorModal from '../components/ImageEditorModal';
-import PdfPageSelectorModal from '../components/PdfPageSelectorModal';
 import { CountryCodePicker, COUNTRIES, Country } from '../components/CountryCodePicker';
 import { PhoneComingSoonModal } from '../components/PhoneComingSoonModal';
-import { useMpinSecurity } from '../components/MpinManager';
-import { clearSessionUnlocked } from '../services/mpinSecurityService';
-import { ShareWhatsAppModal } from '../components/ShareWhatsAppModal';
-import { PdfExportQualityModal } from '../components/PdfExportQualityModal';
-import { DashboardLoadingText } from '../components/DashboardLoadingText';
 import { addPdfBrandingFooter } from '../utils/pdfBranding';
-import { exitNativeApp } from '../services/biometricSecurityService';
-import { InAppSelect } from '../components/InAppSelect';
-import { InAppDialog, DialogOptions } from '../components/InAppDialog';
-import { useAppVersion } from '../hooks/useAppVersion';
+import { PdfExportQualityModal } from '../components/PdfExportQualityModal';
+import { buildTransactionsWorksheet } from '../services/exportManager';
+import TransactionProcessingModal, { ProcessingStep } from '../components/TransactionProcessingModal';
 
 interface TimelineStep {
   id: string;
@@ -131,7 +96,7 @@ const TIMELINE_STEPS: TimelineStep[] = [
   { id: 'merchant_detected', label: 'Extracting merchant' },
   { id: 'amount_extracted', label: 'Extracting amount' },
   { id: 'date_parsed', label: 'Detecting bill category' },
-  { id: 'ai_verification', label: 'Verifying with AI TrackBook' },
+  { id: 'ai_verification', label: 'Verifying with TrackBook AI' },
   { id: 'creating_transaction', label: 'Creating transaction' },
   { id: 'transaction_saved', label: 'Saving to ledger' },
 ];
@@ -243,9 +208,6 @@ function ProcessingTimeline({
 
 interface Transaction {
   id: string;
-  clientEntryId?: string;
-  cashbook_id?: string;
-  cashbook_name?: string;
   amount: number;
   type: 'in' | 'out';
   description: string;
@@ -259,11 +221,6 @@ interface Transaction {
   is_imported?: boolean;
   import_batch_id?: string;
   source?: 'AI' | 'Imported' | 'Manual' | string;
-  user_name?: string;
-  created_at?: string;
-  attachment_details?: any[];
-  syncStatus?: 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED';
-  is_offline?: boolean;
 }
 
 function getTransactionSource(t: any): 'AI' | 'Imported' | 'Manual' {
@@ -282,35 +239,6 @@ interface Cashbook {
   name: string;
   transactions: Transaction[];
   createdAt: Date;
-  user_name?: string;
-  user_id?: string;
-  userId?: string;
-  is_offline?: boolean;
-  syncStatus?: 'PENDING' | 'SYNCING' | 'SYNCED' | 'FAILED';
-}
-
-function formatDateTime12h(dateVal: any): string {
-  if (!dateVal) return 'N/A';
-  try {
-    const d = typeof dateVal === 'string' || typeof dateVal === 'number' ? new Date(dateVal) : dateVal;
-    if (d instanceof Date && !isNaN(d.getTime())) {
-      const day = String(d.getDate()).padStart(2, '0');
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const year = d.getFullYear();
-      
-      let hours = d.getHours();
-      const minutes = String(d.getMinutes()).padStart(2, '0');
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      hours = hours % 12;
-      hours = hours ? hours : 12; // the hour '0' should be '12'
-      const formattedHours = String(hours).padStart(2, '0');
-
-      return `${day}-${month}-${year} ${formattedHours}:${minutes} ${ampm}`;
-    }
-  } catch (e) {
-    console.error(e);
-  }
-  return 'N/A';
 }
 
 function safeFormatDate(dateVal: any, options?: Intl.DateTimeFormatOptions, locales: string = 'en-IN'): string {
@@ -326,38 +254,6 @@ function safeFormatDate(dateVal: any, options?: Intl.DateTimeFormatOptions, loca
   return 'N/A';
 }
 
-function getBookRelativeDate(book: any): string {
-  if (!book) return 'Updated recently';
-  const dateVal = book.updated_at || book.created_at || book.createdAt;
-  const txs = Array.isArray(book.transactions) ? book.transactions : [];
-  let maxTime = dateVal ? new Date(dateVal).getTime() : 0;
-  for (let i = 0; i < txs.length; i++) {
-    const tTime = txs[i]?.date ? new Date(txs[i].date).getTime() : 0;
-    if (tTime > maxTime) {
-      maxTime = tTime;
-    }
-  }
-  if (!maxTime || isNaN(maxTime)) {
-    return 'Updated recently';
-  }
-  const diffMs = Date.now() - maxTime;
-  if (diffMs < 0) return 'Updated just now';
-  const diffMinutes = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffMinutes < 1) return 'Updated just now';
-  if (diffMinutes < 60) return `Updated ${diffMinutes}m ago`;
-  if (diffHours < 24) return `Updated ${diffHours}h ago`;
-  if (diffDays === 1) return 'Updated yesterday';
-  if (diffDays < 30) return `Updated ${diffDays} days ago`;
-  if (diffDays < 365) {
-    const months = Math.floor(diffDays / 30);
-    return `Updated ${months} ${months === 1 ? 'month' : 'months'} ago`;
-  }
-  return `Updated ${new Date(maxTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-}
-
 function safeFormatTime(dateVal: any, options?: Intl.DateTimeFormatOptions, locales: string = 'en-IN'): string {
   if (!dateVal) return 'N/A';
   try {
@@ -371,62 +267,241 @@ function safeFormatTime(dateVal: any, options?: Intl.DateTimeFormatOptions, loca
   return 'N/A';
 }
 
-// Fast canvas-based image compressor to ensure instant cloud uploads
+function formatDateTime12h(dateVal: any): string {
+  if (!dateVal) return 'N/A';
+  try {
+    const d = typeof dateVal === 'string' || typeof dateVal === 'number' ? new Date(dateVal) : dateVal;
+    if (d instanceof Date && !isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      let hours = d.getHours();
+      const minutes = String(d.getMinutes()).padStart(2, '0');
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+      const formattedHours = String(hours).padStart(2, '0');
+      return `${day}-${month}-${year} ${formattedHours}:${minutes} ${ampm}`;
+    }
+  } catch (e) {
+    console.error(e);
+  }
+  return 'N/A';
+}
+
+export interface BookNetBalanceInfo {
+  text: string;
+  isNegative: boolean;
+  colorClass: string;
+  net: number;
+}
+
+const bookDisplayInfoCache = new Map<string, { sig: string; result: BookNetBalanceInfo }>();
+function getBookDisplayInfo(book: any): BookNetBalanceInfo {
+  if (!book) return { text: '₹0', isNegative: false, colorClass: 'text-slate-600 dark:text-zinc-400', net: 0 };
+  const txs: any[] = (Array.isArray(book.transactions) && book.transactions.length > 0)
+    ? book.transactions
+    : (entriesCache.get(book.id) || []);
+  const sig = `${txs.length}_${txs[0]?.id || ''}_${txs[0]?.amount || ''}_${txs[txs.length - 1]?.id || ''}`;
+  const cached = bookDisplayInfoCache.get(book.id);
+  if (cached && cached.sig === sig) {
+    return cached.result;
+  }
+  let cashIn = 0;
+  let cashOut = 0;
+  for (let i = 0; i < txs.length; i++) {
+    const t = txs[i];
+    const amt = parseFloat(t?.amount) || 0;
+    if (t?.type === 'in') {
+      cashIn += amt;
+    } else if (t?.type === 'out') {
+      cashOut += amt;
+    }
+  }
+  const net = cashIn - cashOut;
+  const formatInr = (val: number): string => {
+    const absVal = Math.abs(val);
+    if (isNaN(absVal)) return '0';
+    if (absVal % 1 !== 0) {
+      return absVal.toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    }
+    return absVal.toLocaleString('en-IN');
+  };
+
+  let res: BookNetBalanceInfo;
+  if (net > 0) {
+    res = {
+      text: `+₹${formatInr(net)}`,
+      isNegative: false,
+      colorClass: 'text-emerald-600 dark:text-emerald-400',
+      net
+    };
+  } else if (net < 0) {
+    res = {
+      text: `-₹${formatInr(net)}`,
+      isNegative: true,
+      colorClass: 'text-rose-600 dark:text-rose-400',
+      net
+    };
+  } else {
+    res = {
+      text: '₹0',
+      isNegative: false,
+      colorClass: 'text-slate-600 dark:text-zinc-400',
+      net: 0
+    };
+  }
+  bookDisplayInfoCache.set(book.id, { sig, result: res });
+  return res;
+}
+
+const CashbookListCard = React.memo(({
+  book,
+  displayInfo,
+  selected,
+  justEdited,
+  theme,
+  canDelete = true,
+  onTouchStart,
+  onTouchEnd,
+  onPress,
+  onEdit,
+  onDelete,
+  onOpen
+}: {
+  book: Cashbook;
+  displayInfo: BookNetBalanceInfo;
+  selected: boolean;
+  justEdited: boolean;
+  theme: string;
+  canDelete?: boolean;
+  onTouchStart: (id: string) => void;
+  onTouchEnd: () => void;
+  onPress: (id: string) => void;
+  onEdit: (book: Cashbook, e: React.MouseEvent) => void;
+  onDelete: (id: string, e: React.MouseEvent) => void;
+  onOpen: (id: string) => void;
+}) => {
+  return (
+    <div
+      key={book.id}
+      onMouseDown={() => onTouchStart(book.id)}
+      onMouseUp={onTouchEnd}
+      onTouchStart={() => onTouchStart(book.id)}
+      onTouchEnd={onTouchEnd}
+      onClick={() => onPress(book.id)}
+      className={cn(
+        "group w-full select-none flex items-center justify-between cursor-pointer px-4 sm:px-6 py-3 sm:py-3.5 transition-colors duration-150 relative min-h-[58px] sm:min-h-[64px] min-w-0 rounded-none",
+        selected
+          ? (theme === 'dark' ? "bg-indigo-950/30" : "bg-indigo-50/70")
+          : (theme === 'dark' 
+              ? "bg-transparent hover:bg-zinc-900/60" 
+              : "bg-transparent hover:bg-slate-50/90"),
+        justEdited && (theme === 'dark' ? "bg-indigo-950/40 ring-1 ring-inset ring-indigo-500/40" : "bg-indigo-50/80 ring-1 ring-inset ring-indigo-500/40")
+      )}
+    >
+      {/* Left + Center: Selection checkbox + Cashbook Icon + Cashbook Info (Name & Created on) */}
+      <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0 pr-3 sm:pr-6">
+        {selected && (
+          <div className="w-4 h-4 bg-indigo-600 text-white rounded-none flex items-center justify-center shrink-0">
+            <Check size={11} strokeWidth={3} />
+          </div>
+        )}
+        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-none bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-100 dark:border-indigo-900/40">
+          <BookOpen size={18} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 
+            title={book.name}
+            className={cn(
+              "font-semibold text-sm sm:text-base leading-snug truncate transition-colors duration-150 tracking-tight",
+              theme === 'dark' ? "text-slate-100" : "text-slate-900"
+            )}
+          >
+            {book.name}
+          </h3>
+          <p className={cn(
+            "text-[11px] sm:text-xs mt-0.5 transition-colors duration-150 whitespace-nowrap truncate font-normal",
+            theme === 'dark' ? "text-zinc-500" : "text-slate-400"
+          )}>
+            Created on {formatDateTime12h(book.createdAt)}
+          </p>
+        </div>
+      </div>
+
+      {/* Right: Net Balance + Edit + Delete + Open/View */}
+      <div className="flex items-center shrink-0">
+        <div className="text-right min-w-[70px] sm:min-w-[110px] md:min-w-[130px] pr-3 sm:pr-6 shrink-0">
+          <span className={cn(
+            "tabular-nums text-sm sm:text-base font-semibold tracking-tight whitespace-nowrap font-sans",
+            displayInfo.colorClass
+          )}>
+            {displayInfo.text}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-0.5 sm:gap-1 pl-2 sm:pl-3 border-l border-slate-200 dark:border-zinc-800 shrink-0">
+          <button 
+            type="button"
+            onClick={(e) => onEdit(book, e)}
+            className="p-1.5 sm:p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-zinc-800/80 rounded-none transition-colors cursor-pointer"
+            title="Edit Book"
+            aria-label="Edit Book"
+          >
+            <Pencil size={15} />
+          </button>
+          {canDelete && (
+            <button 
+              type="button"
+              onClick={(e) => onDelete(book.id, e)}
+              className="p-1.5 sm:p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-none transition-colors cursor-pointer"
+              title="Delete Book"
+              aria-label="Delete Book"
+            >
+              <Trash2 size={15} />
+            </button>
+          )}
+          <button 
+            type="button"
+            onClick={() => onOpen(book.id)}
+            className="p-1.5 sm:p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-none transition-colors ml-0.5 cursor-pointer"
+            title="Open Cashbook"
+            aria-label="Open Cashbook"
+          >
+            <ArrowRight size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+CashbookListCard.displayName = 'CashbookListCard';
+
+// Compress image before client-side direct upload using browser-image-compression
 async function compressImage(file: File): Promise<Blob | File> {
-  if (!file.type || !file.type.startsWith('image/') || file.type.includes('svg') || file.type.includes('gif')) {
+  const sizeKB = file.size / 1024;
+  if (file.size < 150 * 1024) {
+    console.log(`[Compression] Image ${file.name} is ${sizeKB.toFixed(1)} KB (below 150 KB threshold). Skipping compression.`);
     return file;
   }
-  // Skip compression if file is already very light (< 350KB)
-  if (file.size <= 350 * 1024) {
-    return file;
-  }
+
+  const options = {
+    maxSizeMB: 1.0, // Increased target size to avoid slow multi-pass iteration cycles
+    maxWidthOrHeight: 1200, // Fast single-pass resize width/height
+    useWebWorker: true,
+    maxIteration: 2 // Guarantee it finishes in maximum 2 iterations for speed
+  };
 
   try {
-    return await new Promise<Blob | File>((resolve) => {
-      const img = new Image();
-      const url = URL.createObjectURL(file);
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        const MAX_DIM = 1600;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > MAX_DIM || height > MAX_DIM) {
-          if (width > height) {
-            height = Math.round((height * MAX_DIM) / width);
-            width = MAX_DIM;
-          } else {
-            width = Math.round((width * MAX_DIM) / height);
-            height = MAX_DIM;
-          }
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          return resolve(file);
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-
-        canvas.toBlob((blob) => {
-          if (blob && blob.size < file.size) {
-            const compressedFile = new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' });
-            resolve(compressedFile);
-          } else {
-            resolve(file);
-          }
-        }, 'image/jpeg', 0.82);
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve(file);
-      };
-      img.src = url;
-    });
+    console.log(`[Compression] Compressing ${file.name} (${sizeKB.toFixed(1)} KB) automatically...`);
+    const compressedBlob = await imageCompression(file, options);
+    console.log(`[Compression] Success: Compressed to ${(compressedBlob.size / 1024).toFixed(1)} KB`);
+    return compressedBlob;
   } catch (err) {
-    console.warn('[Image Compress] Compression fallback to original file:', err);
+    console.error('[Compression] browser-image-compression failed, falling back to original file:', err);
     return file;
   }
 }
@@ -435,17 +510,12 @@ async function compressImage(file: File): Promise<Blob | File> {
 function getCloudinaryThumbnail(url: string): string {
   if (!url || typeof url !== 'string') return url;
   if (url.startsWith('blob:')) return url; // Let blob URLs render directly
-  let target = url;
-  if (target.startsWith('//')) target = 'https:' + target;
-  else if (target.startsWith('res.cloudinary.com')) target = 'https://' + target;
-  else if (target.startsWith('cloudinary.com')) target = 'https://' + target;
-
-  if (target.includes('res.cloudinary.com') && target.includes('/upload/')) {
-    if (!target.includes('/w_200')) {
-      return target.replace('/upload/', '/upload/w_200,q_auto,f_auto/');
+  if (url.includes('res.cloudinary.com') && url.includes('/upload/')) {
+    if (!url.includes('/w_200')) {
+      return url.replace('/upload/', '/upload/w_200,q_auto,f_auto/');
     }
   }
-  return target;
+  return url;
 }
 
 // Ensure base64 string never lands in custom Supabase columns/attachments tables
@@ -470,6 +540,77 @@ const lastFetchTimeCache = new Map<string, number>();
 const attachmentCache = new Map<string, { images: string[], isAi: boolean }>();
 const revalidatedEntries = new Set<string>();
 const inFlightAttachmentQueries = new Map<string, Promise<{ attachments: any[], aiAttachments: any[] }>>();
+const inFlightEntriesQueries = new Map<string, Promise<{ data: any[] | null; error: any }>>();
+const pendingDeletedBookIds = new Set<string>();
+
+// Fast, stable verified column selection for entries to eliminate sequential failed queries
+const ENTRY_COLUMNS = 'id, amount, type, description, category, mode, date, image_layout, cashbook_id, user_id, user_name';
+
+async function fetchEntriesFromSupabase(
+  userId: string,
+  cashbookId?: string | null,
+  candidateUserIds: string[] = [userId],
+  cashbookIds?: string[]
+): Promise<{ data: any[] | null; error: any }> {
+  const queryKey = cashbookId 
+    ? `book_${cashbookId}` 
+    : (cashbookIds && cashbookIds.length > 0 ? `books_${[...cashbookIds].sort().join(',')}` : `user_${userId}`);
+  
+  if (inFlightEntriesQueries.has(queryKey)) {
+    return inFlightEntriesQueries.get(queryKey)!;
+  }
+
+  const queryPromise = (async () => {
+    try {
+      let query = supabase
+        .from('entries')
+        .select(ENTRY_COLUMNS)
+        .order('date', { ascending: false });
+        
+      if (cashbookId) {
+        query = query.eq('cashbook_id', cashbookId);
+      } else if (cashbookIds && cashbookIds.length > 0) {
+        query = query.in('cashbook_id', cashbookIds);
+      } else if (candidateUserIds.length > 1) {
+        query = query.in('user_id', candidateUserIds);
+      } else {
+        query = query.eq('user_id', userId);
+      }
+
+      let { data, error } = await query;
+      
+      // Graceful fallback if user_name is missing from old database schema
+      if (error && (error.code === '42703' || error.message?.includes('column "user_name" does not exist'))) {
+        const fallbackCols = 'id, amount, type, description, category, mode, date, image_layout, cashbook_id, user_id';
+        let fallbackQuery = supabase
+          .from('entries')
+          .select(fallbackCols)
+          .order('date', { ascending: false });
+          
+        if (cashbookId) {
+          fallbackQuery = fallbackQuery.eq('cashbook_id', cashbookId);
+        } else if (cashbookIds && cashbookIds.length > 0) {
+          fallbackQuery = fallbackQuery.in('cashbook_id', cashbookIds);
+        } else if (candidateUserIds.length > 1) {
+          fallbackQuery = fallbackQuery.in('user_id', candidateUserIds);
+        } else {
+          fallbackQuery = fallbackQuery.eq('user_id', userId);
+        }
+        
+        const fallbackRes = await fallbackQuery;
+        data = fallbackRes.data as any;
+        error = fallbackRes.error;
+      }
+      
+      return { data: data as any[] | null, error };
+    } finally {
+      inFlightEntriesQueries.delete(queryKey);
+    }
+  })();
+
+  inFlightEntriesQueries.set(queryKey, queryPromise);
+  return queryPromise;
+}
 
 // Load from localStorage on startup under a namespace like 'trackbook_attachments_metadata_v2'
 try {
@@ -524,58 +665,6 @@ function persistAttachmentCacheToStorage() {
   }
 }
 
-const bookDisplayInfoCache = new Map<string, { sig: string; result: { text: string; isNegative: boolean } }>();
-
-function getBookDisplayInfo(book: any): { text: string; isNegative: boolean } {
-  if (!book) return { text: '0', isNegative: false };
-  const txs: any[] = (Array.isArray(book.transactions) && book.transactions.length > 0)
-    ? book.transactions
-    : (entriesCache.get(book.id) || []);
-
-  const sig = `${txs.length}_${txs[0]?.id || ''}_${txs[0]?.amount || ''}_${txs[txs.length - 1]?.id || ''}`;
-  const cached = bookDisplayInfoCache.get(book.id);
-  if (cached && cached.sig === sig) {
-    return cached.result;
-  }
-
-  let cashIn = 0;
-  let cashOut = 0;
-  for (let i = 0; i < txs.length; i++) {
-    const t = txs[i];
-    const amt = parseFloat(t?.amount) || 0;
-    if (t?.type === 'in') {
-      cashIn += amt;
-    } else if (t?.type === 'out') {
-      cashOut += amt;
-    }
-  }
-  const net = cashIn - cashOut;
-
-  const formatAmt = (val: number): string => {
-    const absVal = Math.abs(val);
-    if (isNaN(absVal)) return '0';
-    if (absVal % 1 !== 0) {
-      // Has decimal/fractional part - format with 2 decimal places
-      return absVal.toLocaleString('en-IN', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
-    }
-    return absVal.toLocaleString('en-IN');
-  };
-
-  const res = net < 0 ? {
-    text: `-${formatAmt(net)}`,
-    isNegative: true,
-  } : {
-    text: formatAmt(net),
-    isNegative: false,
-  };
-
-  bookDisplayInfoCache.set(book.id, { sig, result: res });
-  return res;
-}
-
 /**
  * Optimized, memoized, viewport-prefetching and lazy-loaded Image component
  */
@@ -594,63 +683,13 @@ const OptimizedImage = React.memo(({
   onClick?: () => void;
   [key: string]: any;
 }) => {
-  const isFullscreen = type === 'fullscreen';
-  const [isInView, setIsInView] = React.useState(isFullscreen);
+  const [isInView, setIsInView] = React.useState(false);
   const [retryCount, setRetryCount] = React.useState(0);
   const [hasError, setHasError] = React.useState(false);
-  const [localBase64, setLocalBase64] = React.useState<string>('');
-  const [isLoaded, setIsLoaded] = React.useState(false);
-  const [progress, setProgress] = React.useState(0);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
-
-  const metadata = React.useMemo(() => {
-    const res = { rotate: 0, fit: 'original' };
-    if (!src) return res;
-    const hashIdx = src.indexOf('#');
-    if (hashIdx === -1) return res;
-    const hash = src.substring(hashIdx + 1);
-    const params = new URLSearchParams(hash);
-    res.rotate = parseInt(params.get('rotate') || '0', 10);
-    res.fit = (params.get('fit') || 'original') as 'width' | 'height' | 'original';
-    return res;
-  }, [src]);
-
-  const isRotated90or270 = metadata.rotate === 90 || metadata.rotate === 270;
-  
-  const contentStyle: React.CSSProperties = {
-    ...props.style,
-    transform: `rotate(${metadata.rotate}deg)${isRotated90or270 ? ' scale(0.72)' : ''}`,
-    transition: 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), object-fit 0.2s ease',
-    objectFit: metadata.fit === 'width' ? 'contain' : metadata.fit === 'height' ? 'contain' : (props.style?.objectFit || 'cover')
-  };
-
-  React.useEffect(() => {
-    setIsLoaded(false);
-    setProgress(0);
-    if (isFullscreen) {
-      setIsInView(true);
-    }
-  }, [src, isFullscreen]);
-
-  React.useEffect(() => {
-    if (src && src.startsWith('local-img-')) {
-      let active = true;
-      offlineDb.getLocalImage(src).then(img => {
-        if (active && img && img.data) {
-          setLocalBase64(img.data as string);
-        }
-      });
-      return () => {
-        active = false;
-      };
-    } else {
-      setLocalBase64('');
-    }
-  }, [src]);
 
   React.useEffect(() => {
     if (!src) return;
-    if (isFullscreen) return;
     
     // Fallback if IntersectionObserver is not supported
     if (!('IntersectionObserver' in window)) {
@@ -675,30 +714,10 @@ const OptimizedImage = React.memo(({
     return () => {
       observer.disconnect();
     };
-  }, [src, isFullscreen]);
-
-  React.useEffect(() => {
-    if (!isFullscreen || isLoaded || !src) return;
-
-    let intervalId: any;
-    intervalId = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 95) {
-          return prev + 1 >= 99 ? 98 : prev + 1;
-        }
-        const inc = Math.floor(Math.random() * 8) + 4;
-        return Math.min(prev + inc, 95);
-      });
-    }, 45);
-
-    return () => clearInterval(intervalId);
-  }, [isFullscreen, isLoaded, src]);
+  }, [src]);
 
   const optimizedUrl = React.useMemo(() => {
     if (!isInView || hasError) return ''; 
-    if (src && src.startsWith('local-img-')) {
-      return localBase64;
-    }
     const baseUrl = getOptimizedCloudinaryUrl(src, type);
     if (!baseUrl) return '';
     if (retryCount > 0) {
@@ -707,7 +726,7 @@ const OptimizedImage = React.memo(({
       return `${baseUrl}${sep}retry=${retryCount}`;
     }
     return baseUrl;
-  }, [src, type, isInView, retryCount, hasError, localBase64]);
+  }, [src, type, isInView, retryCount, hasError]);
 
   const handleError = () => {
     console.warn(`[ImageLoad] Failed to load ${src}. Attempt ${retryCount}/3`);
@@ -725,16 +744,24 @@ const OptimizedImage = React.memo(({
     }
   };
 
-  const handleLoad = () => {
-    if (isFullscreen) {
-      setProgress(100);
-      setTimeout(() => {
-        setIsLoaded(true);
-      }, 100);
-    } else {
-      setIsLoaded(true);
-    }
-  };
+  const [isLoaded, setIsLoaded] = React.useState(false);
+  const [loadPct, setLoadPct] = React.useState(15);
+
+  React.useEffect(() => {
+    if (type !== 'fullscreen') return;
+    setIsLoaded(false);
+    setLoadPct(15);
+    const interval = setInterval(() => {
+      setLoadPct((prev) => {
+        if (prev >= 94) {
+          clearInterval(interval);
+          return 94;
+        }
+        return prev + Math.floor(Math.random() * 14 + 6);
+      });
+    }, 100);
+    return () => clearInterval(interval);
+  }, [type, src]);
 
   // Safe offline / failed visual fallback
   if (hasError || (!src && isInView)) {
@@ -758,64 +785,89 @@ const OptimizedImage = React.memo(({
     );
   }
 
-  const showLoader = isFullscreen && !isLoaded && optimizedUrl;
-
-  const content = (
-    <img
-      ref={imgRef}
-      src={optimizedUrl || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'}
-      alt={alt}
-      className={cn(className, isFullscreen && !isLoaded && "opacity-0 invisible")}
-      loading={isFullscreen ? "eager" : "lazy"}
-      decoding="async"
-      onError={handleError}
-      onLoad={handleLoad}
-      onClick={onClick}
-      style={contentStyle}
-      {...props}
-    />
-  );
-
-  if (isFullscreen) {
+  if (type === 'fullscreen') {
+    const thumbUrl = getCloudinaryThumbnail(src);
     return (
-      <div className="relative flex items-center justify-center max-w-full max-h-full">
-        {content}
-        {showLoader && (
-          <div className="fixed inset-0 flex flex-col items-center justify-center bg-slate-950/60 backdrop-blur-md z-50 animate-fade-in">
-            <div className="relative w-16 h-16 flex items-center justify-center">
-              <svg className="w-full h-full transform -rotate-90">
-                <circle
-                  cx="32"
-                  cy="32"
-                  r="24"
-                  className="text-white/10"
-                  strokeWidth="3.5"
-                  stroke="currentColor"
-                  fill="transparent"
-                />
-                <circle
-                  cx="32"
-                  cy="32"
-                  r="24"
-                  className="text-indigo-500 transition-all duration-100 ease-out"
-                  strokeWidth="3.5"
-                  strokeDasharray={2 * Math.PI * 24}
-                  strokeDashoffset={2 * Math.PI * 24 - (progress / 100) * (2 * Math.PI * 24)}
-                  strokeLinecap="round"
-                  stroke="currentColor"
-                  fill="transparent"
-                />
-              </svg>
-              <span className="absolute text-xs font-black text-white font-mono">{progress}%</span>
+      <div className="relative flex items-center justify-center m-auto max-w-full max-h-full">
+        {/* Instant low-res/thumbnail preview so image opens immediately */}
+        {thumbUrl && thumbUrl !== optimizedUrl && !isLoaded && (
+          <img
+            src={thumbUrl}
+            alt={alt}
+            className={cn(className, "filter blur-sm scale-95 opacity-60 transition-opacity duration-300 absolute inset-0 m-auto")}
+          />
+        )}
+
+        {/* Full-resolution Image */}
+        <img
+          ref={imgRef}
+          src={optimizedUrl || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'}
+          alt={alt}
+          className={cn(className, "transition-all duration-300", !isLoaded ? "opacity-0" : "opacity-100")}
+          loading="eager"
+          decoding="async"
+          onLoad={() => {
+            setLoadPct(100);
+            setIsLoaded(true);
+          }}
+          onError={handleError}
+          onClick={onClick}
+          {...props}
+        />
+
+        {/* Centered Loading Ring with 0-100% Progress */}
+        {!isLoaded && !hasError && (
+          <div className="absolute inset-0 m-auto w-24 h-24 flex flex-col items-center justify-center pointer-events-none z-20">
+            <svg className="w-20 h-20 -rotate-90 transform" viewBox="0 0 100 100">
+              <circle
+                cx="50"
+                cy="50"
+                r="40"
+                stroke="currentColor"
+                strokeWidth="6"
+                fill="transparent"
+                className="text-white/20"
+              />
+              <circle
+                cx="50"
+                cy="50"
+                r="40"
+                stroke="currentColor"
+                strokeWidth="6"
+                strokeLinecap="round"
+                fill="transparent"
+                strokeDasharray={251.3}
+                strokeDashoffset={251.3 - (251.3 * loadPct) / 100}
+                className="text-indigo-400 transition-all duration-150"
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-sm font-black font-mono text-white leading-none">
+                {loadPct}%
+              </span>
+              <span className="text-[8px] font-black uppercase tracking-widest text-indigo-300 mt-0.5">
+                Loading
+              </span>
             </div>
-            <span className="text-[10px] uppercase tracking-widest text-slate-300 font-bold mt-3 animate-pulse">Loading Attachment...</span>
           </div>
         )}
       </div>
     );
   }
 
-  return content;
+  return (
+    <img
+      ref={imgRef}
+      src={optimizedUrl || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'}
+      alt={alt}
+      className={className}
+      loading="lazy"
+      decoding="async"
+      onError={handleError}
+      onClick={onClick}
+      {...props}
+    />
+  );
 });
 OptimizedImage.displayName = 'OptimizedImage';
 
@@ -882,8 +934,8 @@ function useVirtualWindow({
 
   const { startIndex, endIndex, paddingTop, paddingBottom } = useMemo(() => {
     const el = containerRef.current;
-    if (!el || itemsCount === 0 || itemsCount <= 40) {
-      return { startIndex: 0, endIndex: Math.max(0, itemsCount - 1), paddingTop: 0, paddingBottom: 0 };
+    if (!el || itemsCount === 0) {
+      return { startIndex: 0, endIndex: Math.min(itemsCount - 1, 10), paddingTop: 0, paddingBottom: 0 };
     }
 
     const rect = el.getBoundingClientRect();
@@ -924,7 +976,7 @@ const AttachmentCell = React.memo(({
   transactionId: string;
   uploadStatuses: any;
   handleRetryUpload: (blobUrl: string, transactionId: string) => void;
-  setPreviewImages: (imgs: string[], transactionId?: string) => void;
+  setPreviewImages: (imgs: string[]) => void;
   setPreviewIndex: (idx: number) => void;
   setPreviewRotation: (deg: number) => void;
   setPreviewZoom: (zoom: number) => void;
@@ -934,7 +986,7 @@ const AttachmentCell = React.memo(({
   
   const isUploading = images.some(img => {
     const status = uploadStatuses[img]?.status;
-    return status === 'uploading';
+    return status === 'uploading' || (img.startsWith('blob:') && status !== 'failed' && status !== 'success');
   });
   
   const isFailed = images.some(img => uploadStatuses[img]?.status === 'failed');
@@ -965,28 +1017,31 @@ const AttachmentCell = React.memo(({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            setPreviewImages(images, transactionId);
-            setPreviewIndex(0);
-            setPreviewRotation(0);
-            setPreviewZoom(1);
+            if (!isUploading) {
+              setPreviewImages(images);
+              setPreviewIndex(0);
+              setPreviewRotation(0);
+              setPreviewZoom(1);
+            }
           }}
+          disabled={isUploading}
           className={cn(
             "flex items-center gap-2 text-left transition-all cursor-pointer group/bill",
             isUploading 
-              ? "text-emerald-500 dark:text-emerald-400" 
+              ? "text-emerald-500 dark:text-emerald-400 animate-pulse pointer-events-none" 
               : "text-slate-500 hover:text-indigo-600"
           )}
         >
-          <Paperclip size={14} className={isUploading ? "animate-bounce text-emerald-500" : ""} />
+          <Paperclip size={14} className={isUploading ? "animate-bounce" : ""} />
           <div className="text-left">
             <p className="text-[10px] font-black leading-none">
               {isUploading ? "Syncing..." : images.length}
             </p>
             <p className={cn(
               "text-[10px] font-bold transition-colors mt-0.5",
-              isUploading ? "text-emerald-500" : "text-slate-400 group-hover/bill:text-indigo-400"
+              isUploading ? "text-emerald-400" : "text-slate-400 group-hover/bill:text-indigo-400"
             )}>
-              {isUploading ? "Uploading to Cloud..." : `${images.length === 1 ? 'Attachment' : 'Attachments'}`}
+              {isUploading ? "Uploading attachments..." : `${images.length === 1 ? 'Attachment' : 'Attachments'}`}
             </p>
           </div>
         </button>
@@ -1001,21 +1056,6 @@ const AttachmentCell = React.memo(({
   );
 });
 AttachmentCell.displayName = 'AttachmentCell';
-
-function areTransactionRowPropsEqual(prevProps: any, nextProps: any): boolean {
-  return (
-    prevProps.t === nextProps.t &&
-    prevProps.runningBalance === nextProps.runningBalance &&
-    prevProps.selected === nextProps.selected &&
-    prevProps.isCurrentlyDeleting === nextProps.isCurrentlyDeleting &&
-    prevProps.isJustEdited === nextProps.isJustEdited &&
-    prevProps.theme === nextProps.theme &&
-    prevProps.canEdit === nextProps.canEdit &&
-    prevProps.canDelete === nextProps.canDelete &&
-    prevProps.canSelect === nextProps.canSelect &&
-    prevProps.uploadStatuses === nextProps.uploadStatuses
-  );
-}
 
 const MobileTransactionRow = React.memo(({
   t,
@@ -1035,10 +1075,7 @@ const MobileTransactionRow = React.memo(({
   handleDeleteTransaction,
   theme,
   index,
-  isJustEdited,
-  canEdit = true,
-  canDelete = true,
-  canSelect = true
+  isJustEdited
 }: {
   t: Transaction;
   runningBalance: number;
@@ -1049,23 +1086,20 @@ const MobileTransactionRow = React.memo(({
   onClick: (id: string) => void;
   uploadStatuses: any;
   handleRetryUpload: (blobUrl: string, transactionId: string) => void;
-  setPreviewImages: (imgs: string[], transactionId?: string) => void;
+  setPreviewImages: (imgs: string[]) => void;
   setPreviewIndex: (idx: number) => void;
   setPreviewRotation: (deg: number) => void;
   setPreviewZoom: (zoom: number) => void;
   handleEditTransaction: (t: Transaction) => void;
   handleDeleteTransaction: (id: string) => void;
   theme: string;
-  index?: number;
+  index: number;
   isJustEdited?: boolean;
-  canEdit?: boolean;
-  canDelete?: boolean;
-  canSelect?: boolean;
 }) => {
   return (
     <motion.div
       id={`entry-${t.id}`}
-      initial={false}
+      initial={{ opacity: 0, y: 16 }}
       animate={
         isCurrentlyDeleting 
           ? { opacity: 0, x: -100, scale: 0.9, height: 0, margin: 0, padding: 0 } 
@@ -1076,17 +1110,15 @@ const MobileTransactionRow = React.memo(({
       transition={
         isJustEdited
           ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
-          : { duration: 0.15, ease: "easeOut" }
+          : { duration: 0.4, ease: [0.16, 1, 0.3, 1], delay: Math.min(index * 0.03, 0.35) }
       }
-      whileTap={canSelect && !isCurrentlyDeleting ? { scale: 0.982 } : undefined}
-      onMouseDown={() => canSelect && onTouchStart(t.id)}
-      onMouseUp={canSelect ? onTouchEnd : undefined}
-      onTouchStart={() => canSelect && onTouchStart(t.id)}
-      onTouchEnd={canSelect ? onTouchEnd : undefined}
-      onClick={() => canSelect && onClick(t.id)}
+      onMouseDown={() => onTouchStart(t.id)}
+      onMouseUp={onTouchEnd}
+      onTouchStart={() => onTouchStart(t.id)}
+      onTouchEnd={onTouchEnd}
+      onClick={() => onClick(t.id)}
       className={cn(
-        "rounded-[20px] border shadow-sm relative transition-all select-none overflow-hidden duration-200",
-        canSelect ? "hover:scale-[1.005] cursor-pointer" : "cursor-default",
+        "rounded-[20px] border shadow-sm relative transition-all select-none overflow-hidden hover:scale-[1.005] duration-200 cursor-pointer",
         isCurrentlyDeleting ? "border-transparent bg-transparent" : "p-4.5 sm:p-5",
         isJustEdited
           ? (theme === 'dark' ? "border-indigo-500 ring-4 ring-indigo-500/40 bg-indigo-950/30 font-bold" : "border-indigo-500 ring-4 ring-indigo-500/30 bg-indigo-50/40 shadow-xl font-bold")
@@ -1109,21 +1141,21 @@ const MobileTransactionRow = React.memo(({
           )}>
             {t.mode}
           </span>
+          {getTransactionSource(t) === 'AI' && (
+            <span className={cn(
+              "px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded-lg transition-colors shrink-0 flex items-center gap-0.5",
+              theme === 'dark' ? "bg-amber-955/30 text-amber-400 border border-amber-900/40" : "bg-amber-50 text-amber-600 border-amber-200"
+            )}>
+              <Sparkles size={10} />
+              AI
+            </span>
+          )}
           {getTransactionSource(t) === 'Imported' && (
             <span className={cn(
               "px-2.5 py-1 text-[10px] font-black tracking-wider uppercase rounded-lg transition-colors shrink-0",
               theme === 'dark' ? "bg-sky-950 text-sky-400 border border-sky-900/30" : "bg-sky-50 text-sky-700 border border-sky-100"
             )}>
               Imported
-            </span>
-          )}
-          {(t.syncStatus === 'PENDING' || t.is_offline) && (
-            <span className={cn(
-              "px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase rounded-lg border transition-colors shrink-0 flex items-center gap-1",
-              theme === 'dark' ? "bg-amber-950/60 text-amber-300 border-amber-800/60" : "bg-amber-50 text-amber-800 border-amber-300"
-            )}>
-              <Clock size={10} className="animate-pulse text-amber-500" />
-              Offline • Pending Sync
             </span>
           )}
         </div>
@@ -1145,9 +1177,9 @@ const MobileTransactionRow = React.memo(({
 
       <div className="mb-3.5 flex flex-wrap items-center gap-2">
         <p className={cn(
-          "text-[13px] font-semibold leading-relaxed truncate whitespace-nowrap transition-colors duration-300 flex-1 min-w-[120px]",
+          "text-[13px] font-semibold leading-relaxed line-clamp-2 transition-colors duration-300 flex-1 min-w-[120px]",
           theme === 'dark' ? "text-slate-200" : "text-slate-850"
-        )} title={t.description}>
+        )}>
           {t.description || 'No details provided'}
         </p>
         
@@ -1179,7 +1211,7 @@ const MobileTransactionRow = React.memo(({
           {t.images && t.images.length > 0 ? (() => {
             const isUploading = t.images.some(img => {
               const status = uploadStatuses[img]?.status;
-              return status === 'uploading';
+              return status === 'uploading' || (img.startsWith('blob:') && status !== 'failed' && status !== 'success');
             });
             const isFailed = t.images.some(img => uploadStatuses[img]?.status === 'failed');
             
@@ -1206,15 +1238,18 @@ const MobileTransactionRow = React.memo(({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setPreviewImages(t.images!, t.id);
-                      setPreviewIndex(0);
-                      setPreviewRotation(0);
-                      setPreviewZoom(1);
+                      if (!isUploading) {
+                        setPreviewImages(t.images!);
+                        setPreviewIndex(0);
+                        setPreviewRotation(0);
+                        setPreviewZoom(1);
+                      }
                     }}
+                    disabled={isUploading}
                     className={cn(
                       "flex items-center gap-1 transition-colors duration-300 text-[10px] font-bold cursor-pointer py-0.5 px-2 rounded-lg border",
                       isUploading 
-                        ? "text-emerald-500 border-emerald-100/30 bg-emerald-500/5 dark:text-emerald-400" 
+                        ? "text-emerald-500 border-emerald-100/30 bg-emerald-500/5 dark:text-emerald-400 animate-pulse pointer-events-none" 
                         : (theme === 'dark' ? "text-indigo-400 border-indigo-950 bg-indigo-950/10 hover:text-indigo-300" : "text-indigo-650 border-indigo-100 bg-indigo-50/10 hover:text-indigo-700")
                     )}
                   >
@@ -1251,42 +1286,36 @@ const MobileTransactionRow = React.memo(({
             "text-[10px] font-bold tracking-tight transition-colors duration-300",
             theme === 'dark' ? "text-zinc-500" : "text-slate-400"
           )}>
-            {formatDateTime12h(t.date || t.created_at)}
+            {t.date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
           </span>
         </div>
 
-        {(canEdit || canDelete) && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            {canEdit && (
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleEditTransaction(t); }}
-                className={cn(
-                  "w-8 h-8 flex items-center justify-center rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-90 border shadow-sm",
-                  theme === 'dark' ? "bg-zinc-900 border-zinc-850/60 text-slate-400 hover:text-indigo-400" : "bg-slate-50 border-slate-100 text-slate-500 hover:bg-slate-100 hover:text-indigo-650"
-                )}
-                aria-label="Edit Transaction"
-              >
-                <Pencil size={12.5} />
-              </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button 
+            onClick={(e) => { e.stopPropagation(); handleEditTransaction(t); }}
+            className={cn(
+              "w-8 h-8 flex items-center justify-center rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-90 border shadow-sm",
+              theme === 'dark' ? "bg-zinc-900 border-zinc-850/60 text-slate-400 hover:text-indigo-400" : "bg-slate-50 border-slate-100 text-slate-500 hover:bg-slate-100 hover:text-indigo-650"
             )}
-            {canDelete && (
-              <button 
-                onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }}
-                className={cn(
-                  "w-8 h-8 flex items-center justify-center rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-90 border shadow-sm",
-                  theme === 'dark' ? "bg-zinc-900 border-zinc-850/60 text-rose-400 hover:text-rose-500" : "bg-rose-50 border-rose-150 text-rose-500 hover:bg-rose-100 hover:text-rose-650"
-                )}
-                aria-label="Delete Transaction"
-              >
-                <Trash2 size={12.5} />
-              </button>
+            aria-label="Edit Transaction"
+          >
+            <Pencil size={12.5} />
+          </button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }}
+            className={cn(
+              "w-8 h-8 flex items-center justify-center rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-90 border shadow-sm",
+              theme === 'dark' ? "bg-zinc-900 border-zinc-850/60 text-rose-400 hover:text-rose-500" : "bg-rose-50 border-rose-150 text-rose-500 hover:bg-rose-100 hover:text-rose-650"
             )}
-          </div>
-        )}
+            aria-label="Delete Transaction"
+          >
+            <Trash2 size={12.5} />
+          </button>
+        </div>
       </div>
     </motion.div>
   );
-}, areTransactionRowPropsEqual);
+});
 MobileTransactionRow.displayName = 'MobileTransactionRow';
 
 const DesktopTransactionRow = React.memo(({
@@ -1305,10 +1334,7 @@ const DesktopTransactionRow = React.memo(({
   setPreviewZoom,
   theme,
   index,
-  isJustEdited,
-  canEdit = true,
-  canDelete = true,
-  canSelect = true
+  isJustEdited
 }: {
   t: Transaction;
   runningBalance: number;
@@ -1319,21 +1345,18 @@ const DesktopTransactionRow = React.memo(({
   handleDeleteTransaction: (id: string) => void;
   handleRetryUpload: (blobUrl: string, transactionId: string) => void;
   uploadStatuses: any;
-  setPreviewImages: (imgs: string[], transactionId?: string) => void;
+  setPreviewImages: (imgs: string[]) => void;
   setPreviewIndex: (idx: number) => void;
   setPreviewRotation: (deg: number) => void;
   setPreviewZoom: (zoom: number) => void;
   theme: string;
-  index?: number;
+  index: number;
   isJustEdited?: boolean;
-  canEdit?: boolean;
-  canDelete?: boolean;
-  canSelect?: boolean;
 }) => {
   return (
     <motion.tr 
       id={`entry-${t.id}`}
-      initial={false}
+      initial={{ opacity: 0, y: 12 }}
       animate={
         isCurrentlyDeleting 
           ? { opacity: 0, x: -50, scale: 0.95 } 
@@ -1344,7 +1367,7 @@ const DesktopTransactionRow = React.memo(({
       transition={
         isJustEdited
           ? { duration: 1.5, times: [0, 0.2, 0.8, 1], ease: "easeInOut" }
-          : { duration: 0.2, ease: "easeOut" }
+          : { duration: 0.35, ease: [0.16, 1, 0.3, 1], delay: Math.min(index * 0.03, 0.35) }
       }
       className={cn(
         "group transition-all",
@@ -1355,39 +1378,40 @@ const DesktopTransactionRow = React.memo(({
         isCurrentlyDeleting && "pointer-events-none opacity-50"
       )}
     >
-      {canSelect && (
-        <td className="px-3 sm:px-6 py-4">
-          <button 
-            type="button"
-            onClick={() => toggleSelectTransaction(t.id)}
-            className={cn(
-              "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
-              selected
-                ? "bg-indigo-600 border-indigo-600 text-white"
-                : "border-slate-300 dark:border-slate-700 group-hover:border-indigo-500"
-            )}
-          >
-            {selected && <CheckSquare size={14} />}
-          </button>
-        </td>
-      )}
+      <td className="px-3 sm:px-6 py-4">
+        <button 
+          type="button"
+          onClick={() => toggleSelectTransaction(t.id)}
+          className={cn(
+            "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
+            selected
+              ? "bg-indigo-600 border-indigo-600 text-white"
+              : "border-slate-300 dark:border-slate-700 group-hover:border-indigo-500"
+          )}
+        >
+          {selected && <CheckSquare size={14} />}
+        </button>
+      </td>
       <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
         <p className={cn(
           "font-bold text-sm",
           theme === 'dark' ? "text-slate-200" : "text-slate-800"
         )}>
-          {formatDateTime12h(t.date || t.created_at)}
+          {safeFormatDate(t.date, { day: '2-digit', month: 'short', year: 'numeric' })}
+        </p>
+        <p className={cn(
+          "text-[10px] font-bold uppercase tracking-tight",
+          theme === 'dark' ? "text-slate-400" : "text-slate-500"
+        )}>
+          {safeFormatTime(t.date, { hour: '2-digit', minute: '2-digit', hour12: true })}
         </p>
       </td>
       <td className="px-3 sm:px-6 py-4 min-w-[120px]">
         <div className="flex items-center gap-2 flex-wrap">
-          <div>
-            <p className={cn(
-              "text-sm font-bold transition-colors duration-300 truncate max-w-[280px] lg:max-w-md xl:max-w-lg whitespace-nowrap",
-              theme === 'dark' ? "text-slate-300" : "text-black"
-            )} title={t.description}>{t.description || '--'}</p>
-            {/* User name display removed for privacy/clutter reduction */}
-          </div>
+          <p className={cn(
+            "text-sm font-bold transition-colors duration-300",
+            theme === 'dark' ? "text-slate-300" : "text-black"
+          )}>{t.description || '--'}</p>
           {getTransactionSource(t) === 'Imported' && (
             <span className={cn(
               "px-1.5 py-0.5 text-[9px] font-black rounded-full border uppercase shrink-0 transition-all",
@@ -1403,15 +1427,6 @@ const DesktopTransactionRow = React.memo(({
             )}>
               <Sparkles size={10} />
               AI
-            </span>
-          )}
-          {(t.syncStatus === 'PENDING' || t.is_offline) && (
-            <span className={cn(
-              "px-2 py-0.5 text-[9px] font-bold rounded-full border uppercase shrink-0 transition-all flex items-center gap-1",
-              theme === 'dark' ? "bg-amber-950/50 text-amber-300 border-amber-800/60" : "bg-amber-50 text-amber-800 border-amber-300"
-            )}>
-              <Clock size={10} className="animate-pulse text-amber-500" />
-              Offline • Pending Sync
             </span>
           )}
           {t.imageLayout && (
@@ -1466,178 +1481,33 @@ const DesktopTransactionRow = React.memo(({
         <span>{formatCurrency(runningBalance)}</span>
       </td>
       <td className="px-3 sm:px-6 py-4">
-        {(canEdit || canDelete) ? (
-          <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            {canEdit && (
-              <button 
-                type="button"
-                onClick={() => handleEditTransaction(t)}
-                className={cn(
-                  "p-1.5 text-slate-400 rounded-lg transition-all cursor-pointer",
-                  theme === 'dark' ? "hover:text-indigo-400 hover:bg-indigo-900/20" : "hover:text-indigo-600 hover:bg-indigo-50"
-                )}
-                aria-label="Edit Transaction"
-              >
-                <Pencil size={16} />
-              </button>
+        <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button 
+            type="button"
+            onClick={() => handleEditTransaction(t)}
+            className={cn(
+              "p-1.5 text-slate-400 rounded-lg transition-all cursor-pointer",
+              theme === 'dark' ? "hover:text-indigo-400 hover:bg-indigo-900/20" : "hover:text-indigo-600 hover:bg-indigo-50"
             )}
-            {canDelete && (
-              <button 
-                type="button"
-                onClick={() => handleDeleteTransaction(t.id)}
-                className={cn(
-                  "p-1.5 text-slate-400 rounded-lg transition-all cursor-pointer",
-                  theme === 'dark' ? "hover:text-rose-400 hover:bg-rose-900/20" : "hover:text-rose-600 hover:bg-rose-50"
-                )}
-                aria-label="Delete Transaction"
-              >
-                <Trash2 size={16} />
-              </button>
+          >
+            <Pencil size={16} />
+          </button>
+          <button 
+            type="button"
+            onClick={() => handleDeleteTransaction(t.id)}
+            className={cn(
+              "p-1.5 text-slate-400 rounded-lg transition-all cursor-pointer",
+              theme === 'dark' ? "hover:text-rose-400 hover:bg-rose-900/20" : "hover:text-rose-600 hover:bg-rose-50"
             )}
-          </div>
-        ) : (
-          <div className="text-center text-slate-300 dark:text-zinc-700 text-xs font-mono">-</div>
-        )}
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
       </td>
     </motion.tr>
   );
-}, areTransactionRowPropsEqual);
+});
 DesktopTransactionRow.displayName = 'DesktopTransactionRow';
-
-function areCashbookCardPropsEqual(prev: any, next: any): boolean {
-  return (
-    prev.book === next.book &&
-    prev.displayInfo.text === next.displayInfo.text &&
-    prev.displayInfo.isNegative === next.displayInfo.isNegative &&
-    prev.selected === next.selected &&
-    prev.justEdited === next.justEdited &&
-    prev.theme === next.theme &&
-    prev.canDelete === next.canDelete
-  );
-}
-
-const CashbookListCard = React.memo(({
-  book,
-  displayInfo,
-  selected,
-  justEdited,
-  theme,
-  canDelete = true,
-  onTouchStart,
-  onTouchEnd,
-  onPress,
-  onEdit,
-  onDelete,
-  onOpen
-}: {
-  book: Cashbook;
-  displayInfo: { text: string; isNegative: boolean };
-  selected: boolean;
-  justEdited: boolean;
-  theme: string;
-  canDelete?: boolean;
-  onTouchStart: (id: string) => void;
-  onTouchEnd: () => void;
-  onPress: (id: string) => void;
-  onEdit: (book: Cashbook, e: React.MouseEvent) => void;
-  onDelete: (id: string, e: React.MouseEvent) => void;
-  onOpen: (id: string) => void;
-}) => {
-  return (
-    <div
-      key={book.id}
-      onMouseDown={() => onTouchStart(book.id)}
-      onMouseUp={onTouchEnd}
-      onTouchStart={() => onTouchStart(book.id)}
-      onTouchEnd={onTouchEnd}
-      onClick={() => onPress(book.id)}
-      className={cn(
-        "group w-full select-none flex items-center justify-between cursor-pointer px-4 sm:px-6 py-3 sm:py-3.5 transition-colors duration-150 relative min-h-[58px] sm:min-h-[64px] min-w-0 rounded-none",
-        selected
-          ? (theme === 'dark' ? "bg-indigo-950/30" : "bg-indigo-50/70")
-          : (theme === 'dark' 
-              ? "bg-transparent hover:bg-zinc-900/60" 
-              : "bg-transparent hover:bg-slate-50/90"),
-        justEdited && (theme === 'dark' ? "bg-indigo-950/40 ring-1 ring-inset ring-indigo-500/40" : "bg-indigo-50/80 ring-1 ring-inset ring-indigo-500/40")
-      )}
-    >
-      {/* Left + Center: Selection checkbox + Cashbook Icon + Cashbook Info (Name & Created on) */}
-      <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0 pr-3 sm:pr-6">
-        {selected && (
-          <div className="w-4 h-4 bg-indigo-600 text-white rounded-none flex items-center justify-center shrink-0">
-            <Check size={11} strokeWidth={3} />
-          </div>
-        )}
-        <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-none bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-100 dark:border-indigo-900/40">
-          <BookOpen size={18} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h3 
-            title={book.name}
-            className={cn(
-              "font-semibold text-sm sm:text-base leading-snug truncate transition-colors duration-150 tracking-tight",
-              theme === 'dark' ? "text-slate-100" : "text-slate-900"
-            )}
-          >
-            {book.name}
-          </h3>
-          <p className={cn(
-            "text-[11px] sm:text-xs mt-0.5 transition-colors duration-150 whitespace-nowrap truncate font-normal",
-            theme === 'dark' ? "text-zinc-500" : "text-slate-400"
-          )}>
-            Created on {formatDateTime12h(book.createdAt)}
-          </p>
-        </div>
-      </div>
-
-      {/* Right: Net Balance + Edit + Delete + Open/View (vertically aligned across rows) */}
-      <div className="flex items-center shrink-0">
-        <div className="text-right min-w-[70px] sm:min-w-[110px] md:min-w-[130px] pr-3 sm:pr-6 shrink-0">
-          <span className={cn(
-            "font-mono tabular-nums text-sm sm:text-base font-semibold tracking-tight whitespace-nowrap",
-            displayInfo.isNegative 
-              ? "text-rose-600 dark:text-rose-400" 
-              : "text-emerald-600 dark:text-emerald-400"
-          )}>
-            {displayInfo.text}
-          </span>
-        </div>
-        <div className="flex items-center gap-0.5 sm:gap-1 pl-2 sm:pl-3 border-l border-slate-200 dark:border-zinc-800 shrink-0">
-          <button 
-            type="button"
-            onClick={(e) => onEdit(book, e)}
-            className="p-1.5 sm:p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-zinc-800/80 rounded-none transition-colors cursor-pointer"
-            title="Edit Book"
-            aria-label="Edit Book"
-          >
-            <Pencil size={15} />
-          </button>
-          {canDelete && (
-            <button 
-              type="button"
-              onClick={(e) => onDelete(book.id, e)}
-              className="p-1.5 sm:p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-none transition-colors cursor-pointer"
-              title="Delete Book"
-              aria-label="Delete Book"
-            >
-              <Trash2 size={15} />
-            </button>
-          )}
-          <button 
-            type="button"
-            onClick={() => onOpen(book.id)}
-            className="p-1.5 sm:p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-none transition-colors ml-0.5 cursor-pointer"
-            title="Open Cashbook"
-            aria-label="Open Cashbook"
-          >
-            <ArrowRight size={16} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}, areCashbookCardPropsEqual);
-CashbookListCard.displayName = 'CashbookListCard';
 
 const SummaryCards = React.memo(({ totals, theme }: { totals: { in: number; out: number; net: number }; theme: string }) => {
   return (
@@ -1691,7 +1561,7 @@ const SummaryCards = React.memo(({ totals, theme }: { totals: { in: number; out:
       </div>
 
       {/* Balance Cards Row (Desktop Only) */}
-      <div className="hidden lg:grid lg:grid-cols-3 w-full gap-4 sm:gap-6">
+      <div className="hidden lg:grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
         <div className={cn(
           "p-6 rounded-3xl border flex items-center gap-4 shadow-sm transition-colors duration-300",
           theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
@@ -1781,100 +1651,16 @@ async function fetchAttachmentsDeduplicated(entryIds: string[]): Promise<{ attac
   const queryPromise = (async () => {
     try {
       const startTime = performance.now();
-      let attachments: any[] = [];
-      let aiAttachments: any[] = [];
-
-      // 1. Primary: Call server RBAC attachments endpoint (bypasses RLS with service_role, chunked by 50)
-      try {
-        const rbacAttRes = await fetch('/api/rbac/attachments', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entryIds })
-        });
-        if (rbacAttRes.ok) {
-          const rbacData = await rbacAttRes.json();
-          if (Array.isArray(rbacData.attachments)) {
-            attachments = rbacData.attachments;
-          }
-          if (Array.isArray(rbacData.aiAttachments)) {
-            aiAttachments = rbacData.aiAttachments;
-          }
-        }
-      } catch (rbacErr) {
-        console.warn('[Deduplication] Server attachments endpoint error, checking client fallback:', rbacErr);
-      }
-
-      // 2. Client fallback or supplementary query if server endpoint returned empty
-      if (attachments.length === 0 && supabase) {
-        const CHUNK_SIZE = 50;
-        const attPromises: any[] = [];
-        const aiPromises: any[] = [];
-
-        for (let i = 0; i < entryIds.length; i += CHUNK_SIZE) {
-          const chunk = entryIds.slice(i, i + CHUNK_SIZE);
-          attPromises.push(
-            supabase.from('attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', chunk)
-          );
-          aiPromises.push(
-            supabase.from('ai_attachments').select('entry_id, file_url, created_at, user_name, user_email').in('entry_id', chunk)
-          );
-        }
-
-        const [attResults, aiResults] = await Promise.all([
-          Promise.all(attPromises).catch(() => []),
-          Promise.all(aiPromises).catch(() => [])
-        ]);
-
-        attResults.forEach((r: any) => {
-          if (r && Array.isArray(r.data)) {
-            attachments.push(...r.data);
-          }
-        });
-
-        aiResults.forEach((r: any) => {
-          if (r && Array.isArray(r.data)) {
-            aiAttachments.push(...r.data);
-          }
-        });
-      }
-
-      // Populate attachmentCache so attachments survive offline, refreshes, and state updates
-      attachments.forEach((att: any) => {
-        if (att?.entry_id && att?.file_url) {
-          const existing = attachmentCache.get(att.entry_id)?.images || [];
-          if (!existing.includes(att.file_url)) {
-            attachmentCache.set(att.entry_id, {
-              images: [...existing, att.file_url],
-              isAi: false
-            });
-          }
-        }
-      });
-      aiAttachments.forEach((att: any) => {
-        if (att?.entry_id && att?.file_url) {
-          const existing = attachmentCache.get(att.entry_id)?.images || [];
-          if (!existing.includes(att.file_url)) {
-            attachmentCache.set(att.entry_id, {
-              images: [...existing, att.file_url],
-              isAi: true
-            });
-          }
-        }
-      });
-      persistAttachmentCacheToStorage();
-
+      const [attachmentsRes, aiAttachmentsRes] = await Promise.all([
+        supabase.from('attachments').select('entry_id, file_url').in('entry_id', entryIds),
+        supabase.from('ai_attachments').select('entry_id, file_url').in('entry_id', entryIds)
+      ]);
       const duration = performance.now() - startTime;
-      console.log(`[Performance] Attachments load timing: fetched ${attachments.length} attachments in ${duration.toFixed(2)}ms for ${entryIds.length} entries`);
+      console.log(`[Performance] Attachments load timing: fetched from db in ${duration.toFixed(2)}ms for ${entryIds.length} entries`);
       
       return {
-        attachments,
-        aiAttachments
-      };
-    } catch (err) {
-      console.warn('[Deduplication] Safe fallback for fetchAttachmentsDeduplicated:', err);
-      return {
-        attachments: [],
-        aiAttachments: []
+        attachments: attachmentsRes.data || [],
+        aiAttachments: aiAttachmentsRes.data || []
       };
     } finally {
       inFlightAttachmentQueries.delete(batchKey);
@@ -2068,7 +1854,7 @@ const getCachedOptimizedImage = (
   return promise;
 };
 
-const CATEGORIES = ['Food', 'Travel', 'Accommodation', 'Advance', 'Shopping', 'Custom'];
+const CATEGORIES = ['Food', 'Travel', 'Advance', 'Shopping', 'Custom'];
 const MODES = ['Card', 'UPI', 'Cash', 'Custom'];
 const DURATIONS = ['All', 'Today', 'Yesterday', 'Last Week', 'Custom'];
 
@@ -2081,448 +1867,39 @@ export function getBookSlug(name: string, id: string): string {
 }
 
 export default function Dashboard({ session, theme, setTheme }: { session: any, theme: 'light' | 'dark', setTheme: React.Dispatch<React.SetStateAction<'light' | 'dark'>> }) {
-  const shouldReduceMotion = useReducedMotion();
-  const { versionDisplay } = useAppVersion();
   // Routing Hooks
   const { bookSlug, tabName } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const bookSlugRef = React.useRef(bookSlug);
-  React.useEffect(() => {
-    bookSlugRef.current = bookSlug;
-  }, [bookSlug]);
-
-  React.useEffect(() => {
-    console.log('[DEBUG] DASHBOARD MOUNTED');
-    return () => {
-      console.log('[DEBUG] DASHBOARD UNMOUNTED');
-    };
-  }, []);
-
   const currentTabName = tabName || 'entries';
 
   // Global State
-  const currentUserId = session?.user?.id;
-  const initialUserName = session?.user?.user_metadata?.full_name || 
-                          session?.user?.user_metadata?.name || 
-                          session?.user?.email?.split('@')[0] || 
-                          '';
-
-  useEffect(() => {
-    if (session?.user?.id) {
-      try {
-        localStorage.setItem('trackbook_last_user_id', session.user.id);
-      } catch {}
+  const [userName, setUserName] = useState<string>(() => {
+    if (session?.user) {
+      const meta = session.user.user_metadata || {};
+      const metaName = meta.full_name || meta.name || meta.user_name || meta.username || meta.preferred_username || meta.display_name;
+      if (metaName && String(metaName).trim()) return String(metaName).trim();
+      if (session.user.email) return session.user.email.split('@')[0];
     }
-  }, [session?.user?.id]);
-
-  const [userName, setUserName] = useState(initialUserName);
-
-  // Clean up any legacy or stale tombstone markers from localStorage
-  useEffect(() => {
-    try {
-      localStorage.removeItem('trackbook_deleted_book_ids');
-      localStorage.removeItem('trackbook_cached_books');
-    } catch (_) {}
-  }, []);
-
-  // Helper to ensure cashbooks are always sorted latest created first
-  const sortCashbooksLatestFirst = (list: Cashbook[]): Cashbook[] => {
-    return [...list].sort((a, b) => {
-      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : ((a as any).created_at ? new Date((a as any).created_at).getTime() : 0);
-      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : ((b as any).created_at ? new Date((b as any).created_at).getTime() : 0);
-      const validA = isNaN(timeA) ? 0 : timeA;
-      const validB = isNaN(timeB) ? 0 : timeB;
-      return validB - validA;
-    });
-  };
-
-  // Synchronous loader for complete offline-first cashbooks & entries
-  const loadCompleteLocalCashbooks = (userId?: string): Cashbook[] => {
-    if (typeof window === 'undefined') return [];
-    const mergedMap = new Map<string, Cashbook>();
-
-    // 1. Load cached synced cashbooks strictly scoped to this user
-    try {
-      const effectiveUserId = userId || localStorage.getItem('trackbook_last_user_id');
-      let raw: string | null = null;
-      if (effectiveUserId) {
-        raw = localStorage.getItem(`trackbook_cached_books_${effectiveUserId}`);
-      }
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          parsed.forEach((b: any) => {
-            if (b && b.id) {
-              mergedMap.set(b.id, {
-                ...b,
-                createdAt: b.createdAt ? new Date(b.createdAt) : (b.created_at ? new Date(b.created_at) : new Date()),
-                transactions: Array.isArray(b.transactions) ? b.transactions.map((t: any) => {
-                  let images = Array.isArray(t.images) ? t.images.filter((img: string) => typeof img === 'string' && !img.startsWith('blob:')) : [];
-                  if (images.length === 0 && attachmentCache.has(t.id)) {
-                    images = attachmentCache.get(t.id)?.images || [];
-                  }
-                  return {
-                    ...t,
-                    date: t.date ? new Date(t.date) : new Date(),
-                    images
-                  };
-                }) : []
-              });
-            }
-          });
-        }
-      }
-    } catch (e) {}
-
-    // Synced authoritative cache loaded
-    const result = sortCashbooksLatestFirst(Array.from(mergedMap.values()));
-    result.forEach(cb => {
-      if (cb.id && Array.isArray(cb.transactions) && cb.transactions.length > 0) {
-        entriesCache.set(cb.id, cb.transactions);
-      }
-    });
-    return result;
-  };
-
-  const [books, setBooks] = useState<Cashbook[]>(() => {
-    try {
-      localStorage.removeItem('trackbook_cached_books'); // Purge legacy unscoped cache
-      return loadCompleteLocalCashbooks(currentUserId);
-    } catch (e) {
-      return [];
-    }
+    return '';
   });
-  
-  const booksRef = useRef<Cashbook[]>(books);
-  const booksLengthRef = useRef(books.length);
-  const initialLoadedRef = useRef(false);
-  useEffect(() => {
-    booksRef.current = books;
-    booksLengthRef.current = books.length;
-  }, [books]);
-
-  const prevUserIdRef = useRef<string | null>(currentUserId || null);
-  useEffect(() => {
-    if (currentUserId !== prevUserIdRef.current) {
-      const prevId = prevUserIdRef.current;
-      prevUserIdRef.current = currentUserId || null;
-      if (currentUserId) {
-        // Only clear if switching between two distinct, different users
-        if (prevId && prevId !== currentUserId) {
-          setBooks([]);
-        }
-        const cached = loadCompleteLocalCashbooks(currentUserId);
-        if (cached.length > 0) {
-          setBooks(cached);
-          setIsLoading(false);
-        }
-      } else {
-        // Only clear if user explicitly clicked sign out — NEVER on network loss or background disconnect
-        const isExplicit = typeof localStorage !== 'undefined' && localStorage.getItem('trackbook_explicit_logout') === 'true';
-        if (isExplicit) {
-          setBooks([]);
-          setIsLoading(false);
-        }
-      }
-    }
-  }, [currentUserId]);
-
-  const preserveAndMergeLocalCache = useCallback(async () => {
-    const effectiveUserId = currentUserId || (typeof localStorage !== 'undefined' ? localStorage.getItem('trackbook_last_user_id') || '' : '');
-    const currentInMemory = booksRef.current || [];
-    const local = loadCompleteLocalCashbooks(effectiveUserId);
-
-    const mergedMap = new Map<string, Cashbook>();
-
-    // 1. Populate with local cache (contains localStorage cached books + pending offline books + pending entries)
-    local.forEach(b => {
-      if (b && b.id) {
-        mergedMap.set(b.id, b);
-      }
-    });
-
-    // 2. Layer in-memory books to ensure in-memory state, active transactions, and rich image arrays are never lost
-    currentInMemory.forEach(b => {
-      if (b && b.id) {
-        const localBook = mergedMap.get(b.id);
-        const inMemoryTxs = (b.transactions && b.transactions.length > 0)
-          ? b.transactions
-          : (localBook?.transactions || entriesCache.get(b.id) || []);
-
-        mergedMap.set(b.id, {
-          ...localBook,
-          ...b,
-          transactions: inMemoryTxs
-        });
-
-        if (inMemoryTxs.length > 0) {
-          entriesCache.set(b.id, inMemoryTxs);
-        }
-      }
-    });
-
-    // Immediately render current synchronous cache + in-memory state without waiting for async promises
-    const immediateList = sortCashbooksLatestFirst(Array.from(mergedMap.values()));
-    if (immediateList.length > 0) {
-      setBooks(immediateList);
-      setIsLoading(false);
-      setIsEntriesLoading(false);
-    }
-
-    // Authoritative local cache loaded cleanly
-    const finalList = sortCashbooksLatestFirst(Array.from(mergedMap.values()));
-    if (finalList.length > 0) {
-      setBooks(finalList);
-      finalList.forEach(b => {
-        if (b.id && Array.isArray(b.transactions) && b.transactions.length > 0) {
-          entriesCache.set(b.id, b.transactions);
-        }
-      });
-    }
-    setIsLoading(false);
-    setIsEntriesLoading(false);
-  }, [currentUserId]);
-
-  const resolveUserDataForAttachments = async () => {
-    if (!session?.user) return { id: null, name: "Unknown User", email: "" };
-    
-    const userId = session.user.id;
-    const userEmail = session.user.email || "";
-    
-    let resolvedName = "";
-    
-    // 1. Authenticated Profile Name
-    try {
-      if (supabase) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', userId)
-          .maybeSingle();
-        if (profile?.full_name) {
-          resolvedName = profile.full_name;
-        }
-      }
-    } catch (err) {
-      console.warn('[resolveUserDataForAttachments] Failed to fetch profile:', err);
-    }
-    
-    // 2. Google Display Name
-    if (!resolvedName) {
-      resolvedName = session.user.user_metadata?.full_name || 
-                     session.user.user_metadata?.name || 
-                     session.user.user_metadata?.display_name || "";
-    }
-    
-    // 3. Email Prefix
-    if (!resolvedName && userEmail) {
-      resolvedName = userEmail.split('@')[0];
-    }
-    
-    // 4. "Unknown User"
-    if (!resolvedName) {
-      resolvedName = "Unknown User";
-    }
-    
-    return {
-      id: userId,
-      name: resolvedName,
-      email: userEmail
-    };
-  };
-
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [helpQuery, setHelpQuery] = useState('');
   const [helpResponse, setHelpResponse] = useState('');
   const [isHelpLoading, setIsHelpLoading] = useState(false);
-  const [isLoading, setIsLoading] = useState(() => {
-    try {
-      const local = loadCompleteLocalCashbooks(currentUserId);
-      if (local.length > 0) return false;
-    } catch (e) {}
-    return true;
-  });
-  const [activeBookId, setActiveBookIdState] = useState<string | null>(() => {
-    if (bookSlug && books.length > 0) {
-      const foundBook = books.find(b => getBookSlug(b.name, b.id) === bookSlug || b.id === bookSlug);
-      if (foundBook) return foundBook.id;
-    }
-    return null;
-  });
-  const activeBookIdRef = useRef<string | null>(activeBookId);
-  useEffect(() => {
-    activeBookIdRef.current = activeBookId;
-  }, [activeBookId]);
+  const [books, setBooks] = useState<Cashbook[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [activeBookId, setActiveBookIdState] = useState<string | null>(null);
   const [isEntriesLoading, setIsEntriesLoading] = useState(false);
-  const [showOfflineDialog, setShowOfflineDialog] = useState(false);
-  const [showOfflinePdfDialog, setShowOfflinePdfDialog] = useState(false);
-  const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && !navigator.onLine);
-  const [isRetryingNetwork, setIsRetryingNetwork] = useState(false);
-  const [reconnectedToast, setReconnectedToast] = useState<string | null>(null);
-  const [showQuitDialog, setShowQuitDialog] = useState(false);
-  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
-  const [pdfQualityModalState, setPdfQualityModalState] = useState<{
-    isOpen: boolean;
-    cashbookId: string;
-    cashbookName: string;
-    transactions: any[];
-  } | null>(null);
-  const isClosingModalFromUiRef = useRef(false);
-
-  // Mobile MPIN Security
-  const { 
-    hasMpin: hasUserMpin, 
-    isMobile: isMobileSecurityActive, 
-    openCreateModal: openMpinCreateModal, 
-    openChangeModal: openMpinChangeModal, 
-    openForgotModal: openMpinForgotModal,
-    openDisableModal: openMpinDisableModal
-  } = useMpinSecurity();
-
-  // Network state observer & automatic offline detection
-  useEffect(() => {
-    const handleNetworkChange = (state: any) => {
-      const offline = state === 'offline' || (typeof navigator !== 'undefined' && !navigator.onLine);
-      setIsOffline(prev => {
-        if (!prev && offline) {
-          setShowForm(null);
-          setIsCreatingBook(false);
-          setIsEditingBook(null);
-          setShowImportModal(false);
-          setShowOfflineDialog(true);
-          preserveAndMergeLocalCache();
-        } else if (prev && !offline) {
-          setShowOfflineDialog(false);
-          setShowOfflinePdfDialog(false);
-          setReconnectedToast('🟢 Back Online');
-          setTimeout(() => setReconnectedToast(null), 3500);
-          syncManager.triggerSync().then(() => {
-            window.dispatchEvent(new CustomEvent('trackbook_refresh_cashbooks'));
-          }).catch(() => {
-            window.dispatchEvent(new CustomEvent('trackbook_refresh_cashbooks'));
-          });
-        }
-        return offline;
-      });
-    };
-    const unsubscribe = syncManager.network.subscribe(handleNetworkChange);
-    return () => unsubscribe();
-  }, [preserveAndMergeLocalCache]);
-
-  // Offline entry & cashbook sync listener and real-time status updates
-  useEffect(() => {
-    const unsubEntry = syncManager.onEntrySynced((clientEntryId, syncedEntry) => {
-      setBooks(prevBooks => {
-        let changed = false;
-        const nextBooks = prevBooks.map(b => {
-          const hasTx = b.transactions.some(t => t.id === clientEntryId || t.clientEntryId === clientEntryId);
-          if (!hasTx) return b;
-          changed = true;
-          const updatedTxs = b.transactions.map(t => {
-            if (t.id === clientEntryId || t.clientEntryId === clientEntryId) {
-              return {
-                ...t,
-                ...(syncedEntry || {}),
-                id: syncedEntry?.id || t.id,
-                syncStatus: 'SYNCED' as const,
-                is_offline: false
-              };
-            }
-            return t;
-          });
-          entriesCache.set(b.id, updatedTxs);
-          return {
-            ...b,
-            transactions: updatedTxs
-          };
-        });
-        return changed ? nextBooks : prevBooks;
-      });
-    });
-
-    const unsubCashbook = syncManager.onCashbookSynced((cashbookId, syncedBook) => {
-      setBooks(prevBooks => {
-        let changed = false;
-        const nextBooks = prevBooks.map(b => {
-          if (b.id === cashbookId) {
-            changed = true;
-            return {
-              ...b,
-              ...(syncedBook || {}),
-              id: syncedBook?.id || b.id,
-              syncStatus: 'SYNCED' as const,
-              is_offline: false
-            };
-          }
-          return b;
-        });
-        if (changed) {
-          try {
-            const effectiveUserId = currentUserId || localStorage.getItem('trackbook_last_user_id');
-            if (effectiveUserId) {
-              localStorage.setItem(`trackbook_cached_books_${effectiveUserId}`, JSON.stringify(nextBooks));
-              localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(nextBooks));
-            }
-          } catch (e) {}
-          return nextBooks;
-        }
-        return prevBooks;
-      });
-    });
-
-    const unsubToasts = syncManager.subscribeToToasts((msg) => {
-      setReconnectedToast(msg);
-      setTimeout(() => setReconnectedToast(null), 3500);
-    });
-
-    return () => {
-      unsubEntry();
-      unsubCashbook();
-      unsubToasts();
-    };
-  }, [currentUserId]);
-
-  const handleRetryConnection = async () => {
-    vibrate();
-    setIsRetryingNetwork(true);
-    try {
-      const isOnline = await syncManager.network.checkConnection();
-      if (isOnline) {
-        setIsOffline(false);
-        setShowOfflineDialog(false);
-        setReconnectedToast('Internet connection restored! Synced.');
-        setTimeout(() => setReconnectedToast(null), 3500);
-      } else {
-        setIsOffline(true);
-        setShowOfflineDialog(true);
-      }
-    } catch {
-      setIsOffline(true);
-    } finally {
-      setIsRetryingNetwork(false);
-    }
-  };
 
   const setActiveBookId = (id: string | null) => {
     setActiveBookIdState(id);
-    activeBookIdRef.current = id;
     if (id) {
-      const book = booksRef.current.find(b => b.id === id);
-      if (book && !entriesCache.has(id)) {
-        entriesCache.set(id, book.transactions || []);
-      }
       const cached = entriesCache.get(id);
-      const hasEntries = (cached && cached.length > 0) || (book && book.transactions && book.transactions.length > 0);
-      if (!hasEntries && !entriesCache.has(id)) {
+      const hasFetched = lastFetchTimeCache.has(id);
+      if (!cached || cached.length === 0 || !hasFetched) {
         setIsEntriesLoading(true);
-      } else {
-        setIsEntriesLoading(false);
-      }
-      // Guarantee instant fresh sync from Supabase when switching/opening a cashbook
-      if (typeof window !== 'undefined' && navigator.onLine) {
-        window.dispatchEvent(new CustomEvent('trackbook_refresh_cashbooks'));
       }
     } else {
       setIsEntriesLoading(false);
@@ -2532,12 +1909,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [searchQueryInput, setSearchQueryInput] = useState('');
 
   // Routing synchronization wrapper
-  const handleSelectBook = useCallback((id: string | null) => {
+  const handleSelectBook = (id: string | null) => {
     setActiveBookId(id);
     if (id === null) {
       navigate('/cashbooks');
     } else {
-      const book = booksRef.current.find(b => b.id === id);
+      const book = books.find(b => b.id === id);
       if (book) {
         const slug = getBookSlug(book.name, book.id);
         navigate(`/cashbooks/${slug}/entries`);
@@ -2545,14 +1922,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         navigate('/cashbooks');
       }
     }
-  }, [navigate]);
+  };
 
   // Synchronize route with activeBookId & tabName
   useEffect(() => {
-    if (isLoading && books.length === 0) return;
+    if (isLoading) return;
 
     if (bookSlug && books.length > 0) {
-      const foundBook = books.find(b => getBookSlug(b.name, b.id) === bookSlug || b.id === bookSlug);
+      const foundBook = books.find(b => getBookSlug(b.name, b.id) === bookSlug);
       if (foundBook) {
         if (activeBookId !== foundBook.id) {
           setActiveBookId(foundBook.id);
@@ -2565,8 +1942,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       if (activeBookId !== null) {
         setActiveBookId(null);
       }
+      // Redirect home root / to /cashbooks if authenticated
+      if (location.pathname === '/') {
+        navigate('/cashbooks', { replace: true });
+      }
     }
-  }, [bookSlug, books, activeBookId, isLoading, navigate]);
+  }, [bookSlug, books, activeBookId, isLoading, location.pathname]);
 
   // Performance timers
   const lastBookOpenStart = useRef<number | null>(null);
@@ -2605,17 +1986,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   // Register backgroundExportManager onReviewAiScan handler
   useEffect(() => {
     backgroundExportManager.onReviewAiScan = (results: any[]) => {
-      // Commit any pending deletions immediately before review
-      if (pendingActionRef.current) {
-        commitPendingDeletion(pendingActionRef.current);
-        setUndoAction(null);
-        setShowUndoToast(false);
-      }
-
       if (results && results.length > 0) {
         // Map the results to handwrittenQueue structure
-        const mappedQueue = results.map((item, idx) => ({
-          id: (item as any).id || (item.result as any)?.id || `ai_receipt_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 7)}`,
+        const mappedQueue = results.map(item => ({
           file: item.file,
           result: item.result,
           previewUrl: item.result.cloudinaryUrl || (item.file && item.file.type.startsWith('image/') ? URL.createObjectURL(item.file) : '')
@@ -2654,15 +2027,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   // Quick Add State and Refs
   const [submitAndAddNew, setSubmitAndAddNew] = useState(false);
   const [quickAddSuccess, setQuickAddSuccess] = useState(false);
-  const descriptionInputRef = useRef<HTMLInputElement>(null);
   const amountInputRef = useRef<HTMLInputElement>(null);
+  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+  const [formErrors, setFormErrors] = useState<{ amount?: string; description?: string }>({});
   
   // UI State
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [showDownloadCenter, setShowDownloadCenter] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
-  const [showAvatarPreviewModal, setShowAvatarPreviewModal] = useState(false);
   const [isCreatingBook, setIsCreatingBook] = useState(false);
 
   // Phone linking states
@@ -2673,69 +2046,43 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
-  const [userAvatarUrl, setUserAvatarUrl] = useState<string | null>(() => {
-    try {
-      if (currentUserId) {
-        const saved = localStorage.getItem(`trackbook_avatar_${currentUserId}`);
-        if (saved) return saved;
-      }
-      return session?.user?.user_metadata?.avatar_url || session?.user?.user_metadata?.picture || null;
-    } catch (e) {
-      return null;
-    }
-  });
-  const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [userPhone, setUserPhone] = useState<string | null>(null);
   const [userPhoneVerified, setUserPhoneVerified] = useState(false);
   const [userPhoneLinkedAt, setUserPhoneLinkedAt] = useState<string | null>(null);
   const [showPhoneSecurityModal, setShowPhoneSecurityModal] = useState(false);
   const [showPhoneLinkingComingSoon, setShowPhoneLinkingComingSoon] = useState(false);
-  const [isAutomationMailConfirmOpen, setIsAutomationMailConfirmOpen] = useState(false);
   const [linkingSelectedCountry, setLinkingSelectedCountry] = useState<Country>(COUNTRIES[0]);
   const [profileSandboxMode, setProfileSandboxMode] = useState(false);
   const [isEditingBook, setIsEditingBook] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [progressModal, setProgressModal] = useState<{
-    isOpen: boolean;
-    type: 'create' | 'edit';
-    progress: number;
-    steps: Array<{ label: string; status: 'pending' | 'loading' | 'success' | 'error' }>;
-    statusText: string;
-    errorMsg: string | null;
-    success: boolean;
-  } | null>(null);
   const [submittingMessage, setSubmittingMessage] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [showBulkTransactionDeleteConfirm, setShowBulkTransactionDeleteConfirm] = useState(false);
   const [transactionToDelete, setTransactionToDelete] = useState<string | null>(null);
-  const [showMergeConfirmDialog, setShowMergeConfirmDialog] = useState(false);
-  const [mergeDescription, setMergeDescription] = useState('');
-  const [mergeCategory, setMergeCategory] = useState('General');
-  const [mergeType, setMergeType] = useState<'in' | 'out'>('out');
-  const [isMerging, setIsMerging] = useState(false);
   const [newBookName, setNewBookName] = useState('');
   const [editBookName, setEditBookName] = useState('');
-  const [createBookError, setCreateBookError] = useState<string | null>(null);
-  const [editBookError, setEditBookError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState<'in' | 'out' | null>(null);
-  const showFormRef = useRef(showForm);
-  showFormRef.current = showForm;
-  const saveTransactionRef = useRef<(() => void) | null>(null);
-  const currentUserRoleRef = useRef<Role>('Primary Admin');
-  const optimisticCashbooksRef = useRef<Map<string, { book: Cashbook; timestamp: number }>>(new Map());
-  const optimisticEntriesRef = useRef<Map<string, { entry: Transaction; cashbookId: string; timestamp: number }>>(new Map());
-  const [detailsError, setDetailsError] = useState(false);
-  const [amountError, setAmountError] = useState(false);
-  const [partyName, setPartyName] = useState('');
-  const [isDrawerDesktop, setIsDrawerDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
-
-  useEffect(() => {
-    const handleResize = () => setIsDrawerDesktop(window.innerWidth >= 1024);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  
+  // Premium Transaction Processing State
+  const [txProgressModal, setTxProgressModal] = useState<{
+    isOpen: boolean;
+    mode: 'create' | 'edit';
+    progress: number;
+    currentStepMessage: string;
+    steps: ProcessingStep[];
+    status: 'processing' | 'success' | 'error';
+    errorMessage?: string | null;
+    retryAction?: () => void;
+  }>({
+    isOpen: false,
+    mode: 'create',
+    progress: 0,
+    currentStepMessage: '',
+    steps: [],
+    status: 'processing',
+    errorMessage: null
+  });
   const [isUploading, setIsUploading] = useState(false);
   const [uploadingMessage, setUploadingMessage] = useState('Detecting bill...');
   const [showAiWarning, setShowAiWarning] = useState(false);
@@ -2747,7 +2094,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const cancelScanRef = useRef<boolean>(false);
   const [backgroundScanResult, setBackgroundScanResult] = useState<string | null>(null);
 
-  // Intelligent AI TrackBook Upload states
+  // Intelligent TrackBook AI Upload states
   const [aiWorkflowStep, setAiWorkflowStep] = useState<'group' | 'upload' | 'scanning' | 'confirmation' | 'completion'>('group');
   const [activeAiTaskId, setActiveAiTaskId] = useState<string | null>(null);
   const lastProcessedRef = useRef<number>(0);
@@ -2767,7 +2114,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [handwrittenIsFood, setHandwrittenIsFood] = useState<boolean>(true);
 
   // Handwritten verification queue
-  const [handwrittenQueue, setHandwrittenQueue] = useState<Array<{ id: string; file: File; result: any; previewUrl: string }>>([]);
+  const [handwrittenQueue, setHandwrittenQueue] = useState<Array<{ file: File; result: any; previewUrl: string }>>([]);
   const [currentQueueIndex, setCurrentQueueIndex] = useState<number>(0);
   const [showFullScreenPreview, setShowFullScreenPreview] = useState<boolean>(false);
 
@@ -2892,23 +2239,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   // Import Shared Entries states
   const [showImportModal, setShowImportModal] = useState(false);
-  const [showImportDropdown, setShowImportDropdown] = useState(false);
-  const importDropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (importDropdownRef.current && !importDropdownRef.current.contains(event.target as Node)) {
-        setShowImportDropdown(false);
-      }
-    };
-    if (showImportDropdown) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [showImportDropdown]);
-
   const [importCode, setImportCode] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   const [importError, setImportError] = useState('');
@@ -2928,100 +2258,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     parentBookId?: string;
   } | null>(null);
   const [showUndoToast, setShowUndoToast] = useState(false);
-  const [undoTimeLeft, setUndoTimeLeft] = useState(8);
+  const [undoTimeLeft, setUndoTimeLeft] = useState(6);
 
-  // Keep a ref of undoAction to commit on unmount
+  // Keep track of pending deleted book IDs so background fetches don't resurrect them during undo window
+  const pendingDeletedBookIdsRef = useRef<Set<string>>(new Set());
+
+  // Keep a ref of undoAction to commit on unmount or before starting new delete
   const pendingActionRef = useRef<any>(null);
   useEffect(() => {
     pendingActionRef.current = undoAction;
   }, [undoAction]);
-
-  /**
-   * Completely and permanently purge a cashbook from all state, local caches, IndexedDB, Supabase, and backend
-   */
-  const purgeBookCompletely = async (targetId: string) => {
-    if (!targetId) return;
-    const userId = session?.user?.id;
-
-    // 1. Clear from React UI state, refs and caches
-    setBooks(prev => prev.filter(b => b.id !== targetId));
-    booksRef.current = booksRef.current.filter(b => b.id !== targetId);
-    if (activeBookId === targetId) {
-      handleSelectBook(null);
-    }
-    entriesCache.delete(targetId);
-
-    // 3. Purge from local storage caches
-    if (userId) {
-      try {
-        const cacheKey = `trackbook_cached_books_${userId}`;
-        const raw = localStorage.getItem(cacheKey);
-        if (raw) {
-          const list = JSON.parse(raw);
-          if (Array.isArray(list)) {
-            localStorage.setItem(cacheKey, JSON.stringify(list.filter((b: any) => b.id !== targetId)));
-          }
-        }
-      } catch {}
-    }
-    try {
-      const latestRaw = localStorage.getItem('trackbook_cached_books_latest');
-      if (latestRaw) {
-        const list = JSON.parse(latestRaw);
-        if (Array.isArray(list)) {
-          localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(list.filter((b: any) => b.id !== targetId)));
-        }
-      }
-      localStorage.removeItem('trackbook_cached_books');
-    } catch {}
-
-    // 4. Purge from pending offline books and entries
-    try {
-      const rawBooks = localStorage.getItem('trackbook_offline_pending_books_v1');
-      if (rawBooks) {
-        const list = JSON.parse(rawBooks);
-        if (Array.isArray(list)) {
-          localStorage.setItem('trackbook_offline_pending_books_v1', JSON.stringify(list.filter((b: any) => b.id !== targetId)));
-        }
-      }
-      const rawEnts = localStorage.getItem('trackbook_offline_pending_entries_v1');
-      if (rawEnts) {
-        const list = JSON.parse(rawEnts);
-        if (Array.isArray(list)) {
-          localStorage.setItem('trackbook_offline_pending_entries_v1', JSON.stringify(list.filter((e: any) => e.cashbook_id !== targetId)));
-        }
-      }
-    } catch {}
-
-    // 5. OfflineDB & SyncManager delete
-    try {
-      await syncManager.deleteCashbook(targetId, userId);
-    } catch (err) {
-      console.warn('[purgeBookCompletely] SyncManager delete notice:', err);
-    }
-
-    // 6. Direct Supabase deletion
-    if (supabase) {
-      try {
-        await supabase.from('entries').delete().eq('cashbook_id', targetId);
-        await supabase.from('cashbook_members').delete().eq('cashbook_id', targetId);
-        await supabase.from('cashbooks').delete().eq('id', targetId);
-      } catch (err) {
-        console.warn('[purgeBookCompletely] Direct Supabase delete notice:', err);
-      }
-    }
-
-    // 7. Backend service role proxy deletion (bypasses RLS, deletes entries, members and book reliably)
-    try {
-      await fetch('/api/sync/delete-cashbook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: targetId, userId })
-      });
-    } catch (err) {
-      console.warn('[purgeBookCompletely] Backend proxy delete notice:', err);
-    }
-  };
 
   const commitPendingDeletion = async (action: {
     type: 'book' | 'transaction' | 'bulk_books' | 'bulk_transactions';
@@ -3034,13 +2280,74 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     try {
       if (action.type === 'book') {
         const bookId = action.data.book?.id || action.data.id;
+        const bookObj = action.data.book || action.data;
         console.log('[DelayedDelete] Committing book deletion to database:', bookId);
-        await purgeBookCompletely(bookId);
+        const { error } = await supabase
+          .from('cashbooks')
+          .delete()
+          .eq('id', bookId);
+
+        if (error) {
+          console.error('[DelayedDelete] Failure committing cashbook deletion:', error);
+          // Backend delete failed: restore immediately and show clear error
+          pendingDeletedBookIdsRef.current.delete(bookId);
+          setBooks(prevBooks => {
+            if (prevBooks.some(b => b.id === bookId)) return prevBooks;
+            const next = [...prevBooks];
+            const insertIdx = action.originalIndex !== undefined ? Math.min(action.originalIndex, next.length) : next.length;
+            next.splice(insertIdx, 0, bookObj);
+            return next;
+          });
+          if (cachedCashbooks && !cachedCashbooks.some((b: any) => b.id === bookId)) {
+            const insertIdx = action.originalIndex !== undefined ? Math.min(action.originalIndex, cachedCashbooks.length) : cachedCashbooks.length;
+            cachedCashbooks.splice(insertIdx, 0, bookObj);
+          }
+          if (action.data.cachedEntries) {
+            entriesCache.set(bookId, action.data.cachedEntries);
+          }
+          setError(`Failed to delete cashbook "${bookObj.name || ''}": ${error.message || 'Database error'}. The cashbook has been restored.`);
+        } else {
+          // Backend delete succeeded: finalize deletion and cleanup
+          console.log('[DelayedDelete] Successfully finalized deletion for book:', bookId);
+          pendingDeletedBookIdsRef.current.delete(bookId);
+          entriesCache.delete(bookId);
+          lastFetchTimeCache.delete(bookId);
+        }
       } else if (action.type === 'bulk_books') {
-        const ids = action.data.map((item: any) => item.book?.id || item.id);
+        const ids = action.data.map((item: any) => item.book.id);
         console.log('[DelayedDelete] Committing bulk book deletion to database:', ids);
-        for (const id of ids) {
-          await purgeBookCompletely(id);
+        const { error } = await supabase
+          .from('cashbooks')
+          .delete()
+          .in('id', ids);
+
+        if (error) {
+          console.error('[DelayedDelete] Failure committing bulk deletion:', error);
+          ids.forEach((id: string) => pendingDeletedBookIdsRef.current.delete(id));
+          setBooks(prevBooks => {
+            const next = [...prevBooks];
+            const sortedPairs = action.data.map((item: any, i: number) => ({
+              item,
+              index: action.originalIndexes?.[i] ?? next.length
+            })).sort((a: any, b: any) => a.index - b.index);
+
+            sortedPairs.forEach((pair: any) => {
+              if (!next.some(b => b.id === pair.item.book.id)) {
+                next.splice(pair.index, 0, pair.item.book);
+              }
+              if (pair.item.cachedEntries) {
+                entriesCache.set(pair.item.book.id, pair.item.cachedEntries);
+              }
+            });
+            return next;
+          });
+          setError(`Failed to delete cashbooks: ${error.message || 'Database error'}. The cashbooks have been restored.`);
+        } else {
+          ids.forEach((id: string) => {
+            pendingDeletedBookIdsRef.current.delete(id);
+            entriesCache.delete(id);
+            lastFetchTimeCache.delete(id);
+          });
         }
       } else if (action.type === 'transaction') {
         console.log('[DelayedDelete] Committing transaction deletion to database:', action.data.id);
@@ -3048,11 +2355,19 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           .from('entries')
           .delete()
           .eq('id', action.data.id);
-        if (error) console.warn('[DelayedDelete] Supabase delete warning:', error.message);
-        try {
-          await supabase.from('attachments').delete().eq('entry_id', action.data.id);
-          await supabase.from('ai_attachments').delete().eq('entry_id', action.data.id);
-        } catch (_) {}
+        if (error) {
+          console.error('[DelayedDelete] Failure committing transaction deletion:', error);
+          setBooks(prevBooks => prevBooks.map(b => {
+            if (b.id === action.parentBookId) {
+              const nextTx = [...b.transactions];
+              const insertIdx = action.originalIndex !== undefined ? action.originalIndex : 0;
+              nextTx.splice(insertIdx, 0, action.data);
+              return { ...b, transactions: nextTx };
+            }
+            return b;
+          }));
+          setError(`Failed to delete transaction: ${error.message || 'Database error'}. Transaction restored.`);
+        }
       } else if (action.type === 'bulk_transactions') {
         const ids = action.data.map((t: any) => t.id);
         console.log('[DelayedDelete] Committing bulk transaction deletion to database:', ids);
@@ -3060,30 +2375,31 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           .from('entries')
           .delete()
           .in('id', ids);
-        if (error) console.warn('[DelayedDelete] Supabase bulk delete warning:', error.message);
-        try {
-          await supabase.from('attachments').delete().in('entry_id', ids);
-          await supabase.from('ai_attachments').delete().in('entry_id', ids);
-        } catch (_) {}
+        if (error) {
+          console.error('[DelayedDelete] Failure committing bulk transaction deletion:', error);
+          setError(`Failed to delete transactions: ${error.message || 'Database error'}. Transactions restored.`);
+        }
       }
-    } catch (err) {
-      console.error('[DelayedDelete] Failure committing database deletion:', err);
+    } catch (err: any) {
+      console.error('[DelayedDelete] Unexpected failure committing database deletion:', err);
     }
   };
 
-  const handleStartUndoableDelete = async (newAction: {
+  const handleStartUndoableDelete = (newAction: {
     type: 'book' | 'transaction' | 'bulk_books' | 'bulk_transactions';
     data: any;
     originalIndex?: number;
     originalIndexes?: number[];
     parentBookId?: string;
   }) => {
-    // If there is an existing pending deletion, commit it now!
+    // If there is an existing pending deletion, commit it now in background
     if (pendingActionRef.current) {
-      await commitPendingDeletion(pendingActionRef.current);
+      const prev = pendingActionRef.current;
+      pendingActionRef.current = null;
+      commitPendingDeletion(prev);
     }
     setUndoAction(newAction);
-    setUndoTimeLeft(8);
+    setUndoTimeLeft(6);
     setShowUndoToast(true);
   };
 
@@ -3098,8 +2414,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   // Lock body scroll when transaction form is visible (prevents underlying scroll)
   useEffect(() => {
-    setDetailsError(false);
-    setAmountError(false);
     if (showForm) {
       document.body.style.overflow = 'hidden';
     } else {
@@ -3123,6 +2437,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       }
       setShowUndoToast(false);
       setUndoAction(null);
+      pendingActionRef.current = null;
     }
     return () => clearTimeout(timer);
   }, [showUndoToast, undoTimeLeft, undoAction]);
@@ -3187,7 +2502,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             setGeneratedCode(savedSession.code);
             setShareExpiryTime(expiryNum);
             setRestoredMessage("Active share session restored");
-            const timer = setTimeout(() => setRestoredMessage(''), 20000);
+            const timer = setTimeout(() => setRestoredMessage(''), 4000);
             return () => clearTimeout(timer);
           } else {
             localStorage.removeItem(`trackbook_share_session_${activeBookId}`);
@@ -3251,163 +2566,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [sortColumn, setSortColumn] = useState<'date' | 'category' | 'amount'>('date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [showReportsMenu, setShowReportsMenu] = useState(false);
+  const [pdfQualityModalState, setPdfQualityModalState] = useState<{
+    isOpen: boolean;
+    cashbookId: string;
+    cashbookName: string;
+    transactions: any[];
+  } | null>(null);
   const [showBookMenu, setShowBookMenu] = useState(false);
   const bookMenuRef = useRef<HTMLDivElement>(null);
   const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
-  const selectedTransactionsRef = useRef(selectedTransactions);
-  useEffect(() => {
-    selectedTransactionsRef.current = selectedTransactions;
-  }, [selectedTransactions]);
-
   const [selectedBooks, setSelectedBooks] = useState<Set<string>>(new Set());
-  const selectedBooksRef = useRef(selectedBooks);
-  useEffect(() => {
-    selectedBooksRef.current = selectedBooks;
-  }, [selectedBooks]);
-
-  // Mobile selected-entry bottom toolbar scroll-aware hide/show state
-  const [isMobileView, setIsMobileView] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
-  const [isMobileToolbarHidden, setIsMobileToolbarHidden] = useState(false);
-  const isMobileToolbarHiddenRef = useRef(false);
-  isMobileToolbarHiddenRef.current = isMobileToolbarHidden;
-  const lastScrollYRef = useRef(0);
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobileView(window.innerWidth < 768);
-    };
-    window.addEventListener('resize', handleResize, { passive: true });
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  useEffect(() => {
-    if (selectedTransactions.size === 0) {
-      setIsMobileToolbarHidden(false);
-      return;
-    }
-
-    // Reset toolbar to visible when selection changes
-    setIsMobileToolbarHidden(false);
-    lastScrollYRef.current = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
-
-    const SCROLL_THRESHOLD = 8;
-    let rafId: number | null = null;
-
-    const handleScroll = () => {
-      if (rafId !== null) return;
-      rafId = window.requestAnimationFrame(() => {
-        rafId = null;
-
-        // Apply ONLY to mobile screens (< 768px); tablet and desktop remain unchanged
-        if (window.innerWidth >= 768) {
-          if (isMobileToolbarHiddenRef.current) {
-            setIsMobileToolbarHidden(false);
-          }
-          return;
-        }
-
-        const currentScrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
-
-        // If near top of page, keep toolbar visible
-        if (currentScrollY <= 20) {
-          if (isMobileToolbarHiddenRef.current) {
-            setIsMobileToolbarHidden(false);
-          }
-          lastScrollYRef.current = currentScrollY;
-          return;
-        }
-
-        const diff = currentScrollY - lastScrollYRef.current;
-
-        // Ignore small jitter below threshold (approx 8px) to avoid flickering
-        if (Math.abs(diff) < SCROLL_THRESHOLD) {
-          return;
-        }
-
-        if (diff > 0 && !isMobileToolbarHiddenRef.current) {
-          // Scrolled down -> slide toolbar down and hide
-          setIsMobileToolbarHidden(true);
-        } else if (diff < 0 && isMobileToolbarHiddenRef.current) {
-          // Scrolled up -> slide toolbar back up into view
-          setIsMobileToolbarHidden(false);
-        }
-
-        lastScrollYRef.current = currentScrollY;
-      });
-    };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    document.addEventListener('scroll', handleScroll, { passive: true, capture: true });
-    return () => {
-      if (rafId !== null) {
-        window.cancelAnimationFrame(rafId);
-      }
-      window.removeEventListener('scroll', handleScroll);
-      document.removeEventListener('scroll', handleScroll, { capture: true });
-    };
-  }, [selectedTransactions]);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
-  const [showDuplicateAiWarning, setShowDuplicateAiWarning] = useState<{ onConfirm: () => void; onCancel: () => void } | null>(null);
-  const [currentSection, setCurrentSection] = useState<'dashboard' | 'cashbooks' | 'processing-center' | 'ai-upload' | 'exports' | 'imports' | 'shared-entries' | 'settings'>('dashboard');
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [isOpenMobile, setIsOpenMobile] = useState(false);
-  const [exportTasks, setExportTasks] = useState<any[]>(backgroundExportManager.getTaskList());
-
-  useEffect(() => {
-    const unsubscribe = backgroundExportManager.subscribe(() => {
-      setExportTasks(backgroundExportManager.getTaskList());
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const handleClearData = async () => {
-    try {
-      await backgroundExportManager.clearAllData();
-      await syncManager.db.clearAllData();
-      localStorage.clear();
-      sessionStorage.clear();
-      window.location.reload();
-    } catch (e) {
-      console.error('Error clearing data:', e);
-    }
-  };
-
-  const handleSaveProfileName = async () => {
-    if (!supabase || !session?.user) return;
-    try {
-      await supabase.auth.updateUser({
-        data: { full_name: userName, avatar_url: userAvatarUrl }
-      });
-      try {
-        await supabase.from('profiles').upsert({
-          id: session.user.id,
-          email: session.user.email || null,
-          full_name: userName,
-          avatar_url: userAvatarUrl,
-          phone: session.user.phone || null,
-          phone_verified: session.user.phone_confirmed_at ? true : false,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'id' });
-      } catch (dbErr) {
-        console.warn('Profiles table sync failed:', dbErr);
-      }
-    } catch (err) {
-      console.error('Error saving profile name:', err);
-    }
-  };
-
-  const handleLinkPhoneStub = async (phone: string) => {
-    setUserPhone(phone);
-    setShowPhoneLinkingComingSoon(true);
-    return true;
-  };
-
-  const handleVerifyOtpStub = async (otp: string) => {
-    setUserPhoneVerified(true);
-    return true;
-  };
-  const [previewTransactionId, setPreviewTransactionId] = useState<string | null>(null);
   const [animatingDeleteId, setAnimatingDeleteId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(20);
   const [uploadStatuses, setUploadStatuses] = useState<Record<string, {
@@ -3429,102 +2599,77 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     vibrate(30);
   };
 
-  // Set isEntriesLoading only when explicitly switching to a cashbook with no cached entries
+  // Set isEntriesLoading to true immediately on activeBookId changes if cache is empty, to prevent false empty flashes
   useEffect(() => {
     if (activeBookId) {
       const cached = entriesCache.get(activeBookId);
-      const book = booksRef.current.find(b => b.id === activeBookId);
-      const hasEntries = (cached && cached.length > 0) || (book && book.transactions && book.transactions.length > 0);
-      if (!hasEntries && !entriesCache.has(activeBookId)) {
+      if (!cached || cached.length === 0) {
         setIsEntriesLoading(true);
-      } else {
-        setIsEntriesLoading(false);
       }
-    } else {
-      setIsEntriesLoading(false);
     }
   }, [activeBookId]);
 
-  const handleTransactionPress = useCallback((id: string) => {
-    if (selectedTransactionsRef.current.size > 0) {
-      setSelectedTransactions(prev => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
+  const handleTransactionPress = (id: string) => {
+    if (selectedTransactions.size > 0) {
+      toggleSelectTransaction(id);
     }
-  }, []);
+  };
 
-  const handleTransactionLongPress = useCallback((id: string) => {
-    setSelectedTransactions(prev => {
-      if (prev.size === 0) {
-        vibrate(50);
-        return new Set([id]);
-      }
-      return prev;
-    });
-  }, []);
+  const handleTransactionLongPress = (id: string) => {
+    if (selectedTransactions.size === 0) {
+      toggleSelectTransaction(id);
+      vibrate(50);
+    }
+  };
 
-  const onTouchStart = useCallback((id: string) => {
-    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+  const onTouchStart = (id: string) => {
     longPressTimer.current = setTimeout(() => {
       handleTransactionLongPress(id);
     }, 1200); // 1.2 seconds (or 1200ms) for long press on mobile/touch devices
-  }, [handleTransactionLongPress]);
+  };
 
-  const onTouchEnd = useCallback(() => {
+  const onTouchEnd = () => {
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
     }
-  }, []);
+  };
 
-  const toggleSelectBook = useCallback((id: string) => {
-    setSelectedBooks(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const toggleSelectBook = (id: string) => {
+    const newSelected = new Set(selectedBooks);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedBooks(newSelected);
+  };
 
-  const handleBookPress = useCallback((id: string) => {
-    if (selectedBooksRef.current.size > 0) {
-      setSelectedBooks(prev => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
+  const handleBookPress = (id: string) => {
+    if (selectedBooks.size > 0) {
+      toggleSelectBook(id);
     } else {
       handleSelectBook(id);
     }
-  }, [handleSelectBook]);
+  };
 
-  const handleBookLongPress = useCallback((id: string) => {
-    setSelectedBooks(prev => {
-      if (prev.size === 0) {
-        vibrate(50);
-        return new Set([id]);
-      }
-      return prev;
-    });
-  }, []);
+  const handleBookLongPress = (id: string) => {
+    if (selectedBooks.size === 0) {
+      toggleSelectBook(id);
+      vibrate(50);
+    }
+  };
 
-  const onTouchStartBook = useCallback((id: string) => {
-    if (bookLongPressTimer.current) clearTimeout(bookLongPressTimer.current);
+  const onTouchStartBook = (id: string) => {
     bookLongPressTimer.current = setTimeout(() => {
       handleBookLongPress(id);
     }, 500);
-  }, [handleBookLongPress]);
+  };
 
-  const onTouchEndBook = useCallback(() => {
+  const onTouchEndBook = () => {
     if (bookLongPressTimer.current) {
       clearTimeout(bookLongPressTimer.current);
-      bookLongPressTimer.current = null;
     }
-  }, []);
+  };
 
   // Keyboard Shortcuts
   useEffect(() => {
@@ -3532,55 +2677,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     let lastKeyTime = 0;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts if user is typing in an input or textarea
+      const activeElement = document.activeElement;
+      const isInput = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA' || (activeElement as HTMLElement)?.isContentEditable;
+      if (isInput && e.key !== 'Escape') return;
+
       const key = e.key.toUpperCase();
       const now = Date.now();
-
-      // Quick Save shortcut: Ctrl+Enter, Cmd+Enter, or Alt+S while form is open
-      if ((((e.ctrlKey || e.metaKey) && e.key === 'Enter') || (e.altKey && key === 'S')) && showFormRef.current) {
-        e.preventDefault();
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          vibrate(50);
-          setShowOfflineDialog(true);
-          return;
-        }
-        saveTransactionRef.current?.();
-        return;
-      }
-
-      // Quick shortcut: Alt+I or Alt+O works from anywhere (even inside text inputs)
-      if (e.altKey && !e.ctrlKey && !e.metaKey) {
-        if (key === 'I' && canAddEntries(currentUserRoleRef.current)) {
-          e.preventDefault();
-          if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            vibrate(50);
-            setShowOfflineDialog(true);
-            return;
-          }
-          setShowForm('in');
-          if (!showFormRef.current) {
-            setTransactionDate(safeToDateTimeLocal(new Date()));
-          }
-          setTimeout(() => amountInputRef.current?.focus(), 60);
-          return;
-        }
-        if (key === 'O' && canAddEntries(currentUserRoleRef.current)) {
-          e.preventDefault();
-          if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            vibrate(50);
-            setShowOfflineDialog(true);
-            return;
-          }
-          setShowForm('out');
-          if (!showFormRef.current) {
-            setTransactionDate(safeToDateTimeLocal(new Date()));
-          }
-          setTimeout(() => amountInputRef.current?.focus(), 60);
-          return;
-        }
-      }
-
-      // Ignore if Ctrl or Meta (Cmd) keys are held, so standard browser shortcuts like Ctrl+C, Ctrl+V, Ctrl+A work
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       // Handle Escape key to close forms/modals
       if (e.key === 'Escape') {
@@ -3600,85 +2703,36 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         return;
       }
 
-      // Identify active element to determine if user is typing narrative text
-      const activeElement = document.activeElement;
-      const tagName = activeElement?.tagName;
-      const inputType = (activeElement as HTMLInputElement)?.type?.toLowerCase() || '';
-
-      // Only text/narrative fields where user enters words shouldn't trigger letter shortcuts
-      const isTextInput =
-        tagName === 'TEXTAREA' ||
-        (activeElement as HTMLElement)?.isContentEditable ||
-        (tagName === 'INPUT' && !['number', 'datetime-local', 'date', 'time', 'checkbox', 'radio', 'button', 'submit', 'range'].includes(inputType));
-
-      if (isTextInput) return;
-
-      // Clear last key if more than 1.5 seconds have passed
-      if (now - lastKeyTime > 1500) {
+      // Clear last key if too much time passed (e.g. 1 second)
+      if (now - lastKeyTime > 1000) {
         lastKey = '';
       }
 
       if (lastKey === 'C') {
         if (key === 'B') {
           e.preventDefault();
-          if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            vibrate(50);
-            setShowOfflineDialog(true);
-            lastKey = '';
-            return;
-          }
           setIsCreatingBook(true);
           lastKey = '';
-        } else if (key === 'I' && (activeBookId || showFormRef.current) && canAddEntries(currentUserRoleRef.current)) {
+        } else if (key === 'I' && activeBookId) {
           e.preventDefault();
-          if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            vibrate(50);
-            setShowOfflineDialog(true);
-            lastKey = '';
-            return;
-          }
           setShowForm('in');
-          if (!showFormRef.current) {
-            setTransactionDate(safeToDateTimeLocal(new Date()));
-          }
+          setTransactionDate(safeToDateTimeLocal(new Date()));
           lastKey = '';
-          setTimeout(() => amountInputRef.current?.focus(), 60);
-        } else if (key === 'O' && (activeBookId || showFormRef.current) && canAddEntries(currentUserRoleRef.current)) {
+        } else if (key === 'O' && activeBookId) {
           e.preventDefault();
-          if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            vibrate(50);
-            setShowOfflineDialog(true);
-            lastKey = '';
-            return;
-          }
           setShowForm('out');
-          if (!showFormRef.current) {
-            setTransactionDate(safeToDateTimeLocal(new Date()));
-          }
+          setTransactionDate(safeToDateTimeLocal(new Date()));
           lastKey = '';
-          setTimeout(() => amountInputRef.current?.focus(), 60);
         }
       } else if (lastKey === 'A') {
-        if (key === 'U' && activeBookId && canAddEntries(currentUserRoleRef.current)) {
+        if (key === 'U' && activeBookId) {
           e.preventDefault();
-          if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            vibrate(50);
-            setShowOfflineDialog(true);
-            lastKey = '';
-            return;
-          }
           setShowAiWarning(true);
           lastKey = '';
         }
       } else if (lastKey === 'I') {
-        if (key === 'M' && canAddEntries(currentUserRoleRef.current)) {
+        if (key === 'M') {
           e.preventDefault();
-          if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            vibrate(50);
-            setShowOfflineDialog(true);
-            lastKey = '';
-            return;
-          }
           setShowImportModal(true);
           setImportCode('');
           setImportError('');
@@ -3687,17 +2741,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         }
       }
 
-      // If user presses 'C', 'A', or 'I' while in a numeric or date field, prevent default so it doesn't affect the input
-      if (key === 'C' || key === 'A' || key === 'I') {
-        if (activeElement === amountInputRef.current || ['number', 'datetime-local', 'date', 'time'].includes(inputType)) {
-          e.preventDefault();
-        }
-        lastKey = key;
-        lastKeyTime = now;
-      } else {
-        lastKey = key;
-        lastKeyTime = now;
-      }
+      lastKey = key;
+      lastKeyTime = now;
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -3730,208 +2775,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [previewIndex, setPreviewIndex] = useState(0);
   const [previewRotation, setPreviewRotation] = useState(0);
   const [previewZoom, setPreviewZoom] = useState(1);
-  const [previewSlideDirection, setPreviewSlideDirection] = useState<number>(1);
-  const previewTouchStartX = useRef<number | null>(null);
-  const previewTouchStartY = useRef<number | null>(null);
-  const previewTouchEndX = useRef<number | null>(null);
-  const [previewOriginalUrls, setPreviewOriginalUrls] = useState<string[]>([]);
-  const [previewValidationStatus, setPreviewValidationStatus] = useState<boolean[]>([]);
-  const [isPreviewValidating, setIsPreviewValidating] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [isDraggingAttachments, setIsDraggingAttachments] = useState(false);
-  const dragCounterRef = useRef<number>(0);
-
-  const handlePreviewNext = () => {
-    if (!previewImages || previewImages.length <= 1) return;
-    setPreviewSlideDirection(1);
-    setPreviewIndex(prev => (prev + 1) % previewImages.length);
-    setPreviewRotation(0);
-    setPreviewZoom(1);
-  };
-
-  const handlePreviewPrev = () => {
-    if (!previewImages || previewImages.length <= 1) return;
-    setPreviewSlideDirection(-1);
-    setPreviewIndex(prev => (prev - 1 + previewImages.length) % previewImages.length);
-    setPreviewRotation(0);
-    setPreviewZoom(1);
-  };
-
-  const getTransactionSeqNumber = (txId: string) => {
-    if (!activeBook || !activeBook.transactions) return 1;
-    // Sort transactions chronologically (oldest to newest)
-    const sorted = [...activeBook.transactions].sort((a, b) => {
-      const timeA = new Date(a.date).getTime();
-      const timeB = new Date(b.date).getTime();
-      if (timeA !== timeB) return timeA - timeB;
-      return a.id.localeCompare(b.id);
-    });
-    const index = sorted.findIndex(t => t.id === txId);
-    return index !== -1 ? index + 1 : 1;
-  };
-
-  const getExtensionFromUrl = (url: string) => {
-    if (!url) return 'png';
-    const cleanUrl = url.split('?')[0].split('#')[0];
-    const parts = cleanUrl.split('.');
-    if (parts.length > 1) {
-      const ext = parts[parts.length - 1].toLowerCase();
-      if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'pdf'].includes(ext)) {
-        return ext;
-      }
-    }
-    return 'png';
-  };
-
-  const getDownloadFileName = () => {
-    const url = previewOriginalUrls[previewIndex] || previewImages?.[previewIndex] || '';
-    const ext = getExtensionFromUrl(url);
-    if (previewTransactionId) {
-      const seqNum = getTransactionSeqNumber(previewTransactionId);
-      return `attachment_${seqNum}.${ext}`;
-    }
-    return `attachment_${previewIndex + 1}.${ext}`;
-  };
-
-  const handleDownloadAttachment = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const url = previewOriginalUrls[previewIndex] || previewImages?.[previewIndex];
-    if (!url) return;
-    
-    const filename = getDownloadFileName();
-    
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(blobUrl);
-    } catch (err) {
-      console.error("Fetch download failed, falling back to direct link download attribute", err);
-      const link = document.createElement('a');
-      link.href = url;
-      link.target = "_blank";
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
-  };
-
-  const handleOpenPreview = async (originalUrls: string[], transactionId?: string) => {
-    if (!originalUrls || originalUrls.length === 0) return;
-    
-    setIsPreviewValidating(true);
-    setPreviewError(null);
-    setPreviewOriginalUrls(originalUrls);
-    setPreviewTransactionId(transactionId || null);
-    
-    const resolvedUrls = originalUrls.map(url => resolveAttachmentUrl(url, 'fullscreen'));
-    setPreviewImages(resolvedUrls);
-    setPreviewIndex(0);
-    setPreviewRotation(0);
-    setPreviewZoom(1);
-
-    const statuses = await Promise.all(
-      resolvedUrls.map(async (url) => {
-        if (!url) return false;
-        if (url.startsWith('data:') || url.startsWith('blob:')) return true;
-        return new Promise<boolean>((resolve) => {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.referrerPolicy = 'no-referrer';
-          const timeout = setTimeout(() => {
-            img.onload = null;
-            img.onerror = null;
-            resolve(false);
-          }, 8000);
-          img.onload = () => {
-            clearTimeout(timeout);
-            resolve(true);
-          };
-          img.onerror = () => {
-            clearTimeout(timeout);
-            resolve(false);
-          };
-          img.src = url;
-        });
-      })
-    );
-
-    setPreviewValidationStatus(statuses);
-    setIsPreviewValidating(false);
-
-    const someFailed = statuses.some(s => !s);
-    if (someFailed) {
-      setPreviewError("This receipt couldn't be previewed.");
-    }
-  };
-
-  const handleClosePreview = () => {
-    setPreviewImages(null);
-    setPreviewOriginalUrls([]);
-    setPreviewValidationStatus([]);
-    setIsPreviewValidating(false);
-    setPreviewError(null);
-    setPreviewTransactionId(null);
-  };
-
-  const handleRetryPreview = async (index: number) => {
-    setIsPreviewValidating(true);
-    const originalUrl = previewOriginalUrls[index];
-    const resolvedUrl = resolveAttachmentUrl(originalUrl, 'fullscreen');
-
-    const isValid = await new Promise<boolean>((resolve) => {
-      if (!resolvedUrl) return resolve(false);
-      if (resolvedUrl.startsWith('data:') || resolvedUrl.startsWith('blob:')) return resolve(true);
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.referrerPolicy = 'no-referrer';
-      const timeout = setTimeout(() => {
-        img.onload = null;
-        img.onerror = null;
-        resolve(false);
-      }, 8000);
-      img.onload = () => {
-        clearTimeout(timeout);
-        resolve(true);
-      };
-      img.onerror = () => {
-        clearTimeout(timeout);
-        resolve(false);
-      };
-      img.src = resolvedUrl;
-    });
-
-    setPreviewValidationStatus(prev => {
-      const copy = [...prev];
-      copy[index] = isValid;
-      return copy;
-    });
-    setIsPreviewValidating(false);
-
-    const anyFailed = previewValidationStatus.some((s, idx) => idx === index ? !isValid : !s);
-    if (!anyFailed) {
-      setPreviewError(null);
-    } else {
-      setPreviewError("This receipt couldn't be previewed.");
-    }
-  };
-
-  const handleOpenOriginal = (index: number) => {
-    const originalUrl = previewOriginalUrls[index];
-    if (originalUrl) {
-      window.open(originalUrl, '_blank');
-    }
-  };
   const [reportLoading, setReportLoading] = useState<{ type: 'excel' | 'pdf', progress: number, message?: string } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -3939,12 +2782,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const multiFileInputRef = useRef<HTMLInputElement>(null);
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
   const [activeUploadTarget, setActiveUploadTarget] = useState<'ai' | 'transaction' | null>(null);
-  const [pendingPdfFile, setPendingPdfFile] = useState<File | null>(null);
-  const [isPdfSelectorOpen, setIsPdfSelectorOpen] = useState<boolean>(false);
 
   const handleAiOcrFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const files = Array.from(e.target.files).slice(0, 7);
+      const files = Array.from(e.target.files).slice(0, 5);
       setSelectedFiles(files);
       startAiUploadReceiptParsing(files);
     }
@@ -3952,19 +2793,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const triggerUploadSelector = (target: 'ai' | 'transaction') => {
-    const isDeviceOffline = isOffline || 
-      (typeof navigator !== 'undefined' && !navigator.onLine) || 
-      syncManager.network.state === 'offline' ||
-      (typeof window !== 'undefined' && (window as any).TrackBookBridge?.isNetworkAvailable?.() === false);
-
-    if (isDeviceOffline) {
-      const msg = "You are offline. Images can only be added when you are online.";
-      showInAppAlert("Offline Mode", msg, "warning");
-      if (typeof window !== 'undefined' && (window as any).TrackBookBridge?.showToast) {
-        (window as any).TrackBookBridge.showToast(msg);
-      }
-      return;
-    }
     if (window.innerWidth < 768) {
       setActiveUploadTarget(target);
       setIsMediaPickerOpen(true);
@@ -3991,27 +2819,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [customCategory, setCustomCategory] = useState('');
   const [mode, setMode] = useState('Cash');
   const [customMode, setCustomMode] = useState('');
-  const [inAppDialog, setInAppDialog] = useState<DialogOptions | null>(null);
-
-  const showInAppAlert = useCallback((title: string, message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
-    setInAppDialog({ title, message, type });
-  }, []);
-
-  const activeCategoryOptions = useMemo(() => {
-    const list = [...CATEGORIES];
-    if (category && !list.includes(category) && category !== 'Custom') {
-      list.splice(list.length - 1, 0, category);
-    }
-    return list;
-  }, [category]);
-
-  const activeModeOptions = useMemo(() => {
-    const list = [...MODES];
-    if (mode && !list.includes(mode) && mode !== 'Custom') {
-      list.splice(list.length - 1, 0, mode);
-    }
-    return list;
-  }, [mode]);
   const safeToISOString = (date: Date | string | number) => {
     try {
       const d = new Date(date);
@@ -4077,136 +2884,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [transactionDate, setTransactionDate] = useState(safeToDateTimeLocal(new Date()));
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [imageLayout, setImageLayout] = useState<'split' | 'merge'>('split');
-  const [selectedFormatIndex, setSelectedFormatIndex] = useState<number>(0);
 
-  const [editorState, setEditorState] = useState<{
-    file: File;
-    onDone: (editedFile: File) => void;
-    onCancel: () => void;
-  } | null>(null);
-
-  const editImagesIfNeeded = async (files: File[]): Promise<File[]> => {
-    const editedFiles: File[] = [];
-    for (const file of files) {
-      if (file.type && file.type.startsWith('image/')) {
-        const edited = await new Promise<File | null>((resolve) => {
-          setEditorState({
-            file,
-            onDone: (newFile) => resolve(newFile),
-            onCancel: () => resolve(null),
-          });
-        });
-        if (edited) {
-          editedFiles.push(edited);
-        }
-      } else {
-        editedFiles.push(file);
-      }
-    }
-    return editedFiles;
-  };
-
-  const [isEditingLoading, setIsEditingLoading] = useState<boolean>(false);
-
-  const handleReeditImage = async () => {
-    if (selectedImages.length === 0 || selectedFormatIndex < 0 || selectedFormatIndex >= selectedImages.length) return;
-    const url = selectedImages[selectedFormatIndex];
-    let fileToEdit: File | null = null;
-    
-    const cleanUrl = url.includes('#') ? url.substring(0, url.indexOf('#')) : url;
-    
-    if (cleanUrl.startsWith('blob:') && imageFilesRef.current[cleanUrl]) {
-      fileToEdit = imageFilesRef.current[cleanUrl];
-    } else {
-      setIsEditingLoading(true);
-      try {
-        const resolvedUrl = resolveAttachmentUrl ? resolveAttachmentUrl(cleanUrl, 'fullscreen') : cleanUrl;
-        const response = await fetch(resolvedUrl);
-        const blob = await response.blob();
-        const filename = cleanUrl.substring(cleanUrl.lastIndexOf('/') + 1) || 'attachment.jpg';
-        fileToEdit = new File([blob], filename, { type: blob.type || 'image/jpeg' });
-      } catch (err) {
-        console.error("Error downloading image for editing:", err);
-      } finally {
-        setIsEditingLoading(false);
-      }
-    }
-
-    if (fileToEdit) {
-      setEditorState({
-        file: fileToEdit,
-        onDone: (editedFile) => {
-          const newUrl = URL.createObjectURL(editedFile);
-          imageFilesRef.current[newUrl] = editedFile;
-          
-          setSelectedImages(prev => {
-            const updated = [...prev];
-            updated[selectedFormatIndex] = newUrl;
-            return updated;
-          });
-        },
-        onCancel: () => {}
-      });
-    }
-  };
-
-  // Keep selectedFormatIndex in bounds
+  // Restrict merge layout - automatically fallback to split if there are less than 2 images
   useEffect(() => {
-    if (selectedImages.length === 0) {
-      setSelectedFormatIndex(0);
-    } else if (selectedFormatIndex >= selectedImages.length) {
-      setSelectedFormatIndex(selectedImages.length - 1);
-    }
-  }, [selectedImages, selectedFormatIndex]);
-
-  const updateImageMetadata = (index: number, rotateOffset: number, fitMode?: 'width' | 'height' | 'original', reset?: boolean) => {
-    if (index < 0 || index >= selectedImages.length) return;
-    const currentUrl = selectedImages[index];
-    const hashIdx = currentUrl.indexOf('#');
-    const hash = hashIdx !== -1 ? currentUrl.substring(hashIdx + 1) : '';
-    const baseUrl = hashIdx !== -1 ? currentUrl.substring(0, hashIdx) : currentUrl;
-    
-    const params = new URLSearchParams(hash);
-    let currentRotate = parseInt(params.get('rotate') || '0', 10);
-    let currentFit = params.get('fit') || 'original';
-    
-    if (reset) {
-      currentRotate = 0;
-      currentFit = 'original';
-    } else {
-      if (rotateOffset !== 0) {
-        currentRotate = (currentRotate + rotateOffset + 360) % 360;
-      }
-      if (fitMode) {
-        currentFit = fitMode;
-      }
-    }
-    
-    const newParams = new URLSearchParams();
-    if (currentRotate !== 0) {
-      newParams.set('rotate', currentRotate.toString());
-    }
-    if (currentFit !== 'original') {
-      newParams.set('fit', currentFit);
-    }
-    
-    const newHash = newParams.toString();
-    const newUrl = baseUrl + (newHash ? '#' + newHash : '');
-    
-    setSelectedImages(prev => {
-      const copy = [...prev];
-      copy[index] = newUrl;
-      return copy;
-    });
-  };
-
-  // Restrict merge layout - automatically fallback to split if there are less than 2 images and we aren't currently editing an existing transaction
-  useEffect(() => {
-    if (editingTransaction) return; // Prevent overwriting stored imageLayout when opening edit details!
     if (selectedImages.length < 2 && imageLayout === 'merge') {
       setImageLayout('split');
     }
-  }, [selectedImages, imageLayout, editingTransaction]);
+  }, [selectedImages, imageLayout]);
 
   // Clear selected transactions when exiting a book to avoid leaking selection bar onto book homepage
   useEffect(() => {
@@ -4215,19 +2899,66 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
   }, [activeBookId]);
 
-  // Set user name, phone and avatar from session & profiles database
+  // Set user name and phone from session & profiles database
   useEffect(() => {
     const fetchProfileData = async () => {
       if (!supabase || !session?.user) return;
       try {
-        let avatarFromMeta = session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || null;
-        
         const { data, error } = await supabase
           .from('profiles')
-          .select('phone, full_name, phone_verified, phone_linked_at, avatar_url')
+          .select('phone, full_name, phone_verified, phone_linked_at')
           .eq('id', session.user.id)
           .maybeSingle();
         
+        let resolvedName: string | null = null;
+        if (data?.full_name && data.full_name.trim()) {
+          resolvedName = data.full_name.trim();
+        } else {
+          // Check all possible Supabase Auth user metadata fields
+          const meta = session.user.user_metadata || {};
+          const metaName = meta.full_name || meta.name || meta.user_name || meta.username || meta.preferred_username || meta.display_name;
+          if (metaName && String(metaName).trim()) {
+            resolvedName = String(metaName).trim();
+          }
+        }
+        
+        // If still not resolved, query user's cashbooks in Supabase for existing user_name
+        if (!resolvedName) {
+          try {
+            const { data: cb } = await supabase
+              .from('cashbooks')
+              .select('user_name')
+              .eq('user_id', session.user.id)
+              .not('user_name', 'is', null)
+              .limit(1);
+            if (cb && cb.length > 0 && cb[0].user_name && cb[0].user_name.trim()) {
+              resolvedName = cb[0].user_name.trim();
+            }
+          } catch (_) {}
+        }
+
+        // If still not resolved and email exists, safely fallback to email prefix for display
+        if (!resolvedName && session.user.email) {
+          const emailPrefix = session.user.email.split('@')[0];
+          if (emailPrefix && emailPrefix.trim()) {
+            resolvedName = emailPrefix.trim();
+          }
+        }
+
+        if (resolvedName) {
+          setUserName(resolvedName);
+          // Safely backfill profiles if it had missing or null full_name
+          if (!data?.full_name && resolvedName) {
+            try {
+              await supabase.from('profiles').upsert({
+                id: session.user.id,
+                email: session.user.email || null,
+                full_name: resolvedName
+              }, { onConflict: 'id' });
+            } catch (_) {}
+          }
+        }
+
         if (data) {
           if (data.phone) {
             setUserPhone(data.phone);
@@ -4236,54 +2967,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           }
           setUserPhoneVerified(!!data.phone_verified);
           setUserPhoneLinkedAt(data.phone_linked_at || null);
-          if (data.full_name) {
-            setUserName(data.full_name);
-          } else if (session.user.user_metadata?.full_name) {
-            setUserName(session.user.user_metadata.full_name);
-          }
-          if (data.avatar_url) {
-            setUserAvatarUrl(data.avatar_url);
-            try { 
-              localStorage.setItem(`trackbook_avatar_${session.user.id}`, data.avatar_url);
-              localStorage.removeItem('trackbook_avatar');
-            } catch (e) {}
-          } else if (avatarFromMeta) {
-            setUserAvatarUrl(avatarFromMeta);
-            try { 
-              localStorage.setItem(`trackbook_avatar_${session.user.id}`, avatarFromMeta);
-              localStorage.removeItem('trackbook_avatar');
-            } catch (e) {}
-          }
         } else {
           setUserPhone(session.user.phone || null);
           setUserPhoneVerified(!!session.user.phone_confirmed_at);
           setUserPhoneLinkedAt(session.user.phone_confirmed_at || null);
-          if (session.user.user_metadata?.full_name) {
-            setUserName(session.user.user_metadata.full_name);
-          }
-          if (avatarFromMeta) {
-            setUserAvatarUrl(avatarFromMeta);
-            try { 
-              localStorage.setItem(`trackbook_avatar_${session.user.id}`, avatarFromMeta);
-              localStorage.removeItem('trackbook_avatar');
-            } catch (e) {}
-          }
         }
       } catch (err) {
         console.error('Error fetching profile in useEffect:', err);
         setUserPhone(session.user.phone || null);
         setUserPhoneVerified(!!session.user.phone_confirmed_at);
         setUserPhoneLinkedAt(session.user.phone_confirmed_at || null);
-        if (session.user.user_metadata?.full_name) {
-          setUserName(session.user.user_metadata.full_name);
-        }
-        const avatarFromMeta = session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || null;
-        if (avatarFromMeta) {
-          setUserAvatarUrl(avatarFromMeta);
-          try {
-            localStorage.setItem(`trackbook_avatar_${session.user.id}`, avatarFromMeta);
-            localStorage.removeItem('trackbook_avatar');
-          } catch (e) {}
+        const meta = session.user.user_metadata || {};
+        const metaName = meta.full_name || meta.name || meta.user_name || meta.username || (session.user.email ? session.user.email.split('@')[0] : '');
+        if (metaName) {
+          setUserName(metaName);
         }
       }
     };
@@ -4293,884 +2990,402 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
   }, [session]);
 
-  function areEntriesEqual(a: any[], b: any[]): boolean {
-    if (a === b) return true;
-    if (!a || !b) return a === b;
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      const itemA = a[i];
-      const itemB = b[i];
-      if (itemA === itemB) continue;
-      if (
-        itemA.id !== itemB.id ||
-        itemA.amount !== itemB.amount ||
-        itemA.type !== itemB.type ||
-        itemA.description !== itemB.description ||
-        itemA.category !== itemB.category ||
-        itemA.mode !== itemB.mode ||
-        itemA.date !== itemB.date ||
-        itemA.syncStatus !== itemB.syncStatus ||
-        itemA.is_offline !== itemB.is_offline
-      ) {
-        return false;
-      }
-      const imgsA = Array.isArray(itemA.images) ? itemA.images : [];
-      const imgsB = Array.isArray(itemB.images) ? itemB.images : [];
-      if (imgsA.length !== imgsB.length) return false;
-      for (let j = 0; j < imgsA.length; j++) {
-        if (imgsA[j] !== imgsB[j]) return false;
-      }
-    }
-    return true;
-  }
+  // Pre-load from localStorage cache on mount/session ready to render UI instantly!
+  useEffect(() => {
+    if (session) {
+      const savedBooks = localStorage.getItem(`cashbooks_${session.user.id}`);
+      if (savedBooks) {
+        try {
+          const parsed = JSON.parse(savedBooks);
+          // Set cachedCashbooks immediately to synchronize cache checks
+          cachedCashbooks = parsed;
+          // Pre-populate entriesCache so we don't flash empty states on hard-refresh
+          parsed.forEach((b: any) => {
+            if (b.id && Array.isArray(b.transactions)) {
+              entriesCache.set(b.id, b.transactions);
+            }
+          });
+          const mappedBooks = parsed.map((b: any) => ({
+            ...b,
+            transactions: (b.transactions || []).map((t: any) => ({
+              ...t,
+              date: new Date(t.date),
+              images: t.images || [],
+              source: t.source || (t.isAi ? 'AI' : ((t.is_imported || t.imported_from_share_code) ? 'Imported' : 'Manual'))
+            })),
+            createdAt: new Date(b.created_at || b.createdAt)
+          }));
+          setBooks(mappedBooks);
 
-  function reconcileBooks(prevBooks: Cashbook[], newBooks: Cashbook[]): Cashbook[] {
-    if (prevBooks === newBooks) return prevBooks;
-    if (prevBooks.length !== newBooks.length) return newBooks;
-
-    let anyChanged = false;
-    const result: Cashbook[] = [];
-
-    for (let i = 0; i < newBooks.length; i++) {
-      const prev = prevBooks[i];
-      const next = newBooks[i];
-
-      if (!prev || prev.id !== next.id) {
-        anyChanged = true;
-        result.push(next);
-        continue;
-      }
-
-      // Merge transactions intelligently to never lose attachments
-      const mergedTxs = (next.transactions || []).map((nextTx: Transaction) => {
-        const prevTx = prev.transactions?.find((pt: Transaction) => pt.id === nextTx.id);
-        if (!prevTx) return nextTx;
-
-        const nextImgs = Array.isArray(nextTx.images) ? nextTx.images.filter(img => typeof img === 'string' && img.length > 0) : [];
-        const prevImgs = Array.isArray(prevTx.images) ? prevTx.images.filter(img => typeof img === 'string' && !img.startsWith('blob:')) : [];
-        
-        let finalImages = nextImgs;
-        if (finalImages.length === 0 && prevImgs.length > 0) {
-          finalImages = prevImgs;
+          // EAGER ROOT SYNC: Solve loading delay entirely by resolving activeBookId immediately!
+          if (bookSlug) {
+            const foundBook = mappedBooks.find(b => getBookSlug(b.name, b.id) === bookSlug);
+            if (foundBook) {
+              setActiveBookIdState(foundBook.id);
+              const cached = entriesCache.get(foundBook.id);
+              if (!cached || cached.length === 0) {
+                setIsEntriesLoading(true);
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Error pre-loading from cache:', e);
         }
-
-        return {
-          ...nextTx,
-          images: finalImages,
-          attachment_details: (nextTx.attachment_details && nextTx.attachment_details.length > 0) 
-            ? nextTx.attachment_details 
-            : (prevTx.attachment_details || [])
-        };
-      });
-
-      const nextWithMergedTxs = {
-        ...next,
-        transactions: mergedTxs
-      };
-
-      const txsEqual = areEntriesEqual(prev.transactions || [], mergedTxs);
-      const metadataEqual =
-        prev.name === next.name &&
-        prev.syncStatus === next.syncStatus &&
-        prev.is_offline === next.is_offline &&
-        prev.user_id === next.user_id &&
-        (prev as any).role === (next as any).role &&
-        (prev as any).userRole === (next as any).userRole;
-
-      if (metadataEqual && txsEqual) {
-        result.push(prev);
-      } else {
-        anyChanged = true;
-        result.push(nextWithMergedTxs);
       }
+      setIsLoading(false); // Enable immediate frame rendering!
     }
-
-    return anyChanged ? result : prevBooks;
-  }
+  }, [session, bookSlug]);
 
   // Stable component-level data fetch and sync function
   const fetchData = useCallback(async (force: boolean = false) => {
-    if (!session || !supabase) {
-      if (!session) {
-        const isExplicit = typeof localStorage !== 'undefined' && localStorage.getItem('trackbook_explicit_logout') === 'true';
-        if (isExplicit) {
-          setBooks([]);
-        }
-      }
+    if (!session) {
+      setBooks([]);
       setIsLoading(false);
       return;
     }
 
-    // If device is strictly offline (no browser connection), retain existing cached books
-    const isDeviceOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-
-    if (isDeviceOffline) {
-      console.log('[fetchData] Device is offline. Retaining local cached cashbooks and pending entries.');
-      preserveAndMergeLocalCache();
-      setIsLoading(false);
-      setIsEntriesLoading(false);
+    if (!supabase) {
       return;
     }
 
-    if (force) {
-      console.log('[DEBUG] QUERY INVALIDATED');
-    }
+    const now = Date.now();
 
-    // Only trigger full-screen loading spinner on very initial load if no cached books
-    if (!initialLoadedRef.current && booksLengthRef.current === 0) {
-      setIsLoading(true);
-    }
-    try {
-      console.log('[fetchData] Loading cashbooks and entries...');
-      const userEmail = session.user.email ? session.user.email.toLowerCase() : '';
-      let rawCashbooksList: any[] = [];
-      let networkFetchSucceeded = false;
-
-      // 1. Direct Supabase Query for owned cashbooks (PRIMARY AUTHORITATIVE SOURCE OF TRUTH)
-      try {
-        const { data: rawOwnedCashbooks, error: ownedErr } = await supabase
-          .from('cashbooks')
-          .select('*')
-          .eq('user_id', session.user.id);
-
-        if (!ownedErr && Array.isArray(rawOwnedCashbooks)) {
-          networkFetchSucceeded = true;
-          rawCashbooksList = [...rawOwnedCashbooks];
-        } else if (ownedErr) {
-          console.warn('[Dashboard] Direct owned cashbooks query error:', ownedErr.message);
-        }
-      } catch (cbErr) {
-        console.warn('[Dashboard] Direct owned cashbooks query exception:', cbErr);
-      }
-
-      // 2. Fetch shared/member cashbooks via RBAC Service Backend
-      try {
-        const rbacRes = await fetch(`/api/rbac?action=user-cashbooks&userId=${session.user.id}&userEmail=${encodeURIComponent(userEmail)}`);
-        if (rbacRes.ok) {
-          const rbacJson = await rbacRes.json();
-          if (rbacJson.success && Array.isArray(rbacJson.cashbooks)) {
-            networkFetchSucceeded = true;
-            const existingIds = new Set(rawCashbooksList.map(c => c.id));
-            for (const cb of rbacJson.cashbooks) {
-              if (cb && cb.id && !existingIds.has(cb.id)) {
-                rawCashbooksList.push(cb);
-                existingIds.add(cb.id);
-              }
-            }
-          }
-        }
-      } catch (rbacErr) {
-        console.warn('[Dashboard] Error calling rbac user-cashbooks:', rbacErr);
-      }
-
-      // 3. Strict diagnostic logging for device consistency
-      const isMobileClient = typeof window !== 'undefined' && window.innerWidth < 640;
-      console.log(`[DATA_DIAGNOSTIC] CLIENT: ${isMobileClient ? 'MOBILE' : 'DESKTOP'} | USER_ID: ${session.user.id} | CASHBOOKS: [${rawCashbooksList.map(c => `${c.id} ("${c.name}")`).join(', ')}]`);
-
-      // If all network queries failed (e.g. sudden network loss during request):
-      if (!networkFetchSucceeded && booksRef.current.length > 0) {
-        console.warn('[Dashboard] Network requests failed. Preserving current in-memory cashbooks.');
-        preserveAndMergeLocalCache();
-        return;
-      }
-
-      // Extract pending undo deletion IDs to prevent deleted items from reappearing before commit
-      const pending = pendingActionRef.current;
-      const pendingBookIds = new Set<string>();
-      const pendingEntryIds = new Set<string>();
-
-      if (pending) {
-        if (pending.type === 'book') {
-          const id = pending.data?.book?.id || pending.data?.id;
-          if (id) pendingBookIds.add(id);
-        } else if (pending.type === 'bulk_books') {
-          if (Array.isArray(pending.data)) {
-            pending.data.forEach((item: any) => {
-              const id = item?.book?.id || item?.id;
-              if (id) pendingBookIds.add(id);
-            });
-          }
-        } else if (pending.type === 'transaction') {
-          const id = pending.data?.id;
-          if (id) pendingEntryIds.add(id);
-        } else if (pending.type === 'bulk_transactions') {
-          if (Array.isArray(pending.data)) {
-            pending.data.forEach((item: any) => {
-              if (item?.id) pendingEntryIds.add(item.id);
-            });
-          }
-        }
-      }
-
-      const cashbooks = (rawCashbooksList || []).filter(cb => cb && cb.id && !pendingBookIds.has(cb.id));
-
-      if (networkFetchSucceeded) {
-        // Authoritative remote cashbooks list from Supabase
-        const cashbookIds = cashbooks.map(cb => cb.id);
-        let entries: any[] = [];
-        let entFetchFailed = false;
-        const attachmentsMap = new Map<string, string[]>();
-        const attachmentsDetailsMap = new Map<string, any[]>();
-        const aiEntryIds = new Set<string>();
-
-        if (cashbookIds.length > 0) {
-          try {
-            const { data: dbEntries, error: entErr } = await supabase
-              .from('entries')
-              .select('*')
-              .in('cashbook_id', cashbookIds)
-              .order('date', { ascending: false });
-
-            if (!entErr && dbEntries) {
-              entries = dbEntries;
-            } else if (entErr) {
-              entFetchFailed = true;
-              console.warn('[Dashboard] Direct entries select warning, will check RBAC endpoint:', entErr.message);
-            }
-          } catch (e: any) {
-            entFetchFailed = true;
-            console.warn('[Dashboard] Direct entries select exception:', e.message);
-          }
-
-          // Secondary fallback / augmentation via RBAC Service Backend to ensure member entries are fully loaded
-          try {
-            const rbacEntRes = await fetch('/api/rbac?action=cashbook-entries', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ cashbookIds, cashbookId: cashbookIds })
-            });
-
-            if (rbacEntRes.ok) {
-              const rbacEntJson = await rbacEntRes.json();
-              if (rbacEntJson.success && Array.isArray(rbacEntJson.entries)) {
-                entFetchFailed = false;
-                const existingEntryIds = new Set(entries.map(e => e.id));
-                for (const re of rbacEntJson.entries) {
-                  if (re && re.id && !existingEntryIds.has(re.id)) {
-                    entries.push(re);
-                  }
-                }
-              }
-              if (rbacEntJson.success && Array.isArray(rbacEntJson.attachments)) {
-                for (const att of rbacEntJson.attachments) {
-                  if (att && att.entry_id && att.file_url) {
-                    if (!attachmentsMap.has(att.entry_id)) attachmentsMap.set(att.entry_id, []);
-                    if (!attachmentsMap.get(att.entry_id)!.includes(att.file_url)) {
-                      attachmentsMap.get(att.entry_id)!.push(att.file_url);
-                    }
-                    if (!attachmentsDetailsMap.has(att.entry_id)) attachmentsDetailsMap.set(att.entry_id, []);
-                    attachmentsDetailsMap.get(att.entry_id)!.push(att);
-                  }
-                }
-              }
-              if (rbacEntJson.success && Array.isArray(rbacEntJson.aiAttachments)) {
-                for (const att of rbacEntJson.aiAttachments) {
-                  if (att && att.entry_id && att.file_url) {
-                    aiEntryIds.add(att.entry_id);
-                    if (!attachmentsMap.has(att.entry_id)) attachmentsMap.set(att.entry_id, []);
-                    if (!attachmentsMap.get(att.entry_id)!.includes(att.file_url)) {
-                      attachmentsMap.get(att.entry_id)!.push(att.file_url);
-                    }
-                    if (!attachmentsDetailsMap.has(att.entry_id)) attachmentsDetailsMap.set(att.entry_id, []);
-                    attachmentsDetailsMap.get(att.entry_id)!.push(att);
-                  }
-                }
-              }
-
-              // Update attachmentCache and persist to storage
-              for (const [eId, urls] of attachmentsMap.entries()) {
-                attachmentCache.set(eId, { images: urls, isAi: aiEntryIds.has(eId) });
-              }
-              persistAttachmentCacheToStorage();
-            }
-          } catch (rbacEntErr) {
-            console.warn('[Dashboard] RBAC entries fallback note:', rbacEntErr);
-          }
-        }
-
-        const entriesMapByCashbook = new Map<string, any[]>();
-        const allEntryIds: string[] = [];
-        if (entries) {
-          for (const e of entries) {
-            if (e && e.id && pendingEntryIds.has(e.id)) continue;
-            allEntryIds.push(e.id);
-            if (!entriesMapByCashbook.has(e.cashbook_id)) {
-              entriesMapByCashbook.set(e.cashbook_id, []);
-            }
-            entriesMapByCashbook.get(e.cashbook_id)!.push(e);
-          }
-        }
-
-        // Fetch attachments for all entries in a single step
-        if (allEntryIds.length > 0) {
-          const { attachments, aiAttachments } = await fetchAttachmentsDeduplicated(allEntryIds);
-          if (attachments) {
-            for (const att of attachments) {
-              if (att && att.entry_id && att.file_url) {
-                if (!attachmentsMap.has(att.entry_id)) {
-                  attachmentsMap.set(att.entry_id, []);
-                }
-                if (!attachmentsMap.get(att.entry_id)!.includes(att.file_url)) {
-                  attachmentsMap.get(att.entry_id)!.push(att.file_url);
-                }
-
-                if (!attachmentsDetailsMap.has(att.entry_id)) {
-                  attachmentsDetailsMap.set(att.entry_id, []);
-                }
-                attachmentsDetailsMap.get(att.entry_id)!.push(att);
-              }
-            }
-          }
-          if (aiAttachments) {
-            for (const att of aiAttachments) {
-              if (att && att.entry_id && att.file_url) {
-                aiEntryIds.add(att.entry_id);
-                if (!attachmentsMap.has(att.entry_id)) {
-                  attachmentsMap.set(att.entry_id, []);
-                }
-                if (!attachmentsMap.get(att.entry_id)!.includes(att.file_url)) {
-                  attachmentsMap.get(att.entry_id)!.push(att.file_url);
-                }
-
-                if (!attachmentsDetailsMap.has(att.entry_id)) {
-                  attachmentsDetailsMap.set(att.entry_id, []);
-                }
-                attachmentsDetailsMap.get(att.entry_id)!.push(att);
-              }
-            }
-          }
-        }
-
-        const mappedBooks = cashbooks.map(cb => {
-          const rawEntries = entriesMapByCashbook.get(cb.id) || [];
-          const existingBook = booksRef.current.find(b => b.id === cb.id);
-          const existingTxsMap = new Map((existingBook?.transactions || []).map(t => [t.id, t]));
-          const cachedTxsMap = new Map((entriesCache.get(cb.id) || []).map(t => [t.id, t]));
-
-          let entryList = rawEntries.map(t => {
-            let images = attachmentsMap.get(t.id) || [];
-
-            // 1. Check persistent attachment cache
-            if (images.length === 0 && attachmentCache.has(t.id)) {
-              images = attachmentCache.get(t.id)?.images || [];
-            }
-
-            // 2. Check existing in-memory transaction or cached entry
-            if (images.length === 0) {
-              const prevTx = existingTxsMap.get(t.id) || cachedTxsMap.get(t.id);
-              if (prevTx && Array.isArray(prevTx.images)) {
-                images = prevTx.images.filter((img: string) => typeof img === 'string' && !img.startsWith('blob:'));
-              }
-            }
-
-            // 3. Fallback to raw t.images
-            if (images.length === 0 && Array.isArray(t.images)) {
-              images = t.images.filter((img: string) => typeof img === 'string' && !img.startsWith('blob:'));
-            }
-
-            // Keep attachmentCache populated
-            if (images.length > 0 && !attachmentCache.has(t.id)) {
-              attachmentCache.set(t.id, { images, isAi: aiEntryIds.has(t.id) });
-            }
-
-            const details = attachmentsDetailsMap.get(t.id) || [];
-            const isMerged = t.image_layout === 'merge' || t.bill_type === 'MERGE' || t.billType === 'MERGE';
-            const isAi = aiEntryIds.has(t.id) || !!t.isAi || t.source === 'AI';
-            return {
-              ...t,
-              imageLayout: isMerged ? 'merge' : (t.image_layout || 'split'),
-              date: t.date ? new Date(t.date) : new Date(),
-              images,
-              attachment_details: details,
-              isAi,
-              source: t.source || (isAi ? 'AI' : ((t.is_imported || t.imported_from_share_code) ? 'Imported' : 'Manual')),
-              user_name: t.user_name,
-              created_at: t.created_at
-            };
-          });
-
-          // Preserve cached/existing entries if server query returned empty and no explicit deletions occurred
-          if (entryList.length === 0) {
-            const existingBook = booksRef.current.find(b => b.id === cb.id);
-            const cached = entriesCache.get(cb.id) || existingBook?.transactions || [];
-            if (cached.length > 0) {
-              entryList = cached.filter(t => !pendingEntryIds.has(t.id));
-            }
-          }
-
-          // Merge in-flight optimistic entries for this cashbook so they appear instantly and never disappear or flicker while saving
-          const nowOpt = Date.now();
-          const existingEntryIds = new Set(entryList.map(e => e.id));
-          for (const [optEntryId, optData] of optimisticEntriesRef.current.entries()) {
-            if (optData.cashbookId === cb.id) {
-              if (existingEntryIds.has(optEntryId)) {
-                optimisticEntriesRef.current.delete(optEntryId);
-              } else if (nowOpt - optData.timestamp < 60000) {
-                entryList.unshift(optData.entry);
-                existingEntryIds.add(optEntryId);
-              } else {
-                optimisticEntriesRef.current.delete(optEntryId);
-              }
-            }
-          }
-
-          // Update memory cache
-          if (entryList.length > 0) {
-            entriesCache.set(cb.id, entryList);
-            lastFetchTimeCache.set(cb.id, Date.now());
-          }
-
+    // 1. STALE-WHILE-REVALIDATE: Instantly render from cache if available
+    if (cachedCashbooks && !force) {
+      setBooks(prevBooks => {
+        return cachedCashbooks!
+          .filter((cb: any) => !pendingDeletedBookIdsRef.current.has(cb.id))
+          .map((cb: any) => {
+          const isCurrentActive = cb.id === activeBookId;
+          const entriesToUse = isCurrentActive ? (entriesCache.get(activeBookId) || []) : [];
           return {
             ...cb,
-            transactions: entryList,
-            createdAt: cb.created_at ? new Date(cb.created_at) : new Date(),
-            user_name: cb.user_name
+            transactions: entriesToUse.map((t: any) => {
+              const cachedImg = attachmentCache.get(t.id);
+              return {
+                ...t,
+                date: t.date ? new Date(t.date) : new Date(),
+                images: cachedImg ? cachedImg.images : (t.images || []),
+                imageLayout: t.image_layout || t.imageLayout || 'split',
+                isAi: cachedImg ? cachedImg.isAi : (t.isAi || false),
+                source: t.source || (cachedImg?.isAi ? 'AI' : (t.isAi ? 'AI' : ((t.is_imported || t.imported_from_share_code) ? 'Imported' : 'Manual')))
+              };
+            }),
+            createdAt: cb.created_at ? new Date(cb.created_at) : (cb.createdAt ? new Date(cb.createdAt) : new Date())
           };
         });
+      });
+      if (activeBookId && entriesCache.has(activeBookId) && lastFetchTimeCache.has(activeBookId)) {
+        setIsEntriesLoading(false);
+        setIsLoading(false);
+      }
+    }
 
-        // Authoritative server books from database (SUPABASE IS SINGLE SOURCE OF TRUTH)
-        const finalMap = new Map<string, Cashbook>();
-        const existingNames = new Set<string>();
+    // 2. CACHE FRESHNESS CHECK: Skip remote call completely if book was loaded < 15 seconds ago
+    if (activeBookId && !force) {
+      const lastFetch = lastFetchTimeCache.get(activeBookId) || 0;
+      const isCacheFresh = (now - lastFetch) < 15000; // 15 seconds threshold
+      if (isCacheFresh && entriesCache.has(activeBookId)) {
+        console.log('[fetchData] Skipping remote fetch because cache is fresh for active book:', activeBookId);
+        setIsEntriesLoading(false);
+        setIsLoading(false);
+        return;
+      }
+    }
 
-        // 1. Authoritative server books from database
-        mappedBooks.forEach(b => {
-          if (b && b.id) {
-            finalMap.set(b.id, b);
-            existingNames.add(b.name.trim().toLowerCase());
-          }
-        });
+    try {
+      if (activeBookId && (!entriesCache.has(activeBookId) || entriesCache.get(activeBookId)?.length === 0 || !lastFetchTimeCache.has(activeBookId))) {
+        setIsEntriesLoading(true);
+      }
+      // Optimize: Only fetch cashbooks if not yet loaded or if force refresh is requested.
+      // Avoids refetching cashbooks when only entries are required.
+      const shouldOnlyFetchEntries = Boolean(
+        activeBookId && 
+        cachedCashbooks && 
+        cachedCashbooks.length > 0 && 
+        books.length > 0 &&
+        !force
+      );
 
-        // Preserve any previously loaded in-memory books that were not explicitly deleted
-        for (const existing of booksRef.current) {
-          if (existing && existing.id && !finalMap.has(existing.id) && !pendingBookIds.has(existing.id)) {
-            finalMap.set(existing.id, existing);
-          }
-        }
+      console.log(`[fetchData] ${shouldOnlyFetchEntries ? 'Fetching entries only for active book...' : 'Refreshing cashbooks and entries from Supabase in parallel...'}`);
 
-        // 2. Preserve in-flight optimistic cashbooks so newly created cashbooks appear instantly
-        const nowBooks = Date.now();
-        for (const [optId, { book: optBook, timestamp }] of optimisticCashbooksRef.current.entries()) {
-          const matchingServerBook = mappedBooks.find(b => 
-            b.id === optId || 
-            (b.name.trim().toLowerCase() === optBook.name.trim().toLowerCase() && (b.user_id === optBook.user_id || (b as any).userId === optBook.user_id))
-          );
-          if (matchingServerBook) {
-            optimisticCashbooksRef.current.delete(optId);
-          } else if (nowBooks - timestamp < 60000) {
-            if (!finalMap.has(optId)) {
-              finalMap.set(optId, optBook);
-            }
-          } else {
-            optimisticCashbooksRef.current.delete(optId);
-          }
-        }
+      // Build candidate user IDs strictly and demonstrably associated with the authenticated user
+      const candidateUserIds = new Set<string>();
+      if (session?.user?.id) candidateUserIds.add(session.user.id);
 
-        const finalMergedList = sortCashbooksLatestFirst(Array.from(finalMap.values()));
-        setBooks(finalMergedList);
-        booksRef.current = finalMergedList;
+      if (session?.user?.email) {
         try {
-          if (session?.user?.id) {
-            localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(finalMergedList));
-            localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(finalMergedList));
+          const { data: altUsers } = await supabase
+            .from('users')
+            .select('id')
+            .eq('email', session.user.email.toLowerCase().trim());
+          if (altUsers) {
+            altUsers.forEach(u => { if (u.id) candidateUserIds.add(u.id); });
           }
-          localStorage.removeItem('trackbook_cached_books');
-        } catch (e) {}
+        } catch (_) {}
+      }
 
-        // Keep entriesCache fully hydrated for all existing cashbooks, clean out deleted ones
-        const validBookIds = new Set(finalMergedList.map(b => b.id));
-        for (const cachedId of Array.from(entriesCache.keys())) {
-          if (!validBookIds.has(cachedId)) {
-            entriesCache.delete(cachedId);
-          }
-        }
-        finalMergedList.forEach(cb => {
-          if (cb && cb.id && Array.isArray(cb.transactions) && cb.transactions.length > 0) {
-            entriesCache.set(cb.id, cb.transactions);
+      const candidateUserIdsArray = Array.from(candidateUserIds);
+
+      // Query cashbooks strictly by authenticated user IDs - never broad display-name matching
+      const cashbooksPromise = shouldOnlyFetchEntries
+        ? Promise.resolve({ data: cachedCashbooks || books, error: null })
+        : (candidateUserIdsArray.length > 1
+            ? supabase
+                .from('cashbooks')
+                .select('id, name, created_at, user_id, user_name')
+                .in('user_id', candidateUserIdsArray)
+                .order('created_at', { ascending: false })
+            : supabase
+                .from('cashbooks')
+                .select('id, name, created_at, user_id, user_name')
+                .eq('user_id', session.user.id)
+                .order('created_at', { ascending: false }));
+
+      const knownCashbookIds = (cachedCashbooks || books).map((b: any) => b.id).filter(Boolean);
+      // Fast, verified query directly using ENTRY_COLUMNS with in-flight deduplication
+      const entriesPromise = fetchEntriesFromSupabase(
+        session.user.id, 
+        activeBookId, 
+        candidateUserIdsArray, 
+        activeBookId ? undefined : knownCashbookIds
+      );
+
+      const [cashbooksResult, entriesResult] = await Promise.all([cashbooksPromise, entriesPromise]);
+
+      if (cashbooksResult.error) throw cashbooksResult.error;
+      if (entriesResult.error) throw entriesResult.error;
+
+      const rawCashbooks = cashbooksResult.data || cachedCashbooks || books;
+      const cashbooks = (rawCashbooks || []).filter((cb: any) => !pendingDeletedBookIdsRef.current.has(cb.id));
+
+      if (cashbooks) {
+        cachedCashbooks = cashbooks;
+        
+        // Ensure cashbook ownership in Supabase is updated ONLY after ownership is verified via candidateUserIds
+        cashbooks.forEach((cb: any) => {
+          if (cb.id && cb.user_id !== session.user.id && candidateUserIds.has(cb.user_id)) {
+            supabase.from('cashbooks').update({ 
+              user_id: session.user.id, 
+              user_name: cb.user_name || userName || session.user.email?.split('@')[0] || null 
+            }).eq('id', cb.id).then(() => {});
           }
         });
-
-        // If currently active cashbook was deleted from remote, reset selection
-        if (activeBookId && !validBookIds.has(activeBookId)) {
-          handleSelectBook(null);
+        let activeBookEntries: any[] = [];
+        
+        if (activeBookId) {
+          const isOwnedActiveBook = cashbooks.some((cb: any) => cb.id === activeBookId);
+          if (isOwnedActiveBook && entriesResult.data) {
+            activeBookEntries = entriesResult.data;
+            entriesCache.set(activeBookId, entriesResult.data);
+            lastFetchTimeCache.set(activeBookId, Date.now());
+          } else if (!isOwnedActiveBook) {
+            console.warn('[Security] Access denied: cashbook does not belong to authenticated user:', activeBookId);
+            setActiveBookId(null);
+            navigate('/cashbooks', { replace: true });
+          }
+        } else if (entriesResult.data) {
+          // On cashbooks list, group fetched entries strictly by verified cashbook_id to calculate Net Balance
+          const allowedBookIds = new Set(cashbooks.map((cb: any) => cb.id));
+          const groupedEntries = new Map<string, any[]>();
+          entriesResult.data.forEach((e: any) => {
+            if (allowedBookIds.has(e.cashbook_id)) {
+              const list = groupedEntries.get(e.cashbook_id) || [];
+              list.push(e);
+              groupedEntries.set(e.cashbook_id, list);
+            }
+          });
+          groupedEntries.forEach((entries, bookId) => {
+            entriesCache.set(bookId, entries);
+            lastFetchTimeCache.set(bookId, Date.now());
+          });
         }
 
-        // Solve loading delay by resolving activeBookId immediately if not set
-        if (bookSlugRef.current) {
-          const foundBook = finalMergedList.find(b => getBookSlug(b.name, b.id) === bookSlugRef.current || b.id === bookSlugRef.current);
-          if (foundBook) {
-            setActiveBookIdState(foundBook.id);
+        setBooks(prevBooks => {
+          // Keep loaded images/attachments mapping to prevent flashing and re-loading
+          const existingBook = prevBooks.find(b => b.id === activeBookId);
+          const existingImagesMap = new Map<string, { images: string[], isAi: boolean }>();
+          if (existingBook?.transactions) {
+            existingBook.transactions.forEach((t: any) => {
+              if (t.images && t.images.length > 0) {
+                existingImagesMap.set(t.id, { images: t.images, isAi: !!t.isAi });
+              }
+            });
+          }
+
+          return cashbooks.map((cb: any) => {
+            const isCurrentActive = cb.id === activeBookId;
+            let entriesToUse: any[] = [];
+            if (isCurrentActive) {
+              entriesToUse = activeBookEntries.length > 0 ? activeBookEntries : (entriesCache.get(cb.id) || []);
+            } else if (entriesCache.has(cb.id)) {
+              entriesToUse = entriesCache.get(cb.id) || [];
+            } else {
+              const prev = prevBooks.find(pb => pb.id === cb.id);
+              entriesToUse = prev ? (prev.transactions || []) : [];
+            }
+            
+            return {
+              ...cb,
+              transactions: entriesToUse.map((t: any) => {
+                const cached = attachmentCache.get(t.id);
+                const existing = existingImagesMap.get(t.id) || cached;
+                if (existing) {
+                  attachmentCache.set(t.id, existing);
+                }
+                const importedCode = t.imported_from_share_code || t.importedFromShareCode;
+                return {
+                  ...t,
+                  date: t.date ? new Date(t.date) : new Date(),
+                  images: existing ? existing.images : [],
+                  imageLayout: t.image_layout || 'split',
+                  isAi: existing ? existing.isAi : false,
+                  imported_from_share_code: importedCode,
+                  is_imported: t.is_imported || !!importedCode,
+                  import_batch_id: t.import_batch_id || importedCode,
+                  source: t.source || (existing?.isAi ? 'AI' : (t.isAi ? 'AI' : ((t.is_imported || !!importedCode) ? 'Imported' : 'Manual')))
+                };
+              }),
+              createdAt: cb.created_at ? new Date(cb.created_at) : (cb.createdAt ? new Date(cb.createdAt) : new Date())
+            };
+          });
+        });
+
+        if (activeBookId) {
+          setIsEntriesLoading(false);
+        }
+
+        // Progressive, asynchronous lazy-loading of attachments to keep page responsive
+        if (activeBookId && activeBookEntries && activeBookEntries.length > 0) {
+          const entryIds = activeBookEntries.map(e => e.id);
+          const dbQueryEntryIds = force
+            ? entryIds
+            : entryIds.filter(id => !attachmentCache.has(id) && !revalidatedEntries.has(id));
+
+          if (dbQueryEntryIds.length === 0) {
+            console.log('[fetchData] Skipping progressive DB attachment queries: all rows already cached or revalidated.');
+          } else {
+            // Mark as revalidated to prevent repeating request during active app session
+            dbQueryEntryIds.forEach(id => revalidatedEntries.add(id));
+
+            (async () => {
+              try {
+                console.log(`[fetchData] Retrieving attachments metadata from DB for ${dbQueryEntryIds.length} entries via SWR...`);
+                const loadStart = performance.now();
+                const { attachments, aiAttachments } = await fetchAttachmentsDeduplicated(dbQueryEntryIds);
+                const loadDuration = performance.now() - loadStart;
+                console.log(`[Performance] Attachments loaded in ${loadDuration.toFixed(2)}ms for ${dbQueryEntryIds.length} entries`);
+
+                const manualMap = new Map<string, string[]>();
+                attachments.forEach((a: any) => {
+                  const list = manualMap.get(a.entry_id) || [];
+                  list.push(a.file_url);
+                  manualMap.set(a.entry_id, list);
+                });
+
+                const aiMap = new Map<string, string[]>();
+                aiAttachments.forEach((a: any) => {
+                  const list = aiMap.get(a.entry_id) || [];
+                  list.push(a.file_url);
+                  aiMap.set(a.entry_id, list);
+                });
+
+                let cacheChanged = false;
+                dbQueryEntryIds.forEach(id => {
+                  const manualImgs = (manualMap.get(id) || []).slice(0, 20);
+                  const aiImgs = (aiMap.get(id) || []).slice(0, 20);
+                  const combinedImgs = [...manualImgs, ...aiImgs];
+                  const isAi = aiImgs.length > 0;
+                  
+                  const cached = attachmentCache.get(id);
+                  if (!cached || JSON.stringify(cached.images) !== JSON.stringify(combinedImgs) || cached.isAi !== isAi) {
+                    attachmentCache.set(id, { images: combinedImgs, isAi });
+                    cacheChanged = true;
+                  }
+                });
+
+                if (cacheChanged) {
+                  persistAttachmentCacheToStorage();
+                  setBooks(prevBooks => prevBooks.map(b => b.id === activeBookId ? {
+                    ...b,
+                    transactions: b.transactions.map((t: any) => {
+                      const cached = attachmentCache.get(t.id);
+                      if (cached) {
+                        return {
+                          ...t,
+                          images: cached.images,
+                          isAi: cached.isAi
+                        };
+                      }
+                      return t;
+                    })
+                  } : b));
+                }
+              } catch (err) {
+                console.error('[fetchData] Background SWR images lazy-fetch error:', err);
+              }
+            })();
           }
         }
-      } else {
-        // Fallback for offline / network issue: preserve in-memory state and merge local cache
-        console.log('[Dashboard] No remote response (offline). Preserving local cache and pending offline books.');
-        preserveAndMergeLocalCache();
+
+        if (lastBookOpenStart.current !== null) {
+          const openDuration = performance.now() - lastBookOpenStart.current;
+          console.log(`[Performance] Cashbook ID: ${activeBookId} opened and rendered in ${openDuration.toFixed(2)}ms`);
+          lastBookOpenStart.current = null;
+        }
+
+        console.log('[fetchData] Refresh completed loaded. Books count:', cashbooks.length);
       }
     } catch (error: any) {
-      console.warn('[Dashboard] Notice during data fetch (device offline or connection drop):', error);
-      // Retain last known good data — do NOT wipe books or entries
-      preserveAndMergeLocalCache();
+      console.error('Error fetching data from Supabase:', error);
+      const errorMsg = error?.message || '';
+      const isFailedToFetch = errorMsg.includes('Failed to fetch') || 
+                              errorMsg.includes('NetworkError') || 
+                              errorMsg.includes('network error') ||
+                              errorMsg === 'Failed to fetch';
+      
+      if (isFailedToFetch) {
+        console.warn('[fetchData] Failed to fetch live data from Supabase, attempting local cache fallback...');
+        const savedBooks = localStorage.getItem(`cashbooks_${session.user.id}`);
+        if (savedBooks) {
+          try {
+            const parsed = JSON.parse(savedBooks);
+            cachedCashbooks = parsed;
+            parsed.forEach((b: any) => {
+              if (b.id && Array.isArray(b.transactions)) {
+                entriesCache.set(b.id, b.transactions);
+              }
+            });
+            setBooks(parsed.map((b: any) => ({
+              ...b,
+              transactions: (b.transactions || []).map((t: any) => ({
+                ...t,
+                date: t.date ? new Date(t.date) : new Date(),
+                images: t.images || [],
+                source: t.source || (t.isAi ? 'AI' : ((t.is_imported || t.imported_from_share_code) ? 'Imported' : 'Manual'))
+              })),
+              createdAt: b.created_at ? new Date(b.created_at) : (b.createdAt ? new Date(b.createdAt) : new Date())
+            })));
+          } catch (e) {
+            console.error('[fetchData] Failed to parse cache in catch fallback:', e);
+          }
+        } else {
+          // No cached local data yet to show
+          setError('Unable to connect to the database. TrackBook is operating in offline mode.');
+        }
+      } else {
+        setError(error.message || 'Failed to fetch data');
+      }
     } finally {
-      initialLoadedRef.current = true;
       setIsLoading(false);
       setIsEntriesLoading(false);
     }
-  }, [session, preserveAndMergeLocalCache]);
+  }, [session, activeBookId]);
 
-  // Fetch data from Supabase init, on invitation accepted, and periodic background refresh
+  // Fetch data from Supabase init
   useEffect(() => {
-    // Safely reconcile any pending unsynced offline records from IndexedDB/localStorage to Supabase
-    if (session?.user?.id && navigator.onLine) {
-      reconcileAndMigrateOfflineData(session)
-        .then((res) => {
-          if (res.migratedBooks > 0 || res.migratedEntries > 0) {
-            console.log(`[Dashboard] Reconciled and migrated ${res.migratedBooks} books and ${res.migratedEntries} entries to Supabase.`);
-            fetchData(true);
-          }
-        })
-        .catch((err) => console.warn('[Dashboard] Data reconciliation notice:', err));
-    }
-
     fetchData();
-
-    const handleCashbookRefresh = () => {
-      fetchData(true);
-    };
-
-    const handleNativeOnline = () => {
-      console.log('[Dashboard] Native online event detected. Syncing in background.');
-      setIsOffline(false);
-      setShowOfflinePdfDialog(false);
-      setShowOfflineDialog(false);
-      syncManager.network.updateState('good');
-      if (session?.user?.id) {
-        reconcileAndMigrateOfflineData(session)
-          .then((res) => {
-            if (res.migratedBooks > 0 || res.migratedEntries > 0) {
-              console.log(`[Dashboard] Reconciled and migrated ${res.migratedBooks} books and ${res.migratedEntries} entries to Supabase.`);
-              fetchData(true);
-            }
-          })
-          .catch((err) => console.warn('[Dashboard] Reconnect data reconciliation notice:', err));
-      }
-      syncManager.triggerSync().then(() => {
-        fetchData(true);
-        setTimeout(() => fetchData(true), 1500);
-      }).catch(() => {
-        fetchData(true);
-      });
-    };
-
-    const handleNativeOffline = () => {
-      console.log('[Dashboard] Native offline event detected.');
-      setIsOffline(true);
-      syncManager.network.updateState('offline');
-      preserveAndMergeLocalCache();
-    };
-
-    window.addEventListener('trackbook_refresh_cashbooks', handleCashbookRefresh);
-    window.addEventListener('cashbook_updated', handleCashbookRefresh);
-    window.addEventListener('online', handleNativeOnline);
-    window.addEventListener('offline', handleNativeOffline);
-
-    // Periodic sync check every 12 seconds so entries added by other members sync live
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible' && navigator.onLine) {
-        fetchData(true);
-      }
-    }, 12000);
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine) {
-        fetchData(true);
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('trackbook_refresh_cashbooks', handleCashbookRefresh);
-      window.removeEventListener('cashbook_updated', handleCashbookRefresh);
-      window.removeEventListener('online', handleNativeOnline);
-      window.removeEventListener('offline', handleNativeOffline);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
   }, [session, fetchData]);
-
-  // Real-time synchronization: listen to changes in cashbooks table (INSERT, UPDATE, DELETE)
-  // This guarantees that any changes made on the mobile APK or web immediately reflect everywhere without manual refresh
-  useEffect(() => {
-    if (!supabase || !session?.user?.id) return;
-
-    const currentUserId = session.user.id;
-    const currentUserEmail = (session.user.email || '').trim().toLowerCase();
-
-    const channel = supabase
-      .channel(`realtime_cashbooks_sync_${currentUserId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'cashbooks' },
-        (payload: any) => {
-          console.log('[Realtime] Cashbook table change detected:', payload.eventType, payload);
-
-          if (payload.eventType === 'DELETE') {
-            const deletedId = payload.old?.id;
-            if (deletedId) {
-              setBooks(prev => prev.filter(b => b.id !== deletedId));
-              booksRef.current = booksRef.current.filter(b => b.id !== deletedId);
-              entriesCache.delete(deletedId);
-              if (activeBookIdRef.current === deletedId) {
-                handleSelectBook(null);
-              }
-              try {
-                const cacheKey = `trackbook_cached_books_${currentUserId}`;
-                const raw = localStorage.getItem(cacheKey);
-                if (raw) {
-                  const list = JSON.parse(raw);
-                  if (Array.isArray(list)) {
-                    localStorage.setItem(cacheKey, JSON.stringify(list.filter((b: any) => b.id !== deletedId)));
-                  }
-                }
-                localStorage.removeItem('trackbook_cached_books_latest');
-                offlineDb.deleteCashbook(deletedId);
-              } catch (_) {}
-            }
-          } else if (payload.eventType === 'INSERT') {
-            const newRow = payload.new;
-            if (newRow && (newRow.user_id === currentUserId || (currentUserEmail && newRow.user_email?.toLowerCase() === currentUserEmail))) {
-              setBooks(prev => {
-                if (prev.some(b => b.id === newRow.id)) return prev;
-                // Reconcile optimistic cashbook if matching by name
-                const matchingOptimistic = prev.find(b => 
-                  b.name.trim().toLowerCase() === newRow.name?.trim().toLowerCase() && 
-                  (b.user_id === newRow.user_id || b.user_id === currentUserId)
-                );
-                if (matchingOptimistic) {
-                  return prev.map(b => b.id === matchingOptimistic.id ? {
-                    ...b,
-                    id: newRow.id,
-                    syncStatus: 'SYNCED',
-                    is_offline: false,
-                    createdAt: newRow.created_at ? new Date(newRow.created_at) : b.createdAt
-                  } : b);
-                }
-                const formatted: Cashbook = {
-                  id: newRow.id,
-                  name: newRow.name,
-                  user_id: newRow.user_id || currentUserId,
-                  user_name: newRow.user_name || 'User',
-                  createdAt: newRow.created_at ? new Date(newRow.created_at) : new Date(),
-                  transactions: [],
-                  is_offline: false,
-                  syncStatus: 'SYNCED'
-                };
-                const next = sortCashbooksLatestFirst([formatted, ...prev]);
-                try {
-                  localStorage.setItem(`trackbook_cached_books_${currentUserId}`, JSON.stringify(next));
-                  localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(next));
-                } catch (_) {}
-                return next;
-              });
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedRow = payload.new;
-            if (updatedRow && updatedRow.id) {
-              setBooks(prev => prev.map(b => b.id === updatedRow.id ? { ...b, name: updatedRow.name } : b));
-            }
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [supabase, session?.user?.id, session?.user?.email]);
-
-  // Real-time synchronization: listen to changes in entries table (INSERT, UPDATE, DELETE)
-  // Debounces rapid bursts and updates ONLY the affected cashbook's transactions list
-  useEffect(() => {
-    if (!supabase || !session?.user?.id) return;
-
-    let pendingUpdates: any[] = [];
-    let flushTimer: NodeJS.Timeout | null = null;
-
-    const flushQueue = () => {
-      if (pendingUpdates.length === 0) return;
-      const updatesToProcess = [...pendingUpdates];
-      pendingUpdates = [];
-
-      setBooks(prev => {
-        let changed = false;
-        let nextBooks = [...prev];
-
-        for (const update of updatesToProcess) {
-          const { eventType, new: newRow, old: oldRow } = update;
-          const bookId = newRow?.cashbook_id || oldRow?.cashbook_id;
-          if (!bookId) continue;
-
-          const bookIndex = nextBooks.findIndex(b => b.id === bookId);
-          if (bookIndex === -1) continue;
-
-          const targetBook = nextBooks[bookIndex];
-          const currentTxs = targetBook.transactions || entriesCache.get(bookId) || [];
-
-          if (eventType === 'DELETE') {
-            const deletedEntryId = oldRow?.id;
-            if (deletedEntryId && currentTxs.some(t => t.id === deletedEntryId)) {
-              const updatedTxs = currentTxs.filter(t => t.id !== deletedEntryId);
-              nextBooks[bookIndex] = {
-                ...targetBook,
-                transactions: updatedTxs
-              };
-              entriesCache.set(bookId, updatedTxs);
-              changed = true;
-            }
-          } else if (eventType === 'INSERT') {
-            if (!newRow || !newRow.id) continue;
-            // Check if already in list (e.g. from optimistic insertion)
-            const alreadyExists = currentTxs.some(t => t.id === newRow.id);
-            if (alreadyExists) {
-              const updatedTxs = currentTxs.map(t => t.id === newRow.id ? {
-                ...t,
-                syncStatus: 'SYNCED' as const,
-                is_offline: false
-              } : t);
-              nextBooks[bookIndex] = {
-                ...targetBook,
-                transactions: updatedTxs
-              };
-              entriesCache.set(bookId, updatedTxs);
-              changed = true;
-            } else {
-              const optIndex = currentTxs.findIndex(t => 
-                (t.syncStatus === 'PENDING' || t.is_offline) &&
-                Number(t.amount) === Number(newRow.amount) &&
-                t.type === newRow.type &&
-                t.category === newRow.category
-              );
-
-              // Preserve attachments from optimistic entry or attachmentCache
-              const prevEntry = optIndex !== -1 ? currentTxs[optIndex] : null;
-              const cachedImgs = attachmentCache.get(newRow.id)?.images || [];
-              const optImgs = Array.isArray(prevEntry?.images) ? prevEntry.images : [];
-              const finalImgs = (Array.isArray(newRow.attachments) && newRow.attachments.length > 0)
-                ? newRow.attachments
-                : ((Array.isArray(newRow.images) && newRow.images.length > 0) 
-                  ? newRow.images 
-                  : (optImgs.length > 0 ? optImgs : cachedImgs));
-
-              const formattedNewEntry: Transaction = {
-                id: newRow.id,
-                amount: Number(newRow.amount) || 0,
-                type: (newRow.type === 'in' || newRow.type === 'out') ? newRow.type : 'in',
-                category: newRow.category || 'General',
-                mode: newRow.mode || 'Cash',
-                date: newRow.date ? new Date(newRow.date) : (newRow.created_at ? new Date(newRow.created_at) : new Date()),
-                created_at: newRow.created_at || new Date().toISOString(),
-                description: newRow.description || '',
-                images: finalImgs,
-                imageLayout: newRow.image_layout || prevEntry?.imageLayout || 'split',
-                syncStatus: 'SYNCED',
-                is_offline: false
-              };
-
-              let updatedTxs: Transaction[];
-              if (optIndex !== -1) {
-                updatedTxs = [...currentTxs];
-                updatedTxs[optIndex] = formattedNewEntry;
-              } else {
-                updatedTxs = [formattedNewEntry, ...currentTxs];
-              }
-
-              nextBooks[bookIndex] = {
-                ...targetBook,
-                transactions: updatedTxs
-              };
-              entriesCache.set(bookId, updatedTxs);
-              changed = true;
-
-              // Asynchronously query server for attachments if new entry has no images locally
-              if (finalImgs.length === 0) {
-                fetchAttachmentsDeduplicated([newRow.id]).then(({ attachments }) => {
-                  if (attachments && attachments.length > 0) {
-                    const newUrls = attachments.map((a: any) => a.file_url).filter(Boolean);
-                    if (newUrls.length > 0) {
-                      setBooks(latest => latest.map(b => b.id === bookId ? {
-                        ...b,
-                        transactions: b.transactions.map(tx => tx.id === newRow.id ? { ...tx, images: newUrls } : tx)
-                      } : b));
-                    }
-                  }
-                }).catch(() => {});
-              }
-            }
-          } else if (eventType === 'UPDATE') {
-            if (!newRow || !newRow.id) continue;
-            const updatedTxs = currentTxs.map(t => {
-              if (t.id === newRow.id) {
-                const updatedImages = (Array.isArray(newRow.attachments) && newRow.attachments.length > 0)
-                  ? newRow.attachments
-                  : ((Array.isArray(newRow.images) && newRow.images.length > 0)
-                    ? newRow.images
-                    : (t.images && t.images.length > 0 ? t.images : (attachmentCache.get(t.id)?.images || [])));
-                return {
-                  ...t,
-                  amount: Number(newRow.amount) || t.amount,
-                  type: (newRow.type === 'in' || newRow.type === 'out') ? newRow.type : t.type,
-                  category: newRow.category || t.category,
-                  mode: newRow.mode || t.mode,
-                  description: newRow.description !== undefined ? newRow.description : t.description,
-                  date: newRow.date ? new Date(newRow.date) : t.date,
-                  images: updatedImages,
-                  imageLayout: newRow.image_layout || t.imageLayout,
-                  syncStatus: 'SYNCED' as const,
-                  is_offline: false
-                };
-              }
-              return t;
-            });
-            nextBooks[bookIndex] = {
-              ...targetBook,
-              transactions: updatedTxs
-            };
-            entriesCache.set(bookId, updatedTxs);
-            changed = true;
-          }
-        }
-
-        if (changed) {
-          booksRef.current = nextBooks;
-          try {
-            if (session?.user?.id) {
-              localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(nextBooks));
-              localStorage.setItem('trackbook_cached_books_latest', JSON.stringify(nextBooks));
-            }
-          } catch (_) {}
-          return nextBooks;
-        }
-        return prev;
-      });
-    };
-
-    const channel = supabase
-      .channel(`realtime_entries_sync_${session.user.id}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'entries' },
-        (payload: any) => {
-          pendingUpdates.push(payload);
-          if (flushTimer) clearTimeout(flushTimer);
-          flushTimer = setTimeout(flushQueue, 35);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      if (flushTimer) clearTimeout(flushTimer);
-      supabase.removeChannel(channel);
-    };
-  }, [supabase, session?.user?.id]);
 
   // Automatic migration utility for legacy base64 images in database tables
   useEffect(() => {
@@ -5306,11 +3521,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     };
   }, [session, supabase]);
 
-  // Autofocus amount when form is shown
+  // Autofocus Amount (not Details) when form is shown
   useEffect(() => {
     if (showForm) {
+      setFormErrors({});
       setTimeout(() => {
         amountInputRef.current?.focus();
+        amountInputRef.current?.select();
       }, 120);
     }
   }, [showForm]);
@@ -5350,63 +3567,29 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const lastActiveBookRef = useRef<any>(undefined);
   const activeBook = useMemo(() => {
     const found = books.find(b => b.id === activeBookId);
-    if (!found) {
-      lastActiveBookRef.current = undefined;
-      return undefined;
-    }
-    const last = lastActiveBookRef.current;
-    if (last && last.id === found.id && last._sourceBook === found) {
-      return last;
-    }
+    if (!found) return undefined;
     const uniques = new Map<string, typeof found.transactions[0]>();
     (found.transactions || []).forEach(t => {
       if (t && t.id && !uniques.has(t.id)) {
         uniques.set(t.id, t);
       }
     });
-    const result = {
+    return {
       ...found,
-      transactions: Array.from(uniques.values()),
-      _sourceBook: found
+      transactions: Array.from(uniques.values())
     };
-    lastActiveBookRef.current = result;
-    return result;
   }, [books, activeBookId]);
-
-  const currentUserRole: Role = useMemo(() => {
-    if (!activeBook) return 'Primary Admin';
-    if ((activeBook as any).user_id === session?.user?.id || (activeBook as any).userId === session?.user?.id || (activeBook as any).isOwner === true) {
-      return 'Primary Admin';
-    }
-    const r = (activeBook as any).userRole || (activeBook as any).role || (activeBook as any).member_role;
-    if (r && ALL_ROLES.includes(r as Role)) {
-      return r as Role;
-    }
-    return 'Viewer';
-  }, [activeBook, session]);
-
-  currentUserRoleRef.current = currentUserRole;
 
   const filteredBooks = useMemo(() => {
     const uniques = new Map<string, typeof books[0]>();
     books.forEach(b => {
-      if (b && b.id && !uniques.has(b.id)) {
+      if (b && b.id && !uniques.has(b.id) && !pendingDeletedBookIdsRef.current.has(b.id)) {
         uniques.set(b.id, b);
       }
     });
-    const list = Array.from(uniques.values()).filter(b => b.name.toLowerCase().includes(searchQuery.toLowerCase()));
-
-    // Sort latest created cashbook first (descending order by creation date/time)
-    return list.sort((a, b) => {
-      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : ((a as any).created_at ? new Date((a as any).created_at).getTime() : 0);
-      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : ((b as any).created_at ? new Date((b as any).created_at).getTime() : 0);
-      const validA = isNaN(timeA) ? 0 : timeA;
-      const validB = isNaN(timeB) ? 0 : timeB;
-      return validB - validA;
-    });
+    return Array.from(uniques.values()).filter(b => b.name.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [books, searchQuery]);
 
   const totals = useMemo(() => {
@@ -5445,22 +3628,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const lastWeek = new Date(today);
       lastWeek.setDate(lastWeek.getDate() - 7);
 
-      const tDate = t.date instanceof Date 
-        ? t.date 
-        : new Date(t.date || t.created_at || 0);
-
       if (transactionDurationFilter === 'Today') {
-        matchesDuration = tDate >= today;
+        matchesDuration = t.date >= today;
       } else if (transactionDurationFilter === 'Yesterday') {
-        matchesDuration = tDate >= yesterday && tDate < today;
+        matchesDuration = t.date >= yesterday && t.date < today;
       } else if (transactionDurationFilter === 'Last Week') {
-        matchesDuration = tDate >= lastWeek;
+        matchesDuration = t.date >= lastWeek;
       } else if (transactionDurationFilter === 'Custom' && customFilterDate) {
         // Parse custom date string "YYYY-MM-DD"
         const [cy, cm, cd] = customFilterDate.split('-').map(Number);
         const filterDateStart = new Date(cy, cm - 1, cd);
         const filterDateEnd = new Date(cy, cm - 1, cd + 1);
-        matchesDuration = tDate >= filterDateStart && tDate < filterDateEnd;
+        matchesDuration = t.date >= filterDateStart && t.date < filterDateEnd;
       }
 
       return matchesSearch && matchesType && matchesCategory && matchesDuration;
@@ -5468,21 +3647,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     // Apply Dynamic Sorting
     return [...filtered].sort((a, b) => {
-      const timeA = a.date instanceof Date ? a.date.getTime() : new Date(a.date || a.created_at || 0).getTime() || 0;
-      const timeB = b.date instanceof Date ? b.date.getTime() : new Date(b.date || b.created_at || 0).getTime() || 0;
-
       let comparison = 0;
       if (sortColumn === 'category') {
         // Primary: Category, Secondary: Date (newest first)
-        comparison = (a.category || '').localeCompare(b.category || '');
+        comparison = a.category.localeCompare(b.category);
         if (comparison === 0) {
-          comparison = timeB - timeA;
+          comparison = b.date.getTime() - a.date.getTime();
         }
       } else {
         // Primary: Date (newest first), Secondary: Category
-        comparison = timeB - timeA;
+        comparison = b.date.getTime() - a.date.getTime();
         if (comparison === 0) {
-          comparison = (a.category || '').localeCompare(b.category || '');
+          comparison = a.category.localeCompare(b.category);
         }
       }
       return sortDirection === 'asc' ? comparison : -comparison;
@@ -5494,29 +3670,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setVisibleCount(20);
   }, [activeBookId, transactionSearchQuery, transactionTypeFilter, transactionCategoryFilter, transactionDurationFilter, customFilterDate]);
 
-  // Pre-calculate running balances chronologically for active cashbook
+  // Pre-calculate running balances for transaction list items with smart cached incremental logic
   const runningBalancesMap = useMemo(() => {
-    if (!activeBook || !activeBookId) return new Map<string, number>();
+    if (!activeBookId) return new Map<string, number>();
     
-    const sig = activeBook.transactions.map(t => {
-      const tTime = t.date instanceof Date ? t.date.getTime() : new Date(t.date || t.created_at || 0).getTime() || 0;
-      return `${t.id}_${t.amount}_${t.type}_${tTime}`;
-    }).join('|');
+    // Create a signature of the current list of filteredTransactions
+    // To see if we can instantly reuse the cached map!
+    const sig = filteredTransactions.map(t => `${t.id}_${t.amount}_${t.type}`).join('|');
     const cachedSig = computedBalancesSignatureCache.get(activeBookId);
     if (cachedSig === sig && computedBalancesCache.has(activeBookId)) {
       return computedBalancesCache.get(activeBookId)!;
     }
     
-    // Sort all transactions in active book chronologically (oldest date first)
-    const chronological = [...activeBook.transactions].sort((a, b) => {
-      const timeA = a.date instanceof Date ? a.date.getTime() : new Date(a.date || a.created_at || 0).getTime() || 0;
-      const timeB = b.date instanceof Date ? b.date.getTime() : new Date(b.date || b.created_at || 0).getTime() || 0;
-      return timeA - timeB;
-    });
-    
     const map = new Map<string, number>();
+    // Calculate running balances incrementally starting from oldest (end of array) to newest (start of array, index 0)
     let current = 0;
-    for (const t of chronological) {
+    for (let i = filteredTransactions.length - 1; i >= 0; i--) {
+      const t = filteredTransactions[i];
       current += (t.type === 'in' ? t.amount : -t.amount);
       map.set(t.id, current);
     }
@@ -5524,7 +3694,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     computedBalancesCache.set(activeBookId, map);
     computedBalancesSignatureCache.set(activeBookId, sig);
     return map;
-  }, [activeBook, activeBookId]);
+  }, [filteredTransactions, activeBookId]);
 
   // Sliced set of transactions currently visible in the UI viewport
   const pagedTransactions = useMemo(() => {
@@ -5595,326 +3765,71 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     e.preventDefault();
     if (!newBookName.trim() || !session) return;
     
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      return;
-    }
-
-    // Prevent creating duplicate book names (case-insensitive, trimmed)
-    const normalizedNewName = newBookName.trim().toLowerCase();
-    const isDuplicate = books.some(b => b.name.trim().toLowerCase() === normalizedNewName);
-    if (isDuplicate) {
-      setCreateBookError("A book with this name already exists. Please choose a different name.");
-      return;
-    }
-
+    // Optimization: Don't show submitting overlay for simple book creation if it's too slow
+    // Or just make it very quick.
     setIsSubmitting(true);
-    setCreateBookError(null);
-
-    const tempId = safeUUID();
-    const bookName = newBookName.trim();
-    const resolvedUserName = session.user.user_metadata?.full_name || 
-                             session.user.user_metadata?.name || 
-                             session.user.email?.split('@')[0] || 'User';
-
-    const payload: any = { 
-      id: tempId, 
-      name: bookName, 
-      created_at: new Date().toISOString(),
-      user_id: session.user.id,
-      user_name: resolvedUserName
-    };
-
-    let saveSuccess = false;
-    let savedRow: any = null;
-
-    // 1. Authoritative Backend Service Role Persistence (prevents client RLS 42501 errors on Postgres)
-    try {
-      const res = await fetch('/api/sync?action=cashbook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'cashbook',
-          ...payload,
-          user_email: session.user.email
-        })
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json?.success) {
-          saveSuccess = true;
-          savedRow = json.cashbook || payload;
-        }
-      }
-    } catch (proxyErr) {
-      console.warn('[CreateBook] Primary proxy insert warning:', proxyErr);
-    }
-
-    // 2. Direct Supabase insert fallback only if backend proxy endpoint failed
-    if (!saveSuccess && supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('cashbooks')
-          .insert([payload])
-          .select()
-          .single();
-
-        if (!error && data) {
-          saveSuccess = true;
-          savedRow = data;
-        } else if (error && (error.code === '42703' || error.message?.toLowerCase().includes('column'))) {
-          const fallbackPayload = {
-            id: payload.id,
-            name: payload.name,
-            created_at: payload.created_at,
-            user_id: payload.user_id
-          };
-          const { data: fbData, error: fbError } = await supabase
-            .from('cashbooks')
-            .insert([fallbackPayload])
-            .select()
-            .single();
-
-          if (!fbError && fbData) {
-            saveSuccess = true;
-            savedRow = fbData;
-          }
-        }
-      } catch (err: any) {
-        console.error('[CreateBook] Direct insert fallback error:', err);
-      }
-    }
-
-    if (!saveSuccess) {
-      setIsSubmitting(false);
-      setCreateBookError("Failed to save cashbook to the database. Please check your internet connection and try again.");
-      return;
-    }
-
-    // 3. ONLY ON CONFIRMED DATABASE PERSISTENCE: Update UI state with real database record
-    const confirmedId = savedRow?.id || tempId;
-    const finalBook: Cashbook = {
-      id: confirmedId,
-      name: savedRow?.name || bookName,
+    setSubmittingMessage('Creating new book...');
+    
+    const newBook: Cashbook = {
+      id: safeUUID(),
+      name: newBookName,
       transactions: [],
-      createdAt: savedRow?.created_at ? new Date(savedRow.created_at) : new Date(),
-      user_id: savedRow?.user_id || session.user.id,
-      syncStatus: 'SYNCED',
-      is_offline: false,
-      user_name: savedRow?.user_name || resolvedUserName
+      createdAt: new Date()
     };
 
-    setBooks(prev => {
-      const next = [finalBook, ...prev.filter(b => b.id !== finalBook.id)];
-      booksRef.current = next;
-      try {
-        localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
-      } catch (_) {}
-      return next;
-    });
-
-    entriesCache.set(finalBook.id, []);
-    setActiveBookId(finalBook.id);
-
-    // Close modal and reset input
+    // Update local state immediately for perceived speed
+    setBooks(prev => [...prev, newBook]);
     setNewBookName('');
-    setCreateBookError(null);
     setIsCreatingBook(false);
     setIsSubmitting(false);
 
-    // Highlight newly created cashbook in the list
-    setJustEditedBookId(finalBook.id);
-    setTimeout(() => {
-      setJustEditedBookId(null);
-    }, 2500);
+    // Then handle Supabase in background
+    if (supabase) {
+      try {
+        const effectiveUserName = userName || session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || null;
+        const { error } = await supabase
+          .from('cashbooks')
+          .insert([{ 
+            id: newBook.id, 
+            name: newBook.name, 
+            created_at: safeToISOString(newBook.createdAt),
+            user_id: session.user.id,
+            user_name: effectiveUserName
+          }]);
+        if (error) throw error;
+      } catch (error) {
+        console.error('Error creating book in Supabase:', error);
+        // If it fails, we might want to revert local state, but usually it's fine
+      }
+    }
   };
 
   const handleUpdateBook = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editBookName.trim() || !isEditingBook || !session) return;
 
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      return;
-    }
-
-    // Prevent renaming to a duplicate book name (case-insensitive, trimmed)
-    const normalizedEditName = editBookName.trim().toLowerCase();
-    const isDuplicate = books.some(b => b.id !== isEditingBook && b.name.trim().toLowerCase() === normalizedEditName);
-    if (isDuplicate) {
-      setEditBookError("A book with this name already exists. Please choose a different name.");
-      return;
-    }
-
     const savedId = isEditingBook;
-    const newName = editBookName.trim();
-    const originalBook = books.find(b => b.id === savedId);
 
-    // 1. Instant optimistic rename in UI state
-    setBooks(prev => prev.map(b => b.id === savedId ? { ...b, name: newName } : b));
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from('cashbooks')
+          .update({ name: editBookName })
+          .eq('id', isEditingBook);
+        if (error) throw error;
+      } catch (error) {
+        console.error('Error updating book in Supabase:', error);
+      }
+    }
+
+    setBooks(books.map(b => b.id === isEditingBook ? { ...b, name: editBookName } : b));
     setIsEditingBook(null);
     setEditBookName('');
-    setEditBookError(null);
 
     setJustEditedBookId(savedId);
     setTimeout(() => {
       setJustEditedBookId(null);
     }, 2000);
-
-    // 2. Persist in background silently
-    (async () => {
-      if (supabase) {
-        try {
-          const { error } = await supabase
-            .from('cashbooks')
-            .update({ name: newName })
-            .eq('id', savedId)
-            .eq('user_id', session.user.id);
-          if (error) {
-            console.warn('[UpdateBook] Supabase update note:', error.message);
-            if (navigator.onLine && error.code !== '42703') {
-              throw error;
-            }
-          }
-        } catch (error: any) {
-          const isNetwork = !navigator.onLine || 
-            error?.name === 'TypeError' || 
-            error?.message?.toLowerCase().includes('failed to fetch');
-          if (isNetwork) {
-            console.log('[UpdateBook] Offline/network notice during update. Local cache retained.');
-          } else {
-            console.error('[UpdateBook] Background update error, rolling back:', error);
-            if (originalBook) {
-              setBooks(prev => prev.map(b => b.id === savedId ? originalBook : b));
-            }
-            setError(error.message || "Couldn't rename the cashbook. Please try again.");
-          }
-        }
-      }
-    })();
-  };
-
-  const handleDuplicateBook = async (bookId: string) => {
-    vibrate(15);
-    const bookToDup = books.find(b => b.id === bookId);
-    if (!bookToDup || !session) return;
-    
-    const newName = `${bookToDup.name} (Copy)`;
-    const newBookId = safeUUID();
-    
-    const resolvedUserName = session.user.user_metadata?.full_name || 
-                             session.user.user_metadata?.name || 
-                             session.user.email?.split('@')[0] || 'User';
-
-    const payload: any = {
-      id: newBookId,
-      name: newName,
-      user_id: session.user.id,
-      user_name: resolvedUserName,
-      created_at: new Date().toISOString()
-    };
-    
-    // Try backend sync endpoint first
-    let syncBookSuccess = false;
-    try {
-      const res = await fetch('/api/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'cashbook', ...payload })
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json && json.success === true) syncBookSuccess = true;
-      }
-    } catch (e) {}
-
-    if (!syncBookSuccess && supabase) {
-      try {
-        const { error } = await supabase.from('cashbooks').insert([payload]);
-        if (error) {
-          if (error.code === '42703' || error.message?.toLowerCase().includes('column')) {
-            const fallbackPayload = { ...payload };
-            delete fallbackPayload.user_name;
-            const { error: retryError } = await supabase.from('cashbooks').insert([fallbackPayload]);
-            if (!retryError) syncBookSuccess = true;
-          }
-        } else {
-          syncBookSuccess = true;
-        }
-      } catch (err: any) {
-        console.warn('[DuplicateBook] Notice duplicating book in Supabase:', err?.message || err);
-      }
-    }
-
-    if (!syncBookSuccess) {
-      setError("Unable to duplicate cashbook. Please check your internet connection and try again.");
-      return;
-    }
-    
-    const sourceEntries = entriesCache.get(bookId) || bookToDup.transactions || [];
-    const dupTransactions = sourceEntries.map((t: any) => ({
-      ...t,
-      id: safeUUID(),
-      cashbook_id: newBookId,
-      created_at: new Date().toISOString()
-    }));
-    
-    if (dupTransactions.length > 0 && supabase) {
-      try {
-        await supabase.from('entries').insert(
-          dupTransactions.map((t: any) => ({
-            id: t.id,
-            cashbook_id: newBookId,
-            user_id: session.user.id,
-            user_name: resolvedUserName,
-            amount: Number(t.amount) || 0,
-            type: t.type === 'in' ? 'in' : 'out',
-            description: t.description || '',
-            category: t.category || 'General',
-            mode: t.mode || 'Cash',
-            date: t.date || new Date().toISOString(),
-            image_layout: t.imageLayout || 'split'
-          }))
-        );
-      } catch (err: any) {
-        console.warn('[DuplicateBook] Notice duplicating entries in Supabase:', err?.message || err);
-      }
-    }
-    
-    const newBook = {
-      id: newBookId,
-      name: newName,
-      transactions: dupTransactions,
-      createdAt: new Date(),
-      user_id: session.user.id
-    };
-    
-    entriesCache.set(newBookId, dupTransactions);
-    setBooks(prev => {
-      const next = [newBook, ...prev];
-      if (session?.user?.id) {
-        localStorage.setItem(`trackbook_cached_books_${session.user.id}`, JSON.stringify(next));
-      }
-      return next;
-    });
-  };
-
-  const handleExportBookFromList = async (bookId: string, format: 'pdf' | 'excel') => {
-    vibrate(15);
-    const book = books.find(b => b.id === bookId);
-    if (!book) return;
-    const txs = entriesCache.get(bookId) || book.transactions || [];
-    if (format === 'excel') {
-      await backgroundExportManager.enqueueExcelTask(book.id, book.name, txs);
-      setPdfQualityModalState({
-        isOpen: true,
-        cashbookId: book.id,
-        cashbookName: book.name,
-        transactions: txs
-      });
-    }
   };
 
   const handleAskAi = async () => {
@@ -5947,55 +3862,68 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
 
   const handleDeleteBook = (id: string) => {
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      return;
-    }
     vibrate(50);
-    setDeleteConfirmId(id);
+    if (!session) return;
+
+    const bookToDeleteObj = books.find(b => b.id === id);
+    const originalIndex = books.findIndex(b => b.id === id);
+    if (!bookToDeleteObj) return;
+
+    // Immediately mark as pending deletion so background sync won't resurrect it
+    pendingDeletedBookIdsRef.current.add(id);
+
+    // Immediately remove from visible React state
+    setBooks(prevBooks => prevBooks.filter(b => b.id !== id));
+
+    // Immediately update memory cache
+    if (cachedCashbooks) {
+      cachedCashbooks = cachedCashbooks.filter((b: any) => b.id !== id);
+    }
+
+    // Immediately update localStorage
+    try {
+      const savedBooks = localStorage.getItem(`cashbooks_${session.user.id}`);
+      if (savedBooks) {
+        const parsed = JSON.parse(savedBooks);
+        if (Array.isArray(parsed)) {
+          localStorage.setItem(
+            `cashbooks_${session.user.id}`,
+            JSON.stringify(parsed.filter((b: any) => b.id !== id))
+          );
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to update localStorage on delete:', e);
+    }
+
+    // Dismiss any confirmation modal
+    setDeleteConfirmId(null);
     setDeleteConfirmed(false);
+
+    // If active book was this book, navigate to cashbooks
+    if (activeBookId === id) {
+      handleSelectBook(null);
+    }
+
+    // Trigger immediate undoable toast
+    handleStartUndoableDelete({
+      type: 'book',
+      data: {
+        book: bookToDeleteObj,
+        cachedEntries: entriesCache.get(id) || []
+      },
+      originalIndex
+    });
   };
 
   const confirmDeleteBook = async () => {
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      return;
-    }
-    const targetId = deleteConfirmId;
-    if (targetId && session) {
-      const bookToDeleteObj = books.find(b => b.id === targetId);
-      const originalIndex = books.findIndex(b => b.id === targetId);
-      const cached = entriesCache.get(targetId) || [];
-
-      setDeleteConfirmId(null);
-      if (activeBookId === targetId) {
-        handleSelectBook(null);
-      }
-
-      // Purge completely and permanently right now
-      await purgeBookCompletely(targetId);
-
-      if (bookToDeleteObj) {
-        handleStartUndoableDelete({
-          type: 'book',
-          data: {
-            book: bookToDeleteObj,
-            cachedEntries: cached
-          },
-          originalIndex
-        }).catch(err => console.error('[confirmDeleteBook] Error starting undoable delete:', err));
-      }
+    if (deleteConfirmId && session) {
+      const id = deleteConfirmId;
+      handleDeleteBook(id);
     }
   };
 
   const handleBulkDeleteBooks = async () => {
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      return;
-    }
     if (selectedBooks.size === 0 || !session) return;
 
     const booksToDelete = Array.from(selectedBooks).map(id => {
@@ -6010,28 +3938,28 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return books.findIndex(b => b.id === id);
     });
 
-    const idsList = Array.from(selectedBooks);
+    const idsSet = new Set(selectedBooks);
+    idsSet.forEach(id => pendingDeletedBookIdsRef.current.add(id));
 
+    if (cachedCashbooks) {
+      cachedCashbooks = cachedCashbooks.filter((b: any) => !idsSet.has(b.id));
+    }
+
+    setBooks(prev => prev.filter(b => !idsSet.has(b.id)));
     setSelectedBooks(new Set());
     setShowBulkDeleteConfirm(false);
-
-    // Purge completely and permanently right now
-    for (const id of idsList) {
-      await purgeBookCompletely(id);
-    }
 
     handleStartUndoableDelete({
       type: 'bulk_books',
       data: booksToDelete,
       originalIndexes
-    }).catch(err => console.error('[handleBulkDeleteBooks] Error starting undoable delete:', err));
+    });
   };
 
-  const handleRetryUpload = async (blobUrl: string, transactionId: string) => {
-    const cleanImg = blobUrl.split('#')[0];
-    const file = imageFilesRef.current[cleanImg];
+  const uploadSingleImageInBackground = async (blobUrl: string, transactionId: string, folderName: string) => {
+    const file = imageFilesRef.current[blobUrl];
     if (!file) {
-      console.warn('[handleRetryUpload] File not found in memory for', cleanImg);
+      console.warn('[BackgroundUpload] No file found in registry for blobUrl:', blobUrl);
       return;
     }
 
@@ -6041,555 +3969,607 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }));
 
     try {
-      const folder = await getUserCloudinaryFolder(session?.user);
-      const processedFile = file.type && file.type.startsWith('image/') ? await compressImage(file) : file;
-      const fileToUpload = processedFile instanceof File ? processedFile : new File([processedFile], file.name || 'image.jpg', { type: file.type });
-      const cloudUrl = await uploadToCloudinary(fileToUpload, folder);
+      // 1. Compress image in background
+      console.log('[BackgroundUpload] Compressing image...', file.name);
+      const isImage = file.type && file.type.startsWith('image/');
+      let processedFile: File;
 
-      if (cloudUrl) {
-        setUploadStatuses(prev => ({
-          ...prev,
-          [blobUrl]: { status: 'success' },
-          [cloudUrl]: { status: 'success' }
-        }));
+      if (isImage) {
+        const compressedBlob = await compressImage(file);
+        processedFile = new File([compressedBlob], file.name || 'compressed.jpg', { type: file.type || 'image/jpeg' });
+      } else {
+        processedFile = file;
+      }
 
-        setBooks(prev => prev.map(b => b.id === activeBookId ? {
+      // 2. Upload to Cloudinary
+      console.log('[BackgroundUpload] Uploading compressed file to Cloudinary...', file.name);
+      const cloudUrl = await uploadToCloudinary(processedFile, folderName);
+      console.log('[BackgroundUpload] Upload completed successfully:', cloudUrl);
+
+      // 3. Save into Supabase 'attachments' table permanently
+      if (supabase && session) {
+        const validatedUrl = await validateAndResolveCloudinaryUrl(cloudUrl, session.user);
+        console.log('[BackgroundUpload] Saving attachment metadata to database...', { transactionId, file_url: validatedUrl });
+        const { error: insertError } = await supabase
+          .from('attachments')
+          .insert([{
+            entry_id: transactionId,
+            user_id: session.user.id,
+            file_url: validatedUrl,
+            file_name: file.name || 'manual_upload',
+            file_type: 'image'
+          }]);
+        if (insertError) throw insertError;
+      }
+
+      // 4. Update local transaction images list: replace local blob URL with permanent Cloudinary URL
+      setBooks(prevBooks => prevBooks.map(b => {
+        if (b.id !== activeBookId) return b;
+        return {
           ...b,
           transactions: b.transactions.map(t => {
-            if (t.id === transactionId && t.images) {
-              return {
-                ...t,
-                images: t.images.map(img => img === blobUrl || img.split('#')[0] === cleanImg ? cloudUrl : img)
-              };
-            }
-            return t;
+            if (t.id !== transactionId) return t;
+            const updatedImages = (t.images || []).map(img => img === blobUrl ? cloudUrl : img);
+            
+            // Also update attachmentCache permanently so that subsequent fetch revalidation gets correct Cloudinary URL
+            const cacheAtt = attachmentCache.get(transactionId);
+            attachmentCache.set(transactionId, {
+              images: cacheAtt ? cacheAtt.images.map(img => img === blobUrl ? cloudUrl : img) : updatedImages,
+              isAi: cacheAtt ? cacheAtt.isAi : false
+            });
+
+            return {
+              ...t,
+              images: updatedImages
+            };
           })
-        } : b));
+        };
+      }));
 
-        const cached = entriesCache.get(activeBookId);
-        if (cached) {
-          entriesCache.set(activeBookId, cached.map(t => {
-            if (t.id === transactionId && t.images) {
-              return {
-                ...t,
-                images: t.images.map((img: string) => img === blobUrl || img.split('#')[0] === cleanImg ? cloudUrl : img)
-              };
-            }
-            return t;
-          }));
-        }
-
-        const resolvedUser = await resolveUserDataForAttachments();
-        await supabase.from('attachments').insert([{
-          entry_id: transactionId,
-          user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
-          user_name: resolvedUser.name,
-          user_email: resolvedUser.email,
-          file_url: cloudUrl
-        }]);
-
-        delete imageFilesRef.current[cleanImg];
-        try { URL.revokeObjectURL(cleanImg); } catch (_) {}
-      }
-    } catch (err: any) {
-      console.error('[handleRetryUpload] Retry failed:', err);
+      // Update status to success
       setUploadStatuses(prev => ({
         ...prev,
-        [blobUrl]: { status: 'failed', error: err?.message || 'Retry failed' }
+        [blobUrl]: { status: 'success' }
+      }));
+
+      // Clean up the URL object reference
+      try {
+        URL.revokeObjectURL(blobUrl);
+      } catch (err) {}
+      delete imageFilesRef.current[blobUrl];
+
+    } catch (err: any) {
+      console.error('[BackgroundUpload] Failed to process background upload:', err);
+      setUploadStatuses(prev => ({
+        ...prev,
+        [blobUrl]: { status: 'failed', error: err.message || 'Upload failed' }
       }));
     }
   };
 
-  const saveTransaction = async () => {
-    saveTransactionRef.current = saveTransaction;
+  const handleRetryUpload = async (blobUrl: string, transactionId: string) => {
+    const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
+    uploadSingleImageInBackground(blobUrl, transactionId, cloudinaryFolder);
+  };
 
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      setIsSubmitting(false);
-      return;
+  const handleAddTransaction = async (e?: React.FormEvent) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!activeBookId || !showForm || !session) return;
+
+    // Rule: Amount and Details are mandatory fields
+    const errors: { amount?: string; description?: string } = {};
+    const amountNum = parseFloat(amount);
+
+    if (!amount || isNaN(amountNum) || amountNum <= 0) {
+      errors.amount = 'Amount is required and must be greater than 0';
     }
 
-    const isAmountEmpty = !amount || !amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0;
-    const isDetailsEmpty = !description || !description.trim();
+    if (!description || description.trim() === '') {
+      errors.description = 'Details are required';
+    }
 
-    if (isAmountEmpty || isDetailsEmpty) {
-      if (isAmountEmpty) setAmountError(true);
-      if (isDetailsEmpty) setDetailsError(true);
-
-      if (isAmountEmpty) {
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      if (errors.amount) {
         amountInputRef.current?.focus();
-      } else if (isDetailsEmpty) {
+      } else if (errors.description) {
         descriptionInputRef.current?.focus();
       }
-      setIsSubmitting(false);
       return;
     }
 
-    if (!activeBookId || !showForm) return;
+    setFormErrors({});
 
     const finalCategory = category === 'Custom' ? customCategory : category;
     const finalMode = mode === 'Custom' ? customMode : mode;
-
-    const amountNum = parseFloat(amount);
     const dateObj = new Date(transactionDate);
 
+    setIsSubmitting(true);
+    setError(null);
+
     const isEdit = !!editingTransaction;
+    const newBlobs = selectedImages.filter(img => img.startsWith('blob:'));
+    const hasAttachments = newBlobs.length > 0;
 
-    // Check if there are any changes for an edit transaction
-    let hasChanges = true;
-    if (isEdit && editingTransaction) {
-      const amountUnchanged = amountNum === editingTransaction.amount;
-      const descUnchanged = description === editingTransaction.description;
-      const catUnchanged = finalCategory === editingTransaction.category;
-      const modeUnchanged = finalMode === editingTransaction.mode;
-      
-      const originalDateFormatted = safeToDateTimeLocal(editingTransaction.date);
-      const newDateFormatted = safeToDateTimeLocal(dateObj);
-      const dateUnchanged = originalDateFormatted === newDateFormatted;
+    // Define real operational steps
+    const initialSteps: ProcessingStep[] = isEdit
+      ? (hasAttachments
+          ? [
+              { id: 'validate', label: 'Validating changes', status: 'active', percent: 15 },
+              { id: 'compress', label: 'Compressing image', status: 'pending', percent: 30 },
+              { id: 'upload', label: 'Uploading to TrackBook Cloud', status: 'pending', percent: 40 },
+              { id: 'save', label: 'Updating transaction', status: 'pending', percent: 95 },
+              { id: 'complete', label: 'Completed', status: 'pending', percent: 100 }
+            ]
+          : [
+              { id: 'validate', label: 'Validating changes', status: 'active', percent: 25 },
+              { id: 'save', label: 'Updating transaction', status: 'pending', percent: 75 },
+              { id: 'refresh', label: 'Refreshing dashboard', status: 'pending', percent: 90 },
+              { id: 'complete', label: 'Completed', status: 'pending', percent: 100 }
+            ])
+      : (hasAttachments
+          ? [
+              { id: 'prepare', label: 'Preparing entry', status: 'active', percent: 15 },
+              { id: 'compress', label: 'Compressing image', status: 'pending', percent: 30 },
+              { id: 'upload', label: 'Uploading to TrackBook Cloud', status: 'pending', percent: 40 },
+              { id: 'save', label: 'Saving transaction', status: 'pending', percent: 95 },
+              { id: 'complete', label: 'Completed', status: 'pending', percent: 100 }
+            ]
+          : [
+              { id: 'prepare', label: 'Preparing entry', status: 'active', percent: 20 },
+              { id: 'save', label: 'Saving transaction', status: 'pending', percent: 75 },
+              { id: 'refresh', label: 'Refreshing dashboard', status: 'pending', percent: 90 },
+              { id: 'complete', label: 'Completed', status: 'pending', percent: 100 }
+            ]);
 
-      const originalImages = editingTransaction.images || [];
-      const imagesUnchanged = selectedImages.length === originalImages.length &&
-        selectedImages.every((img, i) => img === originalImages[i]);
+    // Open Premium Progress Modal immediately
+    setTxProgressModal({
+      isOpen: true,
+      mode: isEdit ? 'edit' : 'create',
+      progress: isEdit ? (hasAttachments ? 15 : 25) : (hasAttachments ? 15 : 20),
+      currentStepMessage: isEdit ? 'Validating changes...' : 'Preparing entry...',
+      steps: initialSteps,
+      status: 'processing',
+      errorMessage: null,
+      retryAction: () => handleAddTransaction()
+    });
 
-      const layoutUnchanged = imageLayout === (editingTransaction.imageLayout || 'split');
-      const typeUnchanged = showForm === editingTransaction.type;
+    try {
+      const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
 
-      if (amountUnchanged && descUnchanged && catUnchanged && modeUnchanged && dateUnchanged && imagesUnchanged && layoutUnchanged && typeUnchanged) {
-        hasChanges = false;
-      }
-    }
+      if (isEdit && editingTransaction) {
+        console.log('[handleAddTransaction] Premium Edit Mode for ID:', editingTransaction.id);
+        const editId = editingTransaction.id;
 
-    if (isEdit && !hasChanges) {
-      // No changes made, close immediately
-      setShowForm(null);
-      setEditingTransaction(null);
-      resetForm();
-      setIsSubmitting(false);
-      return;
-    }
-
-    const resolvedName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User';
-
-    if (isEdit && editingTransaction) {
-      const originalTx = editingTransaction;
-      const savedId = originalTx.id;
-      const currentSelectedImages = [...selectedImages];
-      const currentImageLayout = imageLayout;
-      const currentCategory = finalCategory || 'General';
-      const currentMode = finalMode || 'Cash';
-      const currentDescription = description;
-      const currentShowForm = showForm;
-      const finalType = (currentShowForm ? String(currentShowForm).toLowerCase() : 'in') === 'out' ? 'out' : 'in';
-
-      setIsSubmitting(true);
-
-      try {
-        const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
-        let finalImages = currentSelectedImages;
-        const uploadPromises = currentSelectedImages.map(async (img) => {
-          const hashIdx = img.indexOf('#');
-          const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
-          const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
-
-          if (cleanImg.startsWith('blob:')) {
-            const file = imageFilesRef.current[cleanImg];
-            if (file) {
-              const isImage = file.type && file.type.startsWith('image/');
-              const processedFile = isImage ? await compressImage(file) : file;
-              const fileToUpload = processedFile instanceof File 
-                ? processedFile 
-                : new File([processedFile], file.name || 'image.jpg', { type: file.type });
-              const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
-              if (cloudUrl) {
-                return cloudUrl + hash;
-              }
-            }
-            return img;
-          }
-          return img;
-        });
-
-        finalImages = await Promise.all(uploadPromises);
-
-        currentSelectedImages.forEach(img => {
-          const cleanImg = img.split('#')[0];
-          if (cleanImg.startsWith('blob:')) {
-            delete imageFilesRef.current[cleanImg];
-            try { URL.revokeObjectURL(cleanImg); } catch (_) {}
-          }
-        });
-
-        const resolvedUser = await resolveUserDataForAttachments();
-        const payload: any = {
-          id: savedId,
-          cashbook_id: activeBookId,
-          user_id: session.user.id,
-          amount: amountNum,
-          type: finalType,
-          description: currentDescription || '',
-          category: currentCategory,
-          mode: currentMode,
-          date: safeToISOString(dateObj),
-          user_name: resolvedUser.name,
-          image_layout: currentImageLayout
-        };
-
-        const attachmentInserts = finalImages.map(url => ({
-          entry_id: savedId,
-          user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
-          user_name: resolvedUser.name,
-          user_email: resolvedUser.email,
-          file_url: url
+        // Step 1: Validate changes completed
+        setTxProgressModal(prev => ({
+          ...prev,
+          progress: hasAttachments ? 30 : 50,
+          currentStepMessage: hasAttachments ? 'Compressing image...' : 'Updating transaction in database...',
+          steps: prev.steps.map(s => {
+            if (s.id === 'validate') return { ...s, status: 'completed' };
+            if (hasAttachments && s.id === 'compress') return { ...s, status: 'active' };
+            if (!hasAttachments && s.id === 'save') return { ...s, status: 'active' };
+            return s;
+          })
         }));
 
-        // 1. Authoritative Backend Service Role Persistence (prevents client RLS 42501 errors on Postgres)
-        let updateSucceeded = false;
-        try {
-          const rbacRes = await fetch('/api/rbac?action=save-entry', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              entry: payload,
-              isUpdate: true,
-              attachments: finalImages,
-              userId: session.user.id,
-              userEmail: session.user.email
-            })
-          });
-          if (rbacRes.ok) {
-            const rbacJson = await rbacRes.json();
-            if (rbacJson?.success) {
-              updateSucceeded = true;
+        let uploadedUrls: { blobUrl: string; cloudUrl: string }[] = [];
+
+        if (hasAttachments) {
+          // Step 2: Compress new images
+          const compressedFiles: { blobUrl: string; file: File; name: string }[] = [];
+          for (let i = 0; i < newBlobs.length; i++) {
+            const blobUrl = newBlobs[i];
+            const file = imageFilesRef.current[blobUrl];
+            if (file) {
+              const isImage = file.type && file.type.startsWith('image/');
+              let processedFile: File;
+              if (isImage) {
+                const compressedBlob = await compressImage(file);
+                processedFile = new File([compressedBlob], file.name || `attachment_${i}.jpg`, { type: file.type || 'image/jpeg' });
+              } else {
+                processedFile = file;
+              }
+              compressedFiles.push({ blobUrl, file: processedFile, name: file.name || 'attachment' });
             }
           }
-        } catch (rbacErr) {
-          console.warn('[saveTransaction] Primary RBAC update warning:', rbacErr);
-        }
 
-        // 2. Direct Supabase update fallback only if proxy failed
-        if (!updateSucceeded && supabase) {
-          try {
-            const { error: updateErr } = await supabase
-              .from('entries')
-              .update(payload)
-              .eq('id', savedId);
+          // Step 3: Real Upload with XHR onprogress
+          setTxProgressModal(prev => ({
+            ...prev,
+            progress: 40,
+            currentStepMessage: 'Uploading to TrackBook Cloud...',
+            steps: prev.steps.map(s => {
+              if (s.id === 'compress') return { ...s, status: 'completed' };
+              if (s.id === 'upload') return { ...s, status: 'active' };
+              return s;
+            })
+          }));
 
-            if (!updateErr) {
-              updateSucceeded = true;
-            } else if (updateErr.code === '42703' || updateErr.code === 'PGRST204' || updateErr.message?.toLowerCase().includes('column')) {
-              const fallbackPayload = { ...payload };
-              delete fallbackPayload.image_layout;
-              delete fallbackPayload.user_name;
-              const { error: fbErr } = await supabase.from('entries').update(fallbackPayload).eq('id', savedId);
-              if (!fbErr) updateSucceeded = true;
+          const blobPcts: Record<string, number> = {};
+          for (let i = 0; i < compressedFiles.length; i++) {
+            const item = compressedFiles[i];
+            blobPcts[item.blobUrl] = 0;
+
+            const cloudUrl = await uploadToCloudinary(item.file, cloudinaryFolder, (uploadPct) => {
+              blobPcts[item.blobUrl] = uploadPct;
+              const totalPct = Object.values(blobPcts).reduce((a, b) => a + b, 0);
+              const overallPct = Math.round(totalPct / compressedFiles.length);
+              // Map real upload percentage from 40% to 90%
+              const mapped = Math.round(40 + (overallPct * 0.5));
+              setTxProgressModal(p => ({
+                ...p,
+                progress: Math.min(90, Math.max(40, mapped)),
+                currentStepMessage: `Uploading attachment... (${overallPct}%)`
+              }));
+            });
+
+            uploadedUrls.push({ blobUrl: item.blobUrl, cloudUrl });
+
+            // Save attachment to Supabase
+            if (supabase && session) {
+              await supabase.from('attachments').insert([{
+                entry_id: editId,
+                user_id: session.user.id,
+                file_url: cloudUrl,
+                file_name: item.name,
+                file_type: 'image'
+              }]);
             }
-          } catch (_) {}
+          }
+
+          setTxProgressModal(prev => ({
+            ...prev,
+            progress: 90,
+            currentStepMessage: 'Updating transaction...',
+            steps: prev.steps.map(s => {
+              if (s.id === 'upload') return { ...s, status: 'completed' };
+              if (s.id === 'save') return { ...s, status: 'active' };
+              return s;
+            })
+          }));
         }
 
-        if (!updateSucceeded) {
-          setIsSubmitting(false);
-          setError("Failed to update entry in the database. Please check your internet connection and try again.");
-          return;
-        }
+        // Map final images
+        const finalImages = selectedImages.map(img => {
+          const found = uploadedUrls.find(u => u.blobUrl === img);
+          return found ? found.cloudUrl : img;
+        });
 
-        const updatedTx: Transaction = {
-          ...originalTx,
+        const updatedTransaction: Transaction = {
+          ...editingTransaction,
           amount: amountNum,
-          type: finalType,
-          description: currentDescription || '',
-          category: currentCategory,
-          mode: currentMode,
+          type: showForm,
+          description: description,
+          category: finalCategory || 'General',
+          mode: finalMode,
           date: dateObj,
           images: finalImages,
-          imageLayout: currentImageLayout
+          imageLayout: imageLayout
         };
 
-        setBooks(prev => prev.map(b => b.id === activeBookId ? {
-          ...b,
-          transactions: b.transactions.map(t => t.id === originalTx.id ? updatedTx : t)
-        } : b));
+        // Step 4: Update Supabase entries table
+        if (supabase) {
+          const payload: any = {
+            amount: amountNum,
+            type: showForm,
+            description: description,
+            category: finalCategory || 'General',
+            mode: finalMode,
+            date: safeToISOString(dateObj)
+          };
 
-        const prevCached = entriesCache.get(activeBookId) || [];
-        entriesCache.set(activeBookId, prevCached.map(t => t.id === originalTx.id ? updatedTx : t));
-        attachmentCache.set(savedId, { images: finalImages, isAi: false });
+          const { error: entryError } = await supabase
+            .from('entries')
+            .update({ ...payload, image_layout: imageLayout })
+            .eq('id', editId);
 
+          if (entryError) {
+            if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist')) {
+              await supabase.from('entries').update(payload).eq('id', editId);
+            } else {
+              throw entryError;
+            }
+          }
+
+          // Clean up removed attachments
+          const keptImages = finalImages.filter(img => !img.startsWith('blob:') && !img.startsWith('data:'));
+          let deleteQuery = supabase.from('attachments').delete().eq('entry_id', editId);
+          if (keptImages.length > 0) {
+            deleteQuery = deleteQuery.not('file_url', 'in', `(${keptImages.map(x => `"${x}"`).join(',')})`);
+          }
+          await deleteQuery;
+        }
+
+        // Update local caches
+        attachmentCache.set(editId, { images: finalImages, isAi: false });
+        const currCached = entriesCache.get(activeBookId);
+        if (currCached) {
+          entriesCache.set(activeBookId, currCached.map(t => t.id === editId ? {
+            ...t,
+            amount: amountNum,
+            type: showForm,
+            description: description,
+            category: finalCategory || 'General',
+            mode: finalMode,
+            date: dateObj,
+            image_layout: imageLayout
+          } : t));
+        }
+
+        setBooks(prevBooks => prevBooks.map(b =>
+          b.id === activeBookId
+            ? {
+                ...b,
+                transactions: b.transactions.map(t => t.id === editId ? updatedTransaction : t)
+              }
+            : b
+        ));
+
+        // Step 5: Completed 100%
+        setTxProgressModal(prev => ({
+          ...prev,
+          progress: 100,
+          currentStepMessage: 'Entry updated successfully!',
+          status: 'success',
+          steps: prev.steps.map(s => ({ ...s, status: 'completed' }))
+        }));
+
+        // Display success confirmation for 700ms then close automatically
+        await new Promise(r => setTimeout(r, 700));
+
+        setTxProgressModal(prev => ({ ...prev, isOpen: false }));
         setShowForm(null);
         setEditingTransaction(null);
         resetForm();
         setIsSubmitting(false);
 
+        // Highlight newly edited transaction
         setTimeout(() => {
-          setJustEditedTransactionId(savedId);
-          const element = document.getElementById(`entry-${savedId}`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
+          setJustEditedTransactionId(editId);
+          document.getElementById(`entry-${editId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
           setTimeout(() => {
             setJustEditedTransactionId(null);
-          }, 2000);
-        }, 50);
+          }, 2500);
+        }, 150);
 
-      } catch (err: any) {
-        console.error('[EditEntry] Save error:', err);
-        setIsSubmitting(false);
-        setError('Failed to save changes to the database. Please try again.');
-      }
+      } else {
+        // CREATE NEW ENTRY
+        console.log('[handleAddTransaction] Premium Create Mode...');
+        const tempId = safeUUID();
 
-    } else {
-      // Direct Creation Mode - PERMANENT SUPABASE PERSISTENCE
-      const currentSelectedImages = [...selectedImages];
-      const currentImageLayout = imageLayout;
-      const currentCategory = finalCategory || 'General';
-      const currentMode = finalMode || 'Cash';
-      const currentDescription = description;
-      const currentShowForm = showForm;
-      const finalType = (currentShowForm ? String(currentShowForm).toLowerCase() : 'in') === 'out' ? 'out' : 'in';
-      const tempId = safeUUID();
+        // Step 1: Preparing entry
+        setTxProgressModal(prev => ({
+          ...prev,
+          progress: hasAttachments ? 30 : 40,
+          currentStepMessage: hasAttachments ? 'Compressing image...' : 'Saving transaction...',
+          steps: prev.steps.map(s => {
+            if (s.id === 'prepare') return { ...s, status: 'completed' };
+            if (hasAttachments && s.id === 'compress') return { ...s, status: 'active' };
+            if (!hasAttachments && s.id === 'save') return { ...s, status: 'active' };
+            return s;
+          })
+        }));
 
-      setIsSubmitting(true);
+        let uploadedUrls: { blobUrl: string; cloudUrl: string; fileName: string }[] = [];
 
-      try {
-        const resolvedUser = await resolveUserDataForAttachments();
-        let finalImages = currentSelectedImages;
-
-        // 1. Upload any attached images/PDF to Cloudinary first
-        if (currentSelectedImages.length > 0) {
-          const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
-          const uploadPromises = currentSelectedImages.map(async (img) => {
-            const hashIdx = img.indexOf('#');
-            const hash = hashIdx !== -1 ? img.substring(hashIdx) : '';
-            const cleanImg = hashIdx !== -1 ? img.substring(0, hashIdx) : img;
-
-            if (cleanImg.startsWith('blob:')) {
-              const file = imageFilesRef.current[cleanImg];
-              if (file) {
-                const isImage = file.type && file.type.startsWith('image/');
-                const processedFile = isImage ? await compressImage(file) : file;
-                const fileToUpload = processedFile instanceof File 
-                  ? processedFile 
-                  : new File([processedFile], file.name || 'image.jpg', { type: file.type });
-                const cloudUrl = await uploadToCloudinary(fileToUpload, cloudinaryFolder);
-                if (cloudUrl) {
-                  return cloudUrl + hash;
-                }
+        if (hasAttachments) {
+          // Step 2: Compress images
+          const compressedFiles: { blobUrl: string; file: File; name: string }[] = [];
+          for (let i = 0; i < newBlobs.length; i++) {
+            const blobUrl = newBlobs[i];
+            const file = imageFilesRef.current[blobUrl];
+            if (file) {
+              const isImage = file.type && file.type.startsWith('image/');
+              let processedFile: File;
+              if (isImage) {
+                const compressedBlob = await compressImage(file);
+                processedFile = new File([compressedBlob], file.name || `receipt_${i}.jpg`, { type: file.type || 'image/jpeg' });
+              } else {
+                processedFile = file;
               }
-              return img;
+              compressedFiles.push({ blobUrl, file: processedFile, name: file.name || 'receipt' });
             }
-            return img;
-          });
+          }
 
-          finalImages = await Promise.all(uploadPromises);
-
-          currentSelectedImages.forEach(img => {
-            const cleanImg = img.split('#')[0];
-            if (cleanImg.startsWith('blob:')) {
-              delete imageFilesRef.current[cleanImg];
-              try { URL.revokeObjectURL(cleanImg); } catch (_) {}
-            }
-          });
-        }
-
-        const payload: any = {
-          id: tempId,
-          cashbook_id: activeBookId,
-          user_id: session.user.id,
-          user_name: resolvedUser.name || resolvedName,
-          amount: amountNum,
-          type: finalType,
-          description: currentDescription || '',
-          category: currentCategory,
-          mode: currentMode,
-          date: safeToISOString(dateObj),
-          image_layout: currentImageLayout,
-          created_at: new Date().toISOString()
-        };
-
-        let insertSucceeded = false;
-        let insertedRow: any = null;
-
-        // 1. Authoritative Backend Service Role Persistence (bypasses RLS safely and saves entry + attachments atomically)
-        try {
-          const rbacRes = await fetch('/api/rbac?action=save-entry', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              entry: payload,
-              attachments: finalImages,
-              userId: session.user.id,
-              userEmail: session.user.email
+          // Step 3: Real Upload with XHR onprogress
+          setTxProgressModal(prev => ({
+            ...prev,
+            progress: 40,
+            currentStepMessage: 'Uploading to TrackBook Cloud...',
+            steps: prev.steps.map(s => {
+              if (s.id === 'compress') return { ...s, status: 'completed' };
+              if (s.id === 'upload') return { ...s, status: 'active' };
+              return s;
             })
-          });
-          if (rbacRes.ok) {
-            const rbacJson = await rbacRes.json();
-            if (rbacJson?.success) {
-              insertSucceeded = true;
-              insertedRow = rbacJson.entry || payload;
-            }
+          }));
+
+          const blobPcts: Record<string, number> = {};
+          for (let i = 0; i < compressedFiles.length; i++) {
+            const item = compressedFiles[i];
+            blobPcts[item.blobUrl] = 0;
+
+            const cloudUrl = await uploadToCloudinary(item.file, cloudinaryFolder, (uploadPct) => {
+              blobPcts[item.blobUrl] = uploadPct;
+              const totalPct = Object.values(blobPcts).reduce((a, b) => a + b, 0);
+              const overallPct = Math.round(totalPct / compressedFiles.length);
+              // Map real upload percentage from 40% to 90%
+              const mapped = Math.round(40 + (overallPct * 0.5));
+              setTxProgressModal(p => ({
+                ...p,
+                progress: Math.min(90, Math.max(40, mapped)),
+                currentStepMessage: `Uploading attachment... (${overallPct}%)`
+              }));
+            });
+
+            uploadedUrls.push({ blobUrl: item.blobUrl, cloudUrl, fileName: item.name });
           }
-        } catch (proxyErr) {
-          console.warn('[saveTransaction] Primary RBAC insert warning:', proxyErr);
+
+          setTxProgressModal(prev => ({
+            ...prev,
+            progress: 92,
+            currentStepMessage: 'Saving transaction...',
+            steps: prev.steps.map(s => {
+              if (s.id === 'upload') return { ...s, status: 'completed' };
+              if (s.id === 'save') return { ...s, status: 'active' };
+              return s;
+            })
+          }));
         }
 
-        // 2. Direct Supabase fallback only if backend proxy endpoint failed
-        if (!insertSucceeded && supabase) {
-          try {
-            const { data: insData, error: insertErr } = await supabase
-              .from('entries')
-              .insert([payload])
-              .select()
-              .single();
+        // Map final images with permanent Cloudinary URLs
+        const finalImages = selectedImages.map(img => {
+          const found = uploadedUrls.find(u => u.blobUrl === img);
+          return found ? found.cloudUrl : img;
+        });
 
-            if (!insertErr && insData) {
-              insertSucceeded = true;
-              insertedRow = insData;
-            } else if (insertErr && (insertErr.code === '42703' || insertErr.code === 'PGRST204' || insertErr.message?.toLowerCase().includes('column'))) {
-              const fallbackPayload = { ...payload };
-              delete fallbackPayload.image_layout;
-              delete fallbackPayload.user_name;
-              const { data: fbData, error: fbErr } = await supabase
-                .from('entries')
-                .insert([fallbackPayload])
-                .select()
-                .single();
+        // Step 4: Save transaction to Supabase
+        if (supabase) {
+          const effectiveUserName = userName || session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || null;
+          const payload: any = {
+            id: tempId,
+            cashbook_id: activeBookId,
+            user_id: session.user.id,
+            user_name: effectiveUserName,
+            amount: amountNum,
+            type: showForm,
+            description: description,
+            category: finalCategory || 'General',
+            mode: finalMode,
+            date: safeToISOString(dateObj),
+            source: 'Manual'
+          };
 
-              if (!fbErr && fbData) {
-                insertSucceeded = true;
-                insertedRow = fbData;
+          let entryError: any = null;
+          const firstTry = await supabase.from('entries').insert([{ ...payload, image_layout: imageLayout }]);
+          entryError = firstTry.error;
+
+          if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+            const secondTry = await supabase.from('entries').insert([payload]);
+            entryError = secondTry.error;
+
+            if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+              const payloadNoSource = { ...payload };
+              delete payloadNoSource.source;
+              const thirdTry = await supabase.from('entries').insert([{ ...payloadNoSource, image_layout: imageLayout }]);
+              entryError = thirdTry.error;
+
+              if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
+                const fourthTry = await supabase.from('entries').insert([payloadNoSource]);
+                entryError = fourthTry.error;
               }
             }
-          } catch (err: any) {
-            console.error('[saveTransaction] Direct insert fallback error:', err);
+          }
+
+          if (entryError) throw entryError;
+
+          // Save attachments into attachments table
+          if (uploadedUrls.length > 0) {
+            const attachmentInserts = uploadedUrls.map(item => ({
+              entry_id: tempId,
+              user_id: session.user.id,
+              file_url: item.cloudUrl,
+              file_name: item.fileName,
+              file_type: 'image'
+            }));
+            await supabase.from('attachments').insert(attachmentInserts);
           }
         }
 
-        if (!insertSucceeded) {
-          setIsSubmitting(false);
-          setError("Failed to save entry to the database. Please check your internet connection and try again.");
-          return;
-        }
-
-        // 3. Fallback client-side attachment insert only if direct Supabase path was used
-        if (finalImages.length > 0 && supabase && !insertedRow?.attachments_saved) {
-          const attachmentInserts = finalImages.map(url => ({
-            entry_id: insertedRow?.id || tempId,
-            user_id: session?.user?.id || '00000000-0000-0000-0000-000000000000',
-            user_name: resolvedUser.name,
-            user_email: resolvedUser.email,
-            file_url: url
-          }));
-          try {
-            await supabase.from('attachments').insert(attachmentInserts);
-          } catch (_) {}
-        }
-
-        // 4. ONLY AFTER CONFIRMED DATABASE INSERT: Update UI state
-        const confirmedId = insertedRow?.id || tempId;
-        const finalTx: Transaction = {
-          id: confirmedId,
-          clientEntryId: confirmedId,
+        // Update local state and caches
+        const newTransaction: Transaction = {
+          id: tempId,
           amount: amountNum,
-          type: finalType,
-          description: currentDescription || '',
-          category: currentCategory,
-          mode: currentMode,
+          type: showForm,
+          description: description,
+          category: finalCategory || 'General',
+          mode: finalMode,
           date: dateObj,
           images: finalImages,
-          imageLayout: currentImageLayout,
-          syncStatus: 'SYNCED',
-          is_offline: false,
-          created_at: insertedRow?.created_at || payload.created_at,
-          user_name: resolvedUser.name || resolvedName
+          imageLayout: imageLayout,
+          source: 'Manual'
         };
 
-        setBooks(prev => prev.map(b => b.id === activeBookId ? {
-          ...b,
-          transactions: [finalTx, ...(b.transactions || []).filter(t => t.id !== finalTx.id)]
-        } : b));
+        attachmentCache.set(tempId, { images: finalImages, isAi: false });
 
-        const cached = entriesCache.get(activeBookId) || [];
-        entriesCache.set(activeBookId, [finalTx, ...cached.filter(t => t.id !== finalTx.id)]);
-        attachmentCache.set(finalTx.id, { images: finalImages, isAi: false });
+        const currCached = entriesCache.get(activeBookId) || [];
+        entriesCache.set(activeBookId, [{
+          id: tempId,
+          amount: amountNum,
+          type: showForm,
+          description: description,
+          category: finalCategory || 'General',
+          mode: finalMode,
+          date: dateObj,
+          image_layout: imageLayout,
+          user_id: session.user.id,
+          cashbook_id: activeBookId,
+          source: 'Manual'
+        }, ...currCached]);
+
+        setBooks(prevBooks => prevBooks.map(b =>
+          b.id === activeBookId
+            ? { ...b, transactions: [newTransaction, ...b.transactions] }
+            : b
+        ));
+
+        // Step 5: Completed 100%
+        setTxProgressModal(prev => ({
+          ...prev,
+          progress: 100,
+          currentStepMessage: 'Entry saved successfully!',
+          status: 'success',
+          steps: prev.steps.map(s => ({ ...s, status: 'completed' }))
+        }));
+
+        // Display success confirmation for 700ms then close automatically
+        await new Promise(r => setTimeout(r, 700));
+
+        setTxProgressModal(prev => ({ ...prev, isOpen: false }));
 
         if (submitAndAddNew) {
-          setAmount('');
-          setDescription('');
-          setSelectedImages([]);
-          setImageLayout('split');
+          resetFormFields(true);
+          setQuickAddSuccess(true);
+          setTimeout(() => setQuickAddSuccess(false), 1500);
           setIsSubmitting(false);
+          setTimeout(() => {
+            amountInputRef.current?.focus();
+          }, 80);
         } else {
           setShowForm(null);
           resetForm();
           setIsSubmitting(false);
-          setProgressModal(null);
         }
 
+        // Highlight newly created entry
         setTimeout(() => {
-          setJustEditedTransactionId(finalTx.id);
-          const element = document.getElementById(`entry-${finalTx.id}`);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
+          setJustEditedTransactionId(tempId);
+          document.getElementById(`entry-${tempId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
           setTimeout(() => {
             setJustEditedTransactionId(null);
-          }, 2000);
-        }, 50);
-
-      } catch (dbErr: any) {
-        console.error('[saveTransaction] Database insert error:', dbErr);
-        setIsSubmitting(false);
-        setError("Failed to save entry. Please check your connection and try again.");
+          }, 2500);
+        }, 150);
       }
+    } catch (error: any) {
+      console.error('[handleAddTransaction] Error in transaction flow:', error);
+      setIsSubmitting(false);
+      setTxProgressModal(prev => ({
+        ...prev,
+        status: 'error',
+        errorMessage: error.message || "Couldn't save your entry. Please try again.",
+        steps: prev.steps.map(s => s.status === 'active' ? { ...s, status: 'failed' } : s)
+      }));
     }
   };
 
-  const handleAddTransaction = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      return;
-    }
-    if (isSubmitting) return;
-
-    const isAmountEmpty = !amount || !amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0;
-    const isDetailsEmpty = !description || !description.trim();
-
-    if (isAmountEmpty || isDetailsEmpty) {
-      if (isAmountEmpty) setAmountError(true);
-      if (isDetailsEmpty) setDetailsError(true);
-
-      if (isAmountEmpty) {
-        amountInputRef.current?.focus();
-      } else if (isDetailsEmpty) {
-        descriptionInputRef.current?.focus();
-      }
-      return;
-    }
-
-    if (!activeBookId || !showForm || !session) return;
-
-    setError(null);
-    saveTransaction();
-  };
-
-  const handleDeleteTransaction = useCallback((id: string) => {
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      return;
-    }
+  const handleDeleteTransaction = (id: string) => {
     vibrate(50);
     setTransactionToDelete(id);
     setDeleteConfirmed(false);
-  }, [isOffline]);
+  };
 
   const confirmDeleteTransaction = async () => {
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      return;
-    }
     if (!activeBookId || !transactionToDelete || !session) return;
 
     const idToDelete = transactionToDelete;
@@ -6599,45 +4579,50 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     const transactionObj = activeBook?.transactions.find(t => t.id === idToDelete);
     const originalIndex = activeBook?.transactions.findIndex(t => t.id === idToDelete);
 
-    // 1. Close confirmation modal immediately to keep UI responsive
+    if (transactionObj) {
+      await handleStartUndoableDelete({
+        type: 'transaction',
+        data: transactionObj,
+        originalIndex,
+        parentBookId: activeBookId
+      });
+    }
+
+    // Close the confirmation modal to keep UI responsive
     setTransactionToDelete(null);
 
-    // 2. Synchronously update local UI state: entry disappears immediately and totals recalculate immediately
-    setBooks(prev => prev.map(b => 
-      b.id === activeBookId 
-        ? { ...b, transactions: b.transactions.filter(t => t.id !== idToDelete) }
-        : b
-    ));
+    // Trigger delete animation
+    setAnimatingDeleteId(idToDelete);
 
+    // Wait for the animation (300ms)
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Synchronize entries cache for the active book
     const currCached = entriesCache.get(activeBookId);
     if (currCached) {
       entriesCache.set(activeBookId, currCached.filter(t => t.id !== idToDelete));
     }
 
+    setBooks(books.map(b => 
+      b.id === activeBookId 
+        ? { ...b, transactions: b.transactions.filter(t => t.id !== idToDelete) }
+        : b
+    ));
     setSelectedTransactions(prev => {
       const next = new Set(prev);
       next.delete(idToDelete);
       return next;
     });
-
-    // 3. Register undoable delete in background
-    if (transactionObj) {
-      handleStartUndoableDelete({
-        type: 'transaction',
-        data: transactionObj,
-        originalIndex,
-        parentBookId: activeBookId
-      }).catch(err => console.error('[confirmDeleteTransaction] Undoable delete registration notice:', err));
-    }
+    setAnimatingDeleteId(null);
   };
 
   const handleBulkDelete = async () => {
     if (!activeBookId || selectedTransactions.size === 0 || !session) return;
 
+    // Get transactions list to back up before deleting from local state
     const activeBook = books.find(b => b.id === activeBookId);
     if (!activeBook) return;
 
-    const idsSet = new Set(selectedTransactions);
     const txsToDelete = Array.from(selectedTransactions).map(id => {
       return activeBook.transactions.find(t => t.id === id);
     }).filter(t => t !== undefined);
@@ -6646,264 +4631,60 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       return activeBook.transactions.findIndex(t => t.id === id);
     });
 
-    // 1. Close modal and reset selection immediately
-    setSelectedTransactions(new Set());
-    setShowBulkTransactionDeleteConfirm(false);
+    await handleStartUndoableDelete({
+      type: 'bulk_transactions',
+      data: txsToDelete,
+      originalIndexes,
+      parentBookId: activeBookId
+    });
 
-    // 2. Synchronously update UI state: entries disappear immediately and totals recalculate immediately
-    setBooks(prev => prev.map(b => 
-      b.id === activeBookId 
-        ? { ...b, transactions: b.transactions.filter(t => !idsSet.has(t.id)) }
-        : b
-    ));
-
+    // Local filter and state updates
+    const idsSet = new Set(selectedTransactions);
     const currCached = entriesCache.get(activeBookId);
     if (currCached) {
       entriesCache.set(activeBookId, currCached.filter(t => !idsSet.has(t.id)));
     }
 
-    // 3. Register undoable delete in background
-    handleStartUndoableDelete({
-      type: 'bulk_transactions',
-      data: txsToDelete,
-      originalIndexes,
-      parentBookId: activeBookId
-    }).catch(err => console.error('[handleBulkDelete] Undoable delete registration notice:', err));
+    setBooks(books.map(b => 
+      b.id === activeBookId 
+        ? { ...b, transactions: b.transactions.filter(t => !idsSet.has(t.id)) }
+        : b
+    ));
+
+    setSelectedTransactions(new Set());
+    setShowBulkTransactionDeleteConfirm(false);
   };
 
-  const openMergeDialog = () => {
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      return;
-    }
-    if (!activeBookId) return;
-    const activeBook = books.find(b => b.id === activeBookId);
-    if (!activeBook) return;
-
-    const selectedTxs = activeBook.transactions.filter(t => selectedTransactions.has(t.id));
-    if (selectedTxs.length < 2) return;
-
-    const totalAmt = selectedTxs.reduce((sum, t) => sum + t.amount, 0);
-    const desc = `Merged: ${selectedTxs.map(t => t.description).join(', ')}`;
-    const truncatedDesc = desc.length > 85 ? desc.substring(0, 82) + '...' : desc;
-
-    setMergeDescription(truncatedDesc);
-    setMergeCategory(selectedTxs[0]?.category || 'General');
-    setMergeType(selectedTxs[0]?.type || 'out');
-    setShowMergeConfirmDialog(true);
-  };
-
-  const handleMergeTransactions = async () => {
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      return;
-    }
-    if (!activeBookId || selectedTransactions.size < 2 || !session) return;
-    setIsMerging(true);
-    setError(null);
-
-    try {
-      const activeBook = books.find(b => b.id === activeBookId);
-      if (!activeBook) throw new Error('Cashbook not found');
-
-      const selectedTxs = activeBook.transactions.filter(t => selectedTransactions.has(t.id));
-      const totalAmount = selectedTxs.reduce((sum, t) => sum + t.amount, 0);
-      const newId = safeUUID();
-
-      const resolvedUser = await resolveUserDataForAttachments();
-      const payload: any = {
-        id: newId,
-        cashbook_id: activeBookId,
-        user_id: session.user.id,
-        user_name: resolvedUser.name,
-        amount: totalAmount,
-        type: (mergeType ? String(mergeType).toLowerCase() : 'out') === 'in' ? 'in' : 'out',
-        description: mergeDescription || 'Merged Transactions',
-        category: mergeCategory,
-        mode: 'Online',
-        date: safeToISOString(new Date()),
-        image_layout: 'merge'
-      };
-
-      let insertError: any = null;
-      const { error: firstInsertError } = await supabase.from('entries').insert([payload]);
-      insertError = firstInsertError;
-
-      if (insertError) {
-        if (insertError.code === '42703' || insertError.code === 'PGRST204' || insertError.message?.toLowerCase().includes('column')) {
-          const fallbackPayload = { ...payload };
-          delete fallbackPayload.image_layout;
-          const { error: retryError } = await supabase.from('entries').insert([fallbackPayload]);
-          insertError = retryError;
-
-          if (insertError && (insertError.code === '42703' || insertError.code === 'PGRST204' || insertError.message?.toLowerCase().includes('column'))) {
-            const fallbackNoUser = { ...fallbackPayload };
-            delete fallbackNoUser.user_name;
-            const { error: retryError2 } = await supabase.from('entries').insert([fallbackNoUser]);
-            insertError = retryError2;
-          }
-        }
-      }
-
-      if (insertError) throw insertError;
-
-      const selectedIds = Array.from(selectedTransactions);
-      const { data: oldAtts } = await supabase.from('attachments').select('*').in('entry_id', selectedIds);
-      const { data: oldAiAtts } = await supabase.from('ai_attachments').select('*').in('entry_id', selectedIds);
-
-      if (oldAtts && oldAtts.length > 0) {
-        const resolvedUser = await resolveUserDataForAttachments();
-        const newAtts = oldAtts.map(att => ({
-          entry_id: newId,
-          user_id: session.user.id,
-          user_name: resolvedUser.name,
-          user_email: resolvedUser.email,
-          file_url: att.file_url,
-          file_name: att.file_name || 'merged_attachment',
-          file_type: att.file_type || 'image'
-        }));
-        const { error: attachErr } = await supabase.from('attachments').insert(newAtts);
-        if (attachErr) {
-          if (attachErr.code === '42703' || attachErr.message?.toLowerCase().includes('column')) {
-            const fallbackAtts = oldAtts.map(att => ({
-              entry_id: newId,
-              user_id: session.user.id,
-              user_name: resolvedUser.name,
-              user_email: resolvedUser.email,
-              file_url: att.file_url
-            }));
-            const { error: retryAttachErr } = await supabase.from('attachments').insert(fallbackAtts);
-            if (retryAttachErr) throw retryAttachErr;
-          } else {
-            throw attachErr;
-          }
-        }
-      }
-
-      if (oldAiAtts && oldAiAtts.length > 0) {
-        const resolvedUser = await resolveUserDataForAttachments();
-        const newAiAtts = oldAiAtts.map(att => ({
-          entry_id: newId,
-          user_id: session.user.id,
-          user_name: resolvedUser.name,
-          user_email: resolvedUser.email,
-          file_url: att.file_url,
-          file_name: att.file_name || 'merged_ai_attachment',
-          file_type: att.file_type || 'image'
-        }));
-        const { error: aiAttachErr } = await supabase.from('ai_attachments').insert(newAiAtts);
-        if (aiAttachErr) {
-          if (aiAttachErr.code === '42703' || aiAttachErr.message?.toLowerCase().includes('column')) {
-            const fallbackAiAtts = oldAiAtts.map(att => ({
-              entry_id: newId,
-              user_id: session.user.id,
-              user_name: resolvedUser.name,
-              user_email: resolvedUser.email,
-              file_url: att.file_url
-            }));
-            const { error: retryAiAttachErr } = await supabase.from('ai_attachments').insert(fallbackAiAtts);
-            if (retryAiAttachErr) throw retryAiAttachErr;
-          } else {
-            throw aiAttachErr;
-          }
-        }
-      }
-
-      // Delete old attachments first to prevent foreign key constraint violations
-      if (oldAtts && oldAtts.length > 0) {
-        const { error: delAttErr } = await supabase.from('attachments').delete().in('entry_id', selectedIds);
-        if (delAttErr) console.warn('[Merge] Warning deleting old attachments before parent entries:', delAttErr);
-      }
-      if (oldAiAtts && oldAiAtts.length > 0) {
-        const { error: delAiAttErr } = await supabase.from('ai_attachments').delete().in('entry_id', selectedIds);
-        if (delAiAttErr) console.warn('[Merge] Warning deleting old AI attachments before parent entries:', delAiAttErr);
-      }
-
-      // Now we can safely delete parent entries
-      const { error: deleteError } = await supabase.from('entries').delete().in('id', selectedIds);
-      if (deleteError) throw deleteError;
-
-      const mergedTx: Transaction = {
-        id: newId,
-        amount: totalAmount,
-        type: mergeType,
-        description: mergeDescription || 'Merged Transactions',
-        category: mergeCategory,
-        mode: 'Online',
-        date: new Date(),
-        images: (oldAtts || []).map(a => a.file_url),
-        source: 'Manual',
-        user_name: resolvedUser.name,
-        created_at: new Date().toISOString(),
-        syncStatus: 'SYNCED'
-      };
-
-      setBooks(prev => prev.map(b => b.id === activeBookId ? {
-        ...b,
-        transactions: [mergedTx, ...b.transactions.filter(t => !selectedIds.includes(t.id))]
-      } : b));
-      const currCache = entriesCache.get(activeBookId) || [];
-      entriesCache.set(activeBookId, [mergedTx, ...currCache.filter(t => !selectedIds.includes(t.id))]);
-
-      setSelectedTransactions(new Set());
-      setShowMergeConfirmDialog(false);
-    } catch (err: any) {
-      console.error('[Merge Transactions Error]:', err);
-      setError(err.message || 'Failed to merge transactions');
-    } finally {
-      setIsMerging(false);
-    }
-  };
-
-  const handleEditTransaction = useCallback((t: Transaction) => {
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(50);
-      setShowOfflineDialog(true);
-      return;
-    }
+  const handleEditTransaction = (t: Transaction) => {
     setEditingTransaction(t);
     setShowForm(t.type);
     setAmount(t.amount.toString());
-    const partyMatch = t.description ? t.description.match(/^\[Party:\s*(.+?)\]\s*(.*)$/s) : null;
-    if (partyMatch) {
-      setPartyName(partyMatch[1]);
-      setDescription(partyMatch[2]);
-    } else {
-      setPartyName('');
-      setDescription(t.description || '');
-    }
-    setDetailsError(false);
-    setAmountError(false);
+    setDescription(t.description);
     setCategory(CATEGORIES.includes(t.category) ? t.category : 'Custom');
     if (!CATEGORIES.includes(t.category)) setCustomCategory(t.category);
     setMode(MODES.includes(t.mode) ? t.mode : 'Custom');
     if (!MODES.includes(t.mode)) setCustomMode(t.mode);
     setTransactionDate(safeToDateTimeLocal(t.date));
-    const initialImages = (Array.isArray(t.images) && t.images.length > 0)
-      ? t.images
-      : (attachmentCache.get(t.id)?.images || []);
-    setSelectedImages(initialImages);
+    setSelectedImages(t.images || []);
     setImageLayout(t.imageLayout || 'split');
-  }, []);
+  };
 
-  const toggleSelectTransaction = useCallback((id: string) => {
+  const toggleSelectTransaction = (id: string) => {
     setSelectedTransactions(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }, []);
+  };
 
-  function toggleSelectAll() {
+  const toggleSelectAll = () => {
     if (selectedTransactions.size === filteredTransactions.length) {
       setSelectedTransactions(new Set());
     } else {
       setSelectedTransactions(new Set(filteredTransactions.map(t => t.id)));
     }
-  }
+  };
 
   const generateShareCode = () => {
     const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -6987,7 +4768,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         setShareExpiryTime(expiryTime);
         
         setRestoredMessage("Previous active share session restored");
-        setTimeout(() => setRestoredMessage(''), 20000);
+        setTimeout(() => setRestoredMessage(''), 4000);
 
         if (activeBookId) {
           localStorage.setItem(`trackbook_share_session_${activeBookId}`, JSON.stringify({
@@ -7066,7 +4847,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       setGeneratedCode(code);
       setShareExpiryTime(expiryTime);
       setRestoredMessage("New share session generated");
-      setTimeout(() => setRestoredMessage(''), 20000);
+      setTimeout(() => setRestoredMessage(''), 4000);
 
       // Save current active share session to localStorage
       if (activeBookId) {
@@ -7137,37 +4918,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         return;
       }
 
+      const effectiveUserName = userName || session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || null;
+
       // If there is no active book, create a new book!
       if (!targetBookId) {
         const newBookTitle = `Imported Book (${cleanedCode})`;
-        const resolvedUser = await resolveUserDataForAttachments();
-        const payload: any = {
-          name: newBookTitle,
-          user_id: session.user.id,
-          user_name: resolvedUser.name
-        };
-        let newBook: any = null;
-        let createError: any = null;
-
-        const firstInsert = await supabase
+        const { data: newBook, error: createError } = await supabase
           .from('cashbooks')
-          .insert([payload])
+          .insert([{
+            name: newBookTitle,
+            user_id: session.user.id,
+            user_name: effectiveUserName
+          }])
           .select()
           .single();
-        newBook = firstInsert.data;
-        createError = firstInsert.error;
-
-        if (createError && (createError.code === '42703' || createError.message?.toLowerCase().includes('column'))) {
-          const fallbackPayload = { ...payload };
-          delete fallbackPayload.user_name;
-          const secondInsert = await supabase
-            .from('cashbooks')
-            .insert([fallbackPayload])
-            .select()
-            .single();
-          newBook = secondInsert.data;
-          createError = secondInsert.error;
-        }
 
         if (createError) {
           throw new Error('Failed to create imported cashbook.');
@@ -7239,7 +5003,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       // Rule 2 & 3: Generate deterministic signatures and compare to find final inserts
       const existingSignatures = new Set(existingEntries.map(item => getEntrySignature(item)));
       
-      const resolvedUser = await resolveUserDataForAttachments();
       const finalInserts: any[] = [];
       let skippedDuplicatesCount = 0;
 
@@ -7261,7 +5024,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             image_layout: t.image_layout || t.imageLayout || 'split',
             cashbook_id: targetBookId,
             user_id: session.user.id,
-            user_name: resolvedUser.name,
+            user_name: effectiveUserName,
             imported_from_share_code: cleanedCode, // Rule 6
             is_imported: true,
             import_batch_id: cleanedCode,
@@ -7288,30 +5051,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const cleanInserts = finalInserts.map(({ images, ...rest }) => rest);
 
       console.log('[Import] Ingesting unique entries to database...', cleanInserts.length);
-      let batchSaved = false;
-      try {
-        const batchRes = await fetch('/api/rbac/batch-save-entries', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            entries: cleanInserts,
-            cashbook_id: targetBookId,
-            userId: session.user.id
-          })
-        });
-        if (batchRes.ok) {
-          const bJson = await batchRes.json();
-          if (bJson.success) batchSaved = true;
-        }
-      } catch (_) {}
-
-      let err1: any = null;
-      if (!batchSaved) {
-        const directRes = await supabase
-          .from('entries')
-          .insert(cleanInserts);
-        err1 = directRes.error;
-      }
+      const { error: err1 } = await supabase
+        .from('entries')
+        .insert(cleanInserts);
 
       if (err1) {
         console.warn('[Import] Attempt 1 failed:', err1.message, err1.code);
@@ -7322,7 +5064,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         if (isColumnError) {
           // Rescue Step: Retry without is_imported and import_batch_id first (keep original column set)
           console.log('[Import] Retrying without is_imported and import_batch_id...');
-          const baseInserts = cleanInserts.map(({ is_imported, import_batch_id, source, user_name, ...rest }) => rest);
+          const baseInserts = cleanInserts.map(({ is_imported, import_batch_id, source, ...rest }) => rest);
           const { error: errBase } = await supabase
             .from('entries')
             .insert(baseInserts);
@@ -7496,9 +5238,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const resetFormFields = (keepMode?: boolean) => {
     setAmount('');
     setDescription('');
-    setPartyName('');
-    setDetailsError(false);
-    setAmountError(false);
     setCategory('Food');
     setCustomCategory('');
     if (!keepMode) {
@@ -7507,6 +5246,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
     setTransactionDate(safeToDateTimeLocal(new Date()));
     setSelectedImages([]);
+    setFormErrors({});
   };
 
   const resetForm = () => {
@@ -7517,267 +5257,24 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setTransactionDurationFilter('All');
     setTransactionCategoryFilter('All');
     setTransactionSearchQuery('');
+    setFormErrors({});
     setIsSubmitting(false);
   };
 
-  // Fresh modal state tracking ref for hardware / browser back button popstate
-  const modalStateRef = useRef<any>({});
-  useEffect(() => {
-    modalStateRef.current = {
-      previewImages,
-      showFullScreenPreview,
-      showAvatarPreviewModal,
-      showQuitDialog,
-      showAiWarning,
-      aiConstructionModal,
-      showGroupSizeModal,
-      showDropZone,
-      showForm,
-      isCreatingBook,
-      showShareModal,
-      showImportModal,
-      showPhoneSecurityModal,
-      showPhoneLinkingComingSoon,
-      showDownloadCenter,
-      showWhatsAppModal,
-      showOfflineDialog,
-      deleteConfirmId,
-      showBulkDeleteConfirm,
-      showBulkTransactionDeleteConfirm,
-      isEditingName,
-      isProfileOpen,
-      selectedTransactions,
-      selectedBooks,
-      activeBookId,
-      currentTabName,
-      activeBook,
-    };
-  });
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
 
-  // Global Hardware Back Navigation Bridge for Android Native App & Web View
-  useEffect(() => {
-    (window as any).TrackBookHandleHardwareBack = function(): string {
-      const state = modalStateRef.current;
-
-      // 1. Image preview / topmost overlays
-      if (state.previewImages) {
-        setPreviewImages(null);
-        return "HANDLED";
-      }
-      if (state.showFullScreenPreview) {
-        setShowFullScreenPreview(false);
-        return "HANDLED";
-      }
-      if (state.showAvatarPreviewModal) {
-        setShowAvatarPreviewModal(false);
-        return "HANDLED";
-      }
-      if (state.showQuitDialog) {
-        setShowQuitDialog(false);
-        return "HANDLED";
-      }
-
-      // 2. AI drawer or warning
-      if (state.showAiWarning) {
-        setShowAiWarning(false);
-        return "HANDLED";
-      }
-      if (state.aiConstructionModal) {
-        setAiConstructionModal(null);
-        return "HANDLED";
-      }
-      if (state.showGroupSizeModal) {
-        setShowGroupSizeModal(false);
-        return "HANDLED";
-      }
-      if (state.showDropZone) {
-        setShowDropZone(false);
-        return "HANDLED";
-      }
-
-      // 3. Cash In / Cash Out transaction form
-      if (state.showForm) {
-        resetForm();
-        return "HANDLED";
-      }
-
-      // 4. Create / edit book modal & secondary modals
-      if (state.isCreatingBook) {
-        setIsCreatingBook(false);
-        return "HANDLED";
-      }
-      if (state.showShareModal) {
-        setShowShareModal(false);
-        return "HANDLED";
-      }
-      if (state.showImportModal) {
-        setShowImportModal(false);
-        return "HANDLED";
-      }
-      if (state.showPhoneSecurityModal) {
-        setShowPhoneSecurityModal(false);
-        return "HANDLED";
-      }
-      if (state.showPhoneLinkingComingSoon) {
-        setShowPhoneLinkingComingSoon(false);
-        return "HANDLED";
-      }
-      if (state.showDownloadCenter) {
-        setShowDownloadCenter(false);
-        return "HANDLED";
-      }
-      if (state.showWhatsAppModal) {
-        setShowWhatsAppModal(false);
-        return "HANDLED";
-      }
-      if (state.showOfflineDialog) {
-        setShowOfflineDialog(false);
-        return "HANDLED";
-      }
-
-      // 5. Delete confirmation modals
-      if (state.deleteConfirmId) {
-        setDeleteConfirmId(null);
-        return "HANDLED";
-      }
-      if (state.showBulkDeleteConfirm || state.showBulkTransactionDeleteConfirm) {
-        setShowBulkDeleteConfirm(false);
-        setShowBulkTransactionDeleteConfirm(false);
-        return "HANDLED";
-      }
-
-      // 6. Profile dropdown & name editing
-      if (state.isEditingName) {
-        setIsEditingName(false);
-        return "HANDLED";
-      }
-      if (state.isProfileOpen) {
-        setIsProfileOpen(false);
-        return "HANDLED";
-      }
-
-      // 7. Multi-select modes
-      if (state.selectedTransactions && state.selectedTransactions.size > 0) {
-        setSelectedTransactions(new Set());
-        return "HANDLED";
-      }
-      if (state.selectedBooks && state.selectedBooks.size > 0) {
-        setSelectedBooks(new Set());
-        return "HANDLED";
-      }
-
-      // 8. Reports / secondary tabs → entries tab inside active cashbook
-      if (state.activeBookId && state.currentTabName && state.currentTabName !== 'entries') {
-        const slug = getBookSlug(state.activeBook?.name || '', state.activeBook?.id || state.activeBookId);
-        navigate(`/cashbooks/${slug}/entries`);
-        return "HANDLED";
-      }
-
-      // 9. Entries page → Home screen (cashbooks list)
-      if (state.activeBookId) {
-        handleSelectBook(null);
-        return "HANDLED";
-      }
-
-      // 10. Truly on the Home screen (books list) with no open views/modals/overlays
-      return "HOME";
-    };
-
-    return () => {
-      delete (window as any).TrackBookHandleHardwareBack;
-    };
-  }, []);
-
-  const handlePdfPagesAdded = async (convertedFiles: File[]) => {
-    if (!convertedFiles || convertedFiles.length === 0) return;
-    const remainingSlots = Math.max(0, 7 - selectedImages.length);
-    if (remainingSlots <= 0) {
-      showInAppAlert('Attachment Limit', 'Maximum 7 bills / attachments allowed. Please remove an existing attachment to add more.', 'warning');
-      return;
-    }
-
-    const filesToUse = convertedFiles.slice(0, remainingSlots);
-    if (convertedFiles.length > remainingSlots) {
-      showInAppAlert('Attachment Limit', `Only ${remainingSlots} of the ${convertedFiles.length} selected pages were added to stay within the 7-bill limit.`, 'warning');
-    }
-
-    const finalFiles = await editImagesIfNeeded(filesToUse);
     const newImages: string[] = [...selectedImages];
-    finalFiles.forEach(file => {
+    const filesArray = Array.from(files).slice(0, 5 - selectedImages.length) as File[];
+
+    filesArray.forEach(file => {
       const blobUrl = URL.createObjectURL(file);
       imageFilesRef.current[blobUrl] = file;
       newImages.push(blobUrl);
     });
 
     setSelectedImages(newImages);
-  };
-
-  const processUploadedFiles = async (files: FileList | File[] | null | undefined) => {
-    if (!files) return;
-    const rawFiles = Array.from(files) as File[];
-    if (rawFiles.length === 0) return;
-
-    const isDeviceOffline = isOffline || 
-      (typeof navigator !== 'undefined' && !navigator.onLine) || 
-      syncManager.network.state === 'offline' ||
-      (typeof window !== 'undefined' && (window as any).TrackBookBridge?.isNetworkAvailable?.() === false);
-
-    if (isDeviceOffline) {
-      const msg = "You are offline. Images can only be added when you are online.";
-      showInAppAlert("Offline Mode", msg, "warning");
-      if (typeof window !== 'undefined' && (window as any).TrackBookBridge?.showToast) {
-        (window as any).TrackBookBridge.showToast(msg);
-      }
-      return;
-    }
-
-    if (selectedImages.length >= 7) {
-      showInAppAlert('Attachment Limit', 'Maximum 7 bills / attachments allowed. Please remove an existing attachment to add more.', 'warning');
-      return;
-    }
-
-    const isPdf = (file: File) =>
-      file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-
-    const pdfFiles = rawFiles.filter(isPdf);
-    const imageFiles = rawFiles.filter(f => !isPdf(f));
-
-    let updatedImages = [...selectedImages];
-
-    // Handle normal images if any
-    if (imageFiles.length > 0) {
-      const remainingSlots = Math.max(0, 7 - updatedImages.length);
-      if (remainingSlots <= 0) {
-        showInAppAlert('Attachment Limit', 'Maximum 7 bills / attachments allowed.', 'warning');
-      } else {
-        if (imageFiles.length > remainingSlots) {
-          showInAppAlert('Attachment Limit', `Only ${remainingSlots} of ${imageFiles.length} images were added to stay within the 7-bill limit.`, 'warning');
-        }
-        const filesToProcess = imageFiles.slice(0, remainingSlots);
-        const finalFiles = await editImagesIfNeeded(filesToProcess);
-        finalFiles.forEach(file => {
-          const blobUrl = URL.createObjectURL(file);
-          imageFilesRef.current[blobUrl] = file;
-          updatedImages.push(blobUrl);
-        });
-        setSelectedImages(updatedImages);
-      }
-    }
-
-    // If PDF is selected, open the PDF page selection UI
-    if (pdfFiles.length > 0) {
-      if (updatedImages.length >= 7) {
-        showInAppAlert('Attachment Limit', 'Maximum 7 bills / attachments reached. You cannot add pages from the PDF.', 'warning');
-      } else {
-        setPendingPdfFile(pdfFiles[0]);
-        setIsPdfSelectorOpen(true);
-      }
-    }
-  };
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    await processUploadedFiles(e.target.files);
-    if (e.target) e.target.value = '';
   };
 
   const exportToExcel = async () => {
@@ -7794,10 +5291,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     let currentPage = 1;
     const transactionPageMap = new Map<string, string>();
     
-    // Determine transactions to export: if in reports tab and filter active, export filtered; otherwise active/filtered
-    const transactionsToExport = filteredTransactions;
-
-    const transactionsWithImages = transactionsToExport.filter(t => t.images && t.images.length > 0);
+    const transactionsWithImages = filteredTransactions.filter(t => t.images && t.images.length > 0);
     for (const t of transactionsWithImages) {
       const layout = t.imageLayout || 'split';
       const imageCount = t.images?.length || 0;
@@ -7812,7 +5306,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       currentPage += pagesUsed;
     }
 
-    const ws = buildTransactionsWorksheet(transactionsToExport, transactionPageMap);
+    const ws = buildTransactionsWorksheet(filteredTransactions, transactionPageMap);
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Transactions");
@@ -7823,11 +5317,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   };
   const exportToPDF = async (isCompressed = true) => {
     if (!activeBook || reportLoading) return;
-    if (isOffline || (typeof navigator !== 'undefined' && !navigator.onLine) || syncManager.network.state === 'offline') {
-      vibrate(20);
-      setShowOfflinePdfDialog(true);
-      return;
-    }
     try {
       console.log("Starting PDF export. Compressed mode:", isCompressed);
       setReportLoading({ type: 'pdf', progress: 5, message: 'Preparing document setup...' });
@@ -7895,64 +5384,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         pdfDoc.addImage(src, format as any, x, y, w, h, alias, 'FAST');
       };
 
-      const parseUrlMetadata = (url: string) => {
-        const hashIdx = url.indexOf('#');
-        const hash = hashIdx !== -1 ? url.substring(hashIdx + 1) : '';
-        const params = new URLSearchParams(hash);
-        const rotate = parseInt(params.get('rotate') || '0', 10);
-        const fit = (params.get('fit') || 'original') as 'width' | 'height' | 'original';
-        return { rotate, fit };
-      };
-
-      const getRotatedPdfImage = (srcOrImg: string | HTMLImageElement, rotate: number): Promise<{ src: string; width: number; height: number }> => {
-        return new Promise((resolve) => {
-          const src = typeof srcOrImg === 'string' ? srcOrImg : srcOrImg.src;
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = () => {
-            try {
-              const origWidth = img.naturalWidth || img.width;
-              const origHeight = img.naturalHeight || img.height;
-              
-              if (rotate === 0) {
-                resolve({ src, width: origWidth, height: origHeight });
-                return;
-              }
-
-              const canvas = document.createElement('canvas');
-              const ctx = canvas.getContext('2d');
-              if (!ctx) {
-                resolve({ src, width: origWidth, height: origHeight });
-                return;
-              }
-
-              const angleRad = (rotate * Math.PI) / 180;
-              const is90or270 = rotate === 90 || rotate === 270;
-
-              const targetWidth = is90or270 ? origHeight : origWidth;
-              const targetHeight = is90or270 ? origWidth : origHeight;
-
-              canvas.width = targetWidth;
-              canvas.height = targetHeight;
-
-              ctx.translate(targetWidth / 2, targetHeight / 2);
-              ctx.rotate(angleRad);
-              ctx.drawImage(img, -origWidth / 2, -origHeight / 2, origWidth, origHeight);
-
-              const rotatedSrc = canvas.toDataURL('image/jpeg', 0.85);
-              resolve({ src: rotatedSrc, width: targetWidth, height: targetHeight });
-            } catch (err) {
-              console.error('[PDF] Canvas rotation failed:', err);
-              resolve({ src, width: 300, height: 400 });
-            }
-          };
-          img.onerror = () => {
-            resolve({ src, width: 300, height: 400 });
-          };
-          img.src = src;
-        });
-      };
-
       if (transactionsWithImages.length > 0) {
         // Collect all distinct and unique image URLs to compress before PDF rendering begins (Feature 9)
         const allImageUrls: string[] = [];
@@ -7999,15 +5430,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
                 const pageWidth = doc.internal.pageSize.getWidth();
                 const pageHeight = doc.internal.pageSize.getHeight();
-                const margin = 8;
-                const gap = 3;
+                const margin = 10;
+                const gap = 5;
                 const availableWidth = pageWidth - (margin * 2) - gap;
                 const imgWidth = availableWidth / 2;
-                
-                const safeTop = 15;
-                const safeBottom = pageHeight - 18;
-                const availableHeight = safeBottom - safeTop;
-                const imgHeight = availableHeight;
+                const imgHeight = pageHeight * 0.55; // leaves perfect space for footer (Requirement 6)
+                const y = 18; // Start below header
 
                 // Add transaction header
                 doc.setFontSize(10);
@@ -8025,50 +5453,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   });
                   
                   const img1 = await getCachedOptimizedImage(rawImg1, isCompressed, isStrongCompression, () => {});
-                  
-                  const { rotate, fit } = parseUrlMetadata(rawImg1);
-                  const rotatedData = await getRotatedPdfImage(img1, rotate);
-                  
-                  const ar = rotatedData.width / rotatedData.height;
-                  let w = imgWidth;
-                  let h = imgWidth / ar;
-                  
-                  if (fit === 'width') {
-                    w = imgWidth;
-                    h = imgWidth / ar;
-                    if (h > imgHeight) {
-                      h = imgHeight;
-                      w = imgHeight * ar;
-                    }
-                  } else if (fit === 'height') {
-                    h = imgHeight;
-                    w = imgHeight * ar;
-                    if (w > imgWidth) {
-                      w = imgWidth;
-                      h = imgWidth / ar;
-                    }
-                  } else { // original contain
-                    w = imgWidth;
-                    h = imgWidth / ar;
-                    if (h > imgHeight) {
-                      h = imgHeight;
-                      w = imgHeight * ar;
-                    }
-                  }
-                  
-                  if (h > imgHeight) {
-                    h = imgHeight;
-                    w = imgHeight * ar;
-                  }
-                  if (w > imgWidth) {
-                    w = imgWidth;
-                    h = imgWidth / ar;
-                  }
-                  
-                  const drawX = margin + (imgWidth - w) / 2;
-                  const drawY = safeTop + (availableHeight - h) / 2;
-                  
-                  addOptimizedImageToDoc(doc, rotatedData.src, rawImg1, drawX, drawY, w, h);
+                  addOptimizedImageToDoc(doc, img1, rawImg1, margin, y, imgWidth, imgHeight);
                 } catch (e) { console.error(e); }
                 processedImages++;
 
@@ -8086,50 +5471,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     });
                     
                     const img2 = await getCachedOptimizedImage(rawImg2, isCompressed, isStrongCompression, () => {});
-                    
-                    const { rotate, fit } = parseUrlMetadata(rawImg2);
-                    const rotatedData = await getRotatedPdfImage(img2, rotate);
-                    
-                    const ar = rotatedData.width / rotatedData.height;
-                    let w = imgWidth;
-                    let h = imgWidth / ar;
-                    
-                    if (fit === 'width') {
-                      w = imgWidth;
-                      h = imgWidth / ar;
-                      if (h > imgHeight) {
-                        h = imgHeight;
-                        w = imgHeight * ar;
-                      }
-                    } else if (fit === 'height') {
-                      h = imgHeight;
-                      w = imgHeight * ar;
-                      if (w > imgWidth) {
-                        w = imgWidth;
-                        h = imgWidth / ar;
-                      }
-                    } else { // original contain
-                      w = imgWidth;
-                      h = imgWidth / ar;
-                      if (h > imgHeight) {
-                        h = imgHeight;
-                        w = imgHeight * ar;
-                      }
-                    }
-                    
-                    if (h > imgHeight) {
-                      h = imgHeight;
-                      w = imgHeight * ar;
-                    }
-                    if (w > imgWidth) {
-                      w = imgWidth;
-                      h = imgWidth / ar;
-                    }
-                    
-                    const drawX = margin + imgWidth + gap + (imgWidth - w) / 2;
-                    const drawY = safeTop + (availableHeight - h) / 2;
-                    
-                    addOptimizedImageToDoc(doc, rotatedData.src, rawImg2, drawX, drawY, w, h);
+                    addOptimizedImageToDoc(doc, img2, rawImg2, margin + imgWidth + gap, y, imgWidth, imgHeight);
                   } catch (e) { console.error(e); }
                   processedImages++;
                 }
@@ -8160,51 +5502,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   const safeBottom = pageHeight - 25;
                   const availableHeight = safeBottom - safeTop;
                   
-                  const maxWidth = pageWidth * 0.62;
-                  const maxHeight = Math.min(pageHeight * 0.70, availableHeight);
-                  const targetX = (pageWidth - maxWidth) / 2;
-                  const targetY = safeTop + (availableHeight - maxHeight) / 2;
+                  const imgWidth = pageWidth * 0.62;
+                  const imgHeight = Math.min(pageHeight * 0.70, availableHeight);
+                  const x = (pageWidth - imgWidth) / 2;
+                  const y = safeTop + (availableHeight - imgHeight) / 2;
 
                   // Add transaction header
                   doc.setFontSize(10);
                   doc.setTextColor(80);
                   doc.text(`Transaction: ${t.description} (${t.amount}) - ${safeFormatDate(t.date)}`, 10, 10);
 
-                  const { rotate, fit } = parseUrlMetadata(img);
-                  const rotatedData = await getRotatedPdfImage(optimizedImg, rotate);
-                  
-                  const ar = rotatedData.width / rotatedData.height;
-                  let w = maxWidth;
-                  let h = maxWidth / ar;
-                  
-                  if (fit === 'width') {
-                    w = maxWidth;
-                    h = maxWidth / ar;
-                  } else if (fit === 'height') {
-                    h = maxHeight;
-                    w = maxHeight * ar;
-                  } else { // original contain
-                    w = maxWidth;
-                    h = maxWidth / ar;
-                    if (h > maxHeight) {
-                      h = maxHeight;
-                      w = maxHeight * ar;
-                    }
-                  }
-                  
-                  if (h > maxHeight) {
-                    h = maxHeight;
-                    w = maxHeight * ar;
-                  }
-                  if (w > maxWidth) {
-                    w = maxWidth;
-                    h = maxWidth / ar;
-                  }
-                  
-                  const drawX = targetX + (maxWidth - w) / 2;
-                  const drawY = targetY + (maxHeight - h) / 2;
-
-                  addOptimizedImageToDoc(doc, rotatedData.src, img, drawX, drawY, w, h);
+                  addOptimizedImageToDoc(doc, optimizedImg, img, x, y, imgWidth, imgHeight);
                 } catch (e) { console.error(e); }
                 
                 processedImages++;
@@ -8243,7 +5551,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       await new Promise(r => setTimeout(r, 200));
     } catch (error) {
       console.error("PDF Export failed:", error);
-      showInAppAlert("PDF Export Failed", "Failed to generate or download PDF. Please try again.", "error");
+      alert("Failed to download PDF. Please try again.");
     } finally {
       setReportLoading(null);
       setShowReportsMenu(false);
@@ -8253,27 +5561,30 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const processFiles = async (files: FileList | File[]) => {
     if (!files || files.length === 0 || !activeBookId) return;
 
-    // Limit to 7 images as per user request
-    const filesToProcess = Array.from(files).slice(0, 7) as File[];
-
-    // Bypass cropping workflow; images should be processed immediately upon upload/drop
-    const finalFiles = filesToProcess;
-    if (finalFiles.length === 0) return;
-
     const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
 
+    // Limit to 5 images as per user request
+    const filesToProcess = Array.from(files).slice(0, 5) as File[];
+
     setIsUploading(true);
-    setUploadingMessage('Detecting bills with AI TrackBook...');
+    setUploadingMessage('Detecting bills with TrackBook AI...');
     setError(null);
 
     try {
-      if (aiMode === 'merge' && finalFiles.length > 1) {
+      if (aiMode === 'merge' && filesToProcess.length > 1) {
         setUploadingMessage('Merging and detecting bills...');
         const imagesData: { base64: string, mimeType: string, raw: string | File }[] = [];
         
-        for (const file of finalFiles) {
+        for (const file of filesToProcess) {
           const isImage = file.type && file.type.startsWith('image/');
-          const processedFile: File = file;
+          let processedFile: File;
+
+          if (isImage) {
+            const compressedBlob = await compressImage(file);
+            processedFile = new File([compressedBlob], file.name || 'compressed.jpg', { type: file.type || 'image/jpeg' });
+          } else {
+            processedFile = file;
+          }
           
           const base64 = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
@@ -8313,63 +5624,44 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             setUploadingMessage('Registering transaction in database...');
             console.log('[processFiles] Inserting entry to database:', { id: newTransactionId });
             try {
+              const effectiveUserName = userName || session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || null;
               const payload: any = {
                 id: newTransactionId,
                 cashbook_id: activeBookId,
                 user_id: session.user.id,
+                user_name: effectiveUserName,
                 amount: result.amount,
-                type: (result.type || 'out').toLowerCase() === 'in' ? 'in' : 'out',
+                type: result.type,
                 description: result.description,
                 category: result.category,
                 mode: 'Online',
-                date: safeToISOString(parseAIDate(result.date))
+                date: safeToISOString(parseAIDate(result.date)),
+                source: 'AI'
               };
 
-              // Save entry via RBAC server endpoint first (bypasses RLS)
-              let aiSaved = false;
-              try {
-                const rbacRes = await fetch('/api/rbac/save-entry', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    entry: { ...payload, image_layout: 'merge' },
-                    userId: session.user.id,
-                    userEmail: session.user.email
-                  })
-                });
-                if (rbacRes.ok) {
-                  const rJson = await rbacRes.json();
-                  if (rJson.success) aiSaved = true;
-                }
-              } catch (_) {}
-
-              if (!aiSaved) {
-                // Direct Supabase fallback
-                const { error: entryError } = await supabase.from('entries').insert([{ ...payload, image_layout: 'merge' }]);
-                if (entryError) {
-                  if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist') || entryError.message?.includes('column "source" does not exist')) {
-                    console.warn('[processFiles] image_layout or source missing in schema, retrying fallback...');
-                    const fallbackPayload = { ...payload };
-                    delete fallbackPayload.source;
-                    const { error: retryError } = await supabase.from('entries').insert([fallbackPayload]);
-                    if (retryError && retryError.code !== '42501') throw retryError;
-                  } else if (entryError.code !== '42501') {
-                    throw entryError;
-                  }
+              // Try with image_layout first
+              const { error: entryError } = await supabase.from('entries').insert([{ ...payload, image_layout: 'merge' }]);
+              
+              if (entryError) {
+                if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist') || entryError.message?.includes('column "source" does not exist')) {
+                  console.warn('[processFiles] image_layout or source missing in schema, retrying fallback...');
+                  const fallbackPayload = { ...payload };
+                  delete fallbackPayload.source;
+                  const { error: retryError } = await supabase.from('entries').insert([fallbackPayload]);
+                  if (retryError) throw retryError;
+                } else {
+                  throw entryError;
                 }
               }
 
               if (cloudinaryUrls.length > 0) {
                 console.log('[processFiles] Saving AI attachments rows...');
-                const resolvedUser = await resolveUserDataForAttachments();
                 const aiAttachmentInserts = await Promise.all(
                   cloudinaryUrls.map(async (url) => {
                     const validated = await validateAndResolveCloudinaryUrl(url, session.user);
                     return {
                       entry_id: newTransactionId,
                       user_id: session.user.id,
-                      user_name: resolvedUser.name,
-                      user_email: resolvedUser.email,
                       file_url: validated,
                       file_name: 'ai_merged_bill',
                       file_type: 'image'
@@ -8411,13 +5703,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         }
       } else {
         let completed = 0;
-        const total = finalFiles.length;
+        const total = filesToProcess.length;
         
-        for (const file of finalFiles) {
+        for (const file of filesToProcess) {
           setUploadingMessage(`Detecting bill ${completed + 1}/${total}...`);
           
           const isImage = file.type && file.type.startsWith('image/');
-          const processedFile: File = file;
+          let processedFile: File;
+
+          if (isImage) {
+            const compressedBlob = await compressImage(file);
+            processedFile = new File([compressedBlob], file.name || 'compressed.jpg', { type: file.type || 'image/jpeg' });
+          } else {
+            processedFile = file;
+          }
           
           await new Promise<void>((resolve, reject) => {
             const reader = new FileReader();
@@ -8446,58 +5745,40 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   if (supabase && session) {
                     setUploadingMessage(`Saving bill ${completed}/${total} (SQL)...`);
                     try {
+                      const effectiveUserName = userName || session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || null;
                       const payload: any = {
                         id: newTransactionId,
                         cashbook_id: activeBookId,
                         user_id: session.user.id,
+                        user_name: effectiveUserName,
                         amount: result.amount,
-                        type: (result.type || 'out').toLowerCase() === 'in' ? 'in' : 'out',
+                        type: result.type,
                         description: result.description,
                         category: result.category,
                         mode: 'Online',
-                        date: safeToISOString(parseAIDate(result.date))
+                        date: safeToISOString(parseAIDate(result.date)),
+                        source: 'AI'
                       };
 
-                      // Save entry via RBAC server endpoint first (bypasses RLS)
-                      let aiSplitSaved = false;
-                      try {
-                        const rbacRes = await fetch('/api/rbac/save-entry', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            entry: { ...payload, image_layout: 'split' },
-                            userId: session.user.id,
-                            userEmail: session.user.email
-                          })
-                        });
-                        if (rbacRes.ok) {
-                          const rJson = await rbacRes.json();
-                          if (rJson.success) aiSplitSaved = true;
-                        }
-                      } catch (_) {}
-
-                      if (!aiSplitSaved) {
-                        const { error: entryError } = await supabase.from('entries').insert([{ ...payload, image_layout: 'split' }]);
-                        if (entryError) {
-                          if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist') || entryError.message?.includes('column "source" does not exist')) {
-                            const fallbackPayload = { ...payload };
-                            delete fallbackPayload.source;
-                            const { error: retryError } = await supabase.from('entries').insert([fallbackPayload]);
-                            if (retryError && retryError.code !== '42501') throw retryError;
-                          } else if (entryError.code !== '42501') {
-                            throw entryError;
-                          }
+                      // Try with image_layout first
+                      const { error: entryError } = await supabase.from('entries').insert([{ ...payload, image_layout: 'split' }]);
+                      
+                      if (entryError) {
+                        if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist') || entryError.message?.includes('column "source" does not exist')) {
+                          const fallbackPayload = { ...payload };
+                          delete fallbackPayload.source;
+                          const { error: retryError } = await supabase.from('entries').insert([fallbackPayload]);
+                          if (retryError) throw retryError;
+                        } else {
+                          throw entryError;
                         }
                       }
 
                       console.log('[processFiles] Saving single AI image attachment row...');
                       const validatedSingleUrl = await validateAndResolveCloudinaryUrl(cloudinaryUrl, session.user);
-                      const resolvedUser = await resolveUserDataForAttachments();
                       const aiAttachmentInserts = [{
                         entry_id: newTransactionId,
                         user_id: session.user.id,
-                        user_name: resolvedUser.name,
-                        user_email: resolvedUser.email,
                         file_url: validatedSingleUrl,
                         file_name: 'ai_detected_bill',
                         file_type: 'image'
@@ -8560,7 +5841,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     // Reset input
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
-  async function startAiUploadReceiptParsing(filesInput: File | File[] | FileList) {
+  const startAiUploadReceiptParsing = async (filesInput: File | File[] | FileList) => {
     if (!activeBookId) return;
 
     let files: File[] = [];
@@ -8574,31 +5855,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     if (files.length === 0) return;
 
-    // Filter to images only (JPG, JPEG, PNG, WEBP)
-    const validImageExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
-    const validImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
-    const imageOnlyFiles = files.filter(f => 
-      validImageTypes.includes(f.type?.toLowerCase()) || 
-      validImageExtensions.some(ext => f.name.toLowerCase().endsWith(ext)) ||
-      (f.type && f.type.startsWith('image/'))
-    );
-
-    if (imageOnlyFiles.length === 0) {
-      setError('Please select image files only (JPG, JPEG, PNG, WEBP).');
-      return;
-    }
-
-    // Limit to 7 receipts as per limit update
-    const filesToScan = imageOnlyFiles.slice(0, 7);
-
-    // Bypass cropping workflow; images should be processed immediately upon upload/drop
-    const finalFilesToScan = filesToScan;
-    if (finalFilesToScan.length === 0) return;
-
-    setSelectedFiles(finalFilesToScan);
+    // Limit to 5 receipts as per BUG 2
+    const filesToScan = files.slice(0, 5);
+    setSelectedFiles(filesToScan);
 
     // Auto-detect task name (BUG 3: Food vs Travel Receipts)
-    const isFood = finalFilesToScan.some(f => 
+    const isFood = filesToScan.some(f => 
       f.name.toLowerCase().includes('food') || 
       f.name.toLowerCase().includes('restaurant') || 
       f.name.toLowerCase().includes('meal') || 
@@ -8614,7 +5876,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setAiWorkflowStep('scanning');
 
     // Increment uploaded counts today
-    for (let i = 0; i < finalFilesToScan.length; i++) {
+    for (let i = 0; i < filesToScan.length; i++) {
       incrementUploadedCount();
     }
 
@@ -8622,7 +5884,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     const taskId = await backgroundExportManager.enqueueAiScanTask(
       activeBookId,
       activeBook?.name || 'Cashbook',
-      finalFilesToScan,
+      filesToScan,
       taskName,
       aiGroupSize,
       isHandwritten,
@@ -8632,101 +5894,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setActiveAiTaskId(taskId);
   };
 
-  const selectQueueItem = (index: number) => {
-    if (index < 0 || index >= handwrittenQueue.length) return;
-    vibrate();
-    setCurrentQueueIndex(index);
-    const item = handwrittenQueue[index];
-    if (item) {
-      setAiAmount(String(item.result.amount ?? ''));
-      setAiMerchant(item.result.merchant || 'Unknown Vendor');
-      setAiBillType(item.result.billType || 'Food');
-      setAiCategory(item.result.category || 'Food');
-      setAiDate(item.result.date || '27-05-2026');
-      setAiTime(item.result.time || '12:00 PM');
-      setAiMealType(item.result.mealType || '');
-      setAiDescription(item.result.description || 'Food Expense');
-      setAiOcrConfidence(item.result.ocr_confidence ?? 100);
-      setAiOcrDuration(item.result.ocr_duration_ms ?? 0);
-      setAiAnalytics(item.result.analytics || null);
-      setAiCloudinaryUrl(item.result.cloudinaryUrl || '');
-      setAiFile(item.file);
-      setAiFilePreviewUrl(item.previewUrl);
-    }
-  };
-
-  const handleDiscardAiItem = (targetId?: string) => {
-    vibrate();
-
-    const currentItem = handwrittenQueue[currentQueueIndex];
-    const idToRemove = targetId || currentItem?.id;
-
-    if (!idToRemove) {
-      return;
-    }
-
-    if (handwrittenQueue.length <= 1) {
-      setHandwrittenQueue([]);
-      setCurrentQueueIndex(0);
-      setAiFile(null);
-      setAiFilePreviewUrl('');
-      setAiAmount('');
-      setAiMerchant('');
-      setAiDescription('');
-      if (activeAiTaskId) {
-        backgroundExportManager.updateAiScanResults(activeAiTaskId, []).catch(console.error);
-      }
-      setAiWorkflowStep('group');
-      setAiConstructionModal(null);
-      return;
-    }
-
-    // Remove ONLY the targeted receipt. Every other queued receipt remains untouched.
-    const targetPosition = handwrittenQueue.findIndex(item => item.id === idToRemove);
-    if (targetPosition === -1) return;
-
-    const remainingQueue = handwrittenQueue.filter(item => item.id !== idToRemove);
-    setHandwrittenQueue(remainingQueue);
-
-    if (activeAiTaskId) {
-      const remainingResults = remainingQueue.map(item => ({ file: item.file, result: item.result }));
-      backgroundExportManager.updateAiScanResults(activeAiTaskId, remainingResults).catch(console.error);
-    }
-
-    let nextIndex = targetPosition;
-    if (nextIndex >= remainingQueue.length) {
-      nextIndex = remainingQueue.length - 1;
-    }
-    setCurrentQueueIndex(nextIndex);
-
-    const nextItem = remainingQueue[nextIndex];
-    if (nextItem) {
-      setAiAmount(String(nextItem.result.amount ?? ''));
-      setAiMerchant(nextItem.result.merchant || 'Unknown Vendor');
-      setAiBillType(nextItem.result.billType || 'Food');
-      setAiCategory(nextItem.result.category || 'Food');
-      setAiDate(nextItem.result.date || '27-05-2026');
-      setAiTime(nextItem.result.time || '12:00 PM');
-      setAiMealType(nextItem.result.mealType || '');
-      setAiDescription(nextItem.result.description || 'Food Expense');
-      setAiOcrConfidence(nextItem.result.ocr_confidence ?? 100);
-      setAiOcrDuration(nextItem.result.ocr_duration_ms ?? 0);
-      setAiAnalytics(nextItem.result.analytics || null);
-      setAiCloudinaryUrl(nextItem.result.cloudinaryUrl || '');
-      setAiFile(nextItem.file);
-      setAiFilePreviewUrl(nextItem.previewUrl);
-    }
-  };
-
-  const handleSaveAiEntry = async (forceSave = false) => {
+  const handleSaveAiEntry = async () => {
     if (!activeBookId) return;
-
-    // Commit any pending deletions immediately to Supabase
-    if (pendingActionRef.current) {
-      await commitPendingDeletion(pendingActionRef.current);
-      setUndoAction(null);
-      setShowUndoToast(false);
-    }
+    setIsUploading(true);
+    setError(null);
 
     const amountNum = parseFloat(aiAmount) || 0;
     
@@ -8736,54 +5907,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     if (parts.length === 3) {
       dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
     }
-
-    if (!forceSave && activeBook) {
-      // Exclude any transactions that are currently in the pending delete queue
-      let activeTransactions = activeBook.transactions || [];
-      if (pendingActionRef.current) {
-        const action = pendingActionRef.current;
-        if (action.type === 'transaction' && action.data?.id) {
-          activeTransactions = activeTransactions.filter(tx => tx.id !== action.data.id);
-        } else if (action.type === 'bulk_transactions' && Array.isArray(action.data)) {
-          const deletedIds = new Set(action.data.map((d: any) => d.id));
-          activeTransactions = activeTransactions.filter(tx => !deletedIds.has(tx.id));
-        }
-      }
-
-      const isDuplicate = activeTransactions.some(tx => {
-        const amountMatches = Math.abs(tx.amount - amountNum) < 0.01;
-        
-        const txDateStr = new Date(tx.date).toDateString();
-        const newDateStr = dateObj.toDateString();
-        const dateMatches = txDateStr === newDateStr;
-        
-        const txDescLower = (tx.description || '').toLowerCase();
-        const newDescLower = aiDescription.toLowerCase();
-        const newMerchantLower = aiMerchant.toLowerCase();
-        
-        const descMatches = txDescLower.includes(newMerchantLower) || 
-                            newDescLower.includes(txDescLower) || 
-                            txDescLower.includes(newDescLower);
-                            
-        return amountMatches && dateMatches && descMatches;
-      });
-
-      if (isDuplicate) {
-        setShowDuplicateAiWarning({
-          onConfirm: () => {
-            setShowDuplicateAiWarning(null);
-            handleSaveAiEntry(true);
-          },
-          onCancel: () => {
-            setShowDuplicateAiWarning(null);
-          }
-        });
-        return;
-      }
-    }
-
-    setIsUploading(true);
-    setError(null);
 
     const tempId = safeUUID();
     const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
@@ -8857,10 +5980,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             imageUrl = await uploadToCloudinary(savedFile, cloudinaryFolder);
           }
 
+          const effectiveUserName = userName || session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || null;
           const payload: any = {
             id: tempId,
             cashbook_id: activeBookId,
             user_id: session.user.id,
+            user_name: effectiveUserName,
             amount: savedAmount,
             type: 'out',
             description: savedDescription,
@@ -8870,45 +5995,22 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             image_layout: 'split'
           };
 
-          // Save entry via RBAC server endpoint first (bypasses RLS)
-          let aiSingleSaved = false;
-          try {
-            const rbacRes = await fetch('/api/rbac/save-entry', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                entry: payload,
-                userId: session.user.id,
-                userEmail: session.user.email
-              })
-            });
-            if (rbacRes.ok) {
-              const rJson = await rbacRes.json();
-              if (rJson.success) aiSingleSaved = true;
-            }
-          } catch (_) {}
-
-          if (!aiSingleSaved) {
-            const { error: entryError } = await supabase.from('entries').insert([payload]);
-            if (entryError) {
-              if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist')) {
-                delete payload.image_layout;
-                const { error: retryError } = await supabase.from('entries').insert([payload]);
-                if (retryError && retryError.code !== '42501') throw retryError;
-              } else if (entryError.code !== '42501') {
-                throw entryError;
-              }
+          const { error: entryError } = await supabase.from('entries').insert([payload]);
+          if (entryError) {
+            if (entryError.code === '42703' || entryError.message?.includes('column "image_layout" does not exist')) {
+              delete payload.image_layout;
+              const { error: retryError } = await supabase.from('entries').insert([payload]);
+              if (retryError) throw retryError;
+            } else {
+              throw entryError;
             }
           }
 
           if (imageUrl) {
             const validatedUrl = await validateAndResolveCloudinaryUrl(imageUrl, session.user);
-            const resolvedUser = await resolveUserDataForAttachments();
             const aiAttachmentInserts = [{
               entry_id: tempId,
               user_id: session.user.id,
-              user_name: resolvedUser.name,
-              user_email: resolvedUser.email,
               file_url: validatedUrl,
               file_name: JSON.stringify({
                 original_name: savedFile?.name || 'receipt',
@@ -8927,27 +6029,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       })();
     }
 
-    // Remove only the receipt that was just saved, keeping all other receipts in the queue.
-    const savedItem = handwrittenQueue[currentQueueIndex];
-    const remainingQueue = savedItem
-      ? handwrittenQueue.filter(item => item.id !== savedItem.id)
-      : handwrittenQueue.filter((_, idx) => idx !== currentQueueIndex);
-
-    setHandwrittenQueue(remainingQueue);
-
-    if (activeAiTaskId) {
-      const remainingResults = remainingQueue.map(item => ({ file: item.file, result: item.result }));
-      backgroundExportManager.updateAiScanResults(activeAiTaskId, remainingResults).catch(console.error);
-    }
-
-    if (remainingQueue.length > 0) {
-      let nextIndex = currentQueueIndex;
-      if (nextIndex >= remainingQueue.length) {
-        nextIndex = remainingQueue.length - 1;
-      }
+    // Shift queue for next handwritten bill if available
+    const nextIndex = currentQueueIndex + 1;
+    if (nextIndex < handwrittenQueue.length) {
       setCurrentQueueIndex(nextIndex);
-      const nextItem = remainingQueue[nextIndex];
-      setAiAmount(String(nextItem.result.amount ?? ''));
+      const nextItem = handwrittenQueue[nextIndex];
+      setAiAmount(String(nextItem.result.amount));
       setAiMerchant(nextItem.result.merchant || 'Unknown Vendor');
       setAiBillType(nextItem.result.billType || 'Food');
       setAiCategory(nextItem.result.category || 'Food');
@@ -8975,145 +6062,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
   };
 
-  const [isSigningOut, setIsSigningOut] = useState(false);
-
   const handleSignOut = async () => {
-    if (isSigningOut) return;
-    setIsSigningOut(true);
-    try {
-      vibrate(10);
-      setIsProfileOpen(false);
-    } catch {}
-    await executeAppLogout({ reason: 'user' });
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
   };
 
-  if (isLoading && books.length === 0) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
-        <div className="flex flex-col items-center gap-4 animate-fade-in">
-          <Loader2 className="animate-spin text-indigo-600 animate-duration-1000" size={40} />
-          <DashboardLoadingText />
-        </div>
-      </div>
-    );
+  if (isLoading) {
+    return null;
   }
+
   return (
     <div className={cn(
-      "min-h-screen transition-colors duration-300 overflow-x-clip",
+      "min-h-screen transition-colors duration-300",
       theme === 'dark' ? "bg-black text-slate-100" : "bg-slate-50 text-black"
     )}>
-      {/* Reconnected Toast Notification */}
-      <AnimatePresence>
-        {reconnectedToast && (
-          <motion.div
-            initial={{ opacity: 0, y: -20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className="fixed top-4 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-5 py-2.5 rounded-full text-xs font-black flex items-center gap-2.5 z-[120] shadow-2xl border border-emerald-400/30 tracking-wide"
-          >
-            <CheckCircle2 size={16} />
-            <span>{reconnectedToast}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Detailed Offline Modal with Visual Illustration */}
-      <AnimatePresence>
-        {showOfflineDialog && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
-            <motion.div
-              initial={{ scale: 0.92, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.92, opacity: 0, y: 20 }}
-              className={cn(
-                "w-full max-w-md p-6 sm:p-7 rounded-3xl shadow-2xl text-center border transition-all duration-300 relative overflow-hidden",
-                theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
-              )}
-            >
-              {/* Close icon in top corner */}
-              <button
-                type="button"
-                onClick={() => setShowOfflineDialog(false)}
-                className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-500/10 text-slate-400 transition-colors cursor-pointer"
-                title="Dismiss (View saved data in read-only mode)"
-              >
-                <X size={18} />
-              </button>
-
-              {/* Offline Icon Container */}
-              <div className="relative mx-auto w-24 h-24 sm:w-28 sm:h-28 mb-4 flex items-center justify-center">
-                <div className="absolute inset-0 rounded-full bg-rose-500/10 dark:bg-rose-500/15 animate-ping opacity-30" />
-                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-rose-50 dark:bg-rose-950/40 border-2 border-rose-200 dark:border-rose-900/60 flex items-center justify-center text-rose-500">
-                  <WifiOff size={40} className="text-rose-500" />
-                </div>
-              </div>
-
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-[11px] font-black uppercase tracking-wider mb-2">
-                <span className="flex h-2 w-2 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
-                </span>
-                <span>Offline Mode • Read-Only</span>
-              </div>
-
-              <h3 className="text-xl sm:text-2xl font-black tracking-tight mt-1 mb-2">
-                You're Offline
-              </h3>
-              
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium leading-relaxed max-w-sm mx-auto mb-3">
-                No internet connection detected. Connect to the internet to continue.
-              </p>
-
-              <div className="mb-5 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs font-semibold text-center">
-                Adding entries, creating cashbooks, editing, and deleting are disabled while offline.
-              </div>
-
-              <div className="flex items-center justify-center gap-2 text-xs font-semibold text-slate-400 dark:text-slate-500 mb-5">
-                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                <span>Waiting for connection...</span>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-3">
-                <button
-                  type="button"
-                  onClick={handleRetryConnection}
-                  disabled={isRetryingNetwork}
-                  className="flex-1 py-3 px-4 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-black transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 cursor-pointer"
-                >
-                  {isRetryingNetwork ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" />
-                      <span>Checking Connection...</span>
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw size={16} />
-                      <span>Retry Connection</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    vibrate();
-                    setShowOfflineDialog(false);
-                  }}
-                  className={cn(
-                    "py-3 px-4 rounded-2xl text-xs font-bold transition-all border cursor-pointer",
-                    theme === 'dark'
-                      ? "bg-zinc-900 border-zinc-800 text-slate-300 hover:bg-zinc-800"
-                      : "bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200"
-                  )}
-                >
-                  View Loaded Data
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
       {/* Error Alert */}
       <AnimatePresence>
         {error && (
@@ -9121,7 +6084,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="fixed top-0 left-0 right-0 bg-rose-500 text-white px-4 py-2 text-center text-sm font-medium flex items-center justify-center gap-2 z-[100] flex-wrap"
+            className="bg-rose-500 text-white px-4 py-2 text-center text-sm font-medium flex items-center justify-center gap-2 sticky top-0 z-[60] flex-wrap"
           >
             <div className="flex items-center gap-2">
               <AlertCircle size={16} />
@@ -9138,21 +6101,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       <AnimatePresence>
         {restoredMessage && (
           <motion.div
-            initial={{ opacity: 0, y: -20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className="fixed top-4 left-1/2 -translate-x-1/2 bg-emerald-600 dark:bg-emerald-700 text-white px-5 py-2.5 rounded-full text-xs font-bold flex items-center gap-2.5 z-[100] shadow-xl border border-emerald-500/30 tracking-wide"
+            initial={{ height: 0, opacity: 0, y: -20 }}
+            animate={{ height: 'auto', opacity: 1, y: 0 }}
+            exit={{ height: 0, opacity: 0, y: -20 }}
+            className="bg-emerald-600 dark:bg-emerald-700 text-white px-4 py-3 text-center text-xs sm:text-xs font-bold flex items-center justify-center gap-2 sticky top-0 z-[60] shadow-md tracking-wide"
           >
             <CheckSquare size={16} />
             <span>{restoredMessage}</span>
-            <button
-              type="button"
-              onClick={() => setRestoredMessage('')}
-              className="ml-2 p-1 hover:bg-white/20 rounded-full transition-colors cursor-pointer outline-none border-none text-white/90 hover:text-white flex items-center justify-center"
-              title="Close"
-            >
-              <X size={14} />
-            </button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -9163,13 +6118,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           "border-b sticky top-0 z-50 px-4 h-14 sm:h-16 transition-colors duration-300",
           theme === 'dark' ? "bg-black border-zinc-900" : "bg-white border-slate-100"
         )}>
-          <div className="w-full h-full flex items-center justify-between gap-2 sm:gap-4 px-6 md:px-8">
+          <div className="max-w-[98%] mx-auto h-full flex items-center justify-between gap-2 sm:gap-4">
             
             {/* Left: Logo */}
-            <div className="flex items-center shrink-0 select-none">
-              <span className="font-sans text-[15px] sm:text-base tracking-[0.08em] uppercase font-semibold text-indigo-600 dark:text-indigo-400">
-                TRACKBOOK
-              </span>
+            <div className="flex items-center gap-2 shrink-0 font-outfit">
+              <div className="flex items-center gap-1 leading-none">
+                <span className="font-black text-indigo-600 dark:text-indigo-400 text-sm sm:text-base tracking-tight">Track</span>
+                <span className={cn(
+                  "font-black text-sm sm:text-base tracking-tight transition-colors duration-300",
+                  theme === 'dark' ? "text-slate-100" : "text-slate-800"
+                )}>Book</span>
+              </div>
             </div>
 
             {/* Center: Desktop Search (Centered) */}
@@ -9182,8 +6141,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   value={searchQueryInput}
                   onChange={(e) => setSearchQueryInput(e.target.value)}
                   className={cn(
-                    "w-full pl-10 pr-4 py-2 border rounded-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm transition-all",
-                    theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white placeholder-zinc-500" : "bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400"
+                    "w-full pl-10 pr-4 py-2 border-none rounded-full focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
+                    theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-100 text-black"
                   )}
                 />
               </div>
@@ -9199,34 +6158,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <Search size={20} />
               </button>
 
-              {/* Sync Status Badge */}
-              <SyncStatusBadge theme={theme} />
-
-              {/* Notification Bell */}
-              <NotificationBell session={session} theme={theme} onInviteAccepted={fetchData} />
-
-              {/* Inline Download Center Trigger */}
+              {/* Inline Download Center Trigger (Prevent absolute-position overlaps) */}
               <DownloadCenterTrigger theme={theme} isOpen={showDownloadCenter} setIsOpen={setShowDownloadCenter} />
 
               <div className="relative shrink-0" ref={dropdownRef}>
                 <button 
                   onClick={() => { vibrate(); setIsProfileOpen(!isProfileOpen); }}
-                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-indigo-600 ring-2 ring-indigo-500/30 hover:ring-indigo-500/60 transition-all cursor-pointer select-none overflow-hidden flex items-center justify-center text-white font-bold text-xs sm:text-sm shrink-0 aspect-square shadow-sm active:scale-95"
-                  style={{ borderRadius: '9999px', clipPath: 'circle(50% at 50% 50%)' }}
-                  title="Profile and settings"
-                  aria-label="Profile and settings"
+                  className="flex items-center gap-1.5 sm:gap-2 p-1 pr-2 sm:pr-3 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
                 >
-                  {userAvatarUrl ? (
-                    <img 
-                      src={userAvatarUrl} 
-                      alt={userName || "Profile"} 
-                      className="w-full h-full object-cover block" 
-                      style={{ borderRadius: '9999px', objectFit: 'cover' }}
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span className="select-none font-bold">{userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}</span>
-                  )}
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-xs sm:text-sm">
+                    {userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}
+                  </div>
+                  <ChevronDown size={14} className={cn("text-slate-400 transition-transform", isProfileOpen && "rotate-180")} />
                 </button>
 
                 <AnimatePresence>
@@ -9237,41 +6180,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
                       className={cn(
                         "absolute right-0 mt-2 w-64 rounded-2xl shadow-2xl border p-2 z-50 transition-colors duration-300",
-                        theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-200"
+                        theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
                       )}
                     >
                       <div className={cn(
-                        "p-3 border-b mb-2 transition-colors duration-300 flex items-center gap-3",
+                        "p-3 border-b mb-2 transition-colors duration-300",
                         theme === 'dark' ? "border-zinc-800" : "border-slate-100"
                       )}>
-                        <div 
-                          className="w-10 h-10 rounded-full bg-indigo-600 ring-2 ring-indigo-500/20 overflow-hidden flex items-center justify-center text-white font-bold text-sm shrink-0 aspect-square shadow-sm"
-                          style={{ borderRadius: '9999px', overflow: 'hidden' }}
-                        >
-                          {userAvatarUrl ? (
-                            <img 
-                              src={userAvatarUrl} 
-                              alt={userName || "Profile"} 
-                              className="w-full h-full object-cover rounded-full block" 
-                              style={{ borderRadius: '9999px', objectFit: 'cover' }}
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <span className="select-none font-bold">{userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}</span>
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Signed in as</p>
-                          <p className={cn(
-                            "font-bold truncate text-sm transition-colors duration-300",
-                            theme === 'dark' ? "text-slate-100" : "text-black"
-                          )}>{userName}</p>
-                          {userPhoneVerified && (
-                            <div className="flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[8px] font-extrabold uppercase tracking-widest bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/40 dark:border-emerald-900/30 w-fit">
-                              ✓ Verified Mobile
-                            </div>
-                          )}
-                        </div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Signed in as</p>
+                        <p className={cn(
+                          "font-bold truncate transition-colors duration-300",
+                          theme === 'dark' ? "text-slate-100" : "text-black"
+                        )}>{userName}</p>
+                        {userPhoneVerified && (
+                          <div className="flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-[8.5px] font-extrabold uppercase tracking-widest bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/40 dark:border-emerald-900/30 w-fit">
+                            ✓ Verified Mobile Number
+                          </div>
+                        )}
                       </div>
 
                       <button 
@@ -9291,68 +6216,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </button>
 
                       <button 
-                        onClick={() => { vibrate(5); setIsAutomationMailConfirmOpen(true); setIsProfileOpen(false); }}
+                        onClick={() => { setIsHelpOpen(true); setIsProfileOpen(false); }}
                         className={cn(
                           "w-full flex items-center gap-3 p-3 rounded-xl transition-all",
                           theme === 'dark' ? "hover:bg-zinc-900 text-slate-300" : "hover:bg-slate-50 text-black"
                         )}
                       >
-                        <Mail size={18} className="text-indigo-500" />
-                        <span className="font-medium flex-1 text-left flex items-center gap-2">
-                          <span>Automation Mail</span>
-                          <span className="px-1.5 py-0.5 text-[8px] font-extrabold bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 rounded-full uppercase tracking-widest border border-indigo-500/10">BETA</span>
-                        </span>
+                        <HelpCircle size={18} />
+                        <span className="font-medium flex-1 text-left">Help & Support</span>
                       </button>
-
-                      {/* Mobile-Only Security Options */}
-                      {isMobileSecurityActive && (
-                        <>
-                          {!hasUserMpin ? (
-                            <button 
-                              onClick={() => { vibrate(); openMpinCreateModal(); setIsProfileOpen(false); }}
-                              className={cn(
-                                "w-full flex items-center gap-3 p-3 rounded-xl transition-all",
-                                theme === 'dark' ? "hover:bg-zinc-900 text-slate-300" : "hover:bg-slate-50 text-black"
-                              )}
-                            >
-                              <Shield size={18} className="text-indigo-500" />
-                              <span className="font-medium flex-1 text-left">Enable TPIN</span>
-                            </button>
-                          ) : (
-                            <>
-                              <button 
-                                onClick={() => { vibrate(); openMpinDisableModal(); setIsProfileOpen(false); }}
-                                className={cn(
-                                  "w-full flex items-center gap-3 p-3 rounded-xl transition-all text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/20"
-                                )}
-                              >
-                                <ShieldOff size={18} className="text-rose-500" />
-                                <span className="font-medium flex-1 text-left">Disable TPIN</span>
-                              </button>
-                              <button 
-                                onClick={() => { vibrate(); openMpinChangeModal(); setIsProfileOpen(false); }}
-                                className={cn(
-                                  "w-full flex items-center gap-3 p-3 rounded-xl transition-all",
-                                  theme === 'dark' ? "hover:bg-zinc-900 text-slate-300" : "hover:bg-slate-50 text-black"
-                                )}
-                              >
-                                <KeyRound size={18} className="text-indigo-500" />
-                                <span className="font-medium flex-1 text-left">Change your TPIN</span>
-                              </button>
-                              <button 
-                                onClick={() => { vibrate(); openMpinForgotModal(); setIsProfileOpen(false); }}
-                                className={cn(
-                                  "w-full flex items-center gap-3 p-3 rounded-xl transition-all",
-                                  theme === 'dark' ? "hover:bg-zinc-900 text-slate-300" : "hover:bg-slate-50 text-black"
-                                )}
-                              >
-                                <RefreshCw size={18} className="text-indigo-500" />
-                                <span className="font-medium flex-1 text-left">Forgot TPIN</span>
-                              </button>
-                            </>
-                          )}
-                        </>
-                      )}
 
                       <button 
                         onClick={() => { setIsEditingName(true); setIsProfileOpen(false); }}
@@ -9362,32 +6234,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         )}
                       >
                         <Settings size={18} />
-                        <span className="font-medium flex-1 text-left">Settings</span>
+                        <span className="font-medium flex-1 text-left">Profile Settings</span>
                       </button>
 
                       <button 
-                        type="button"
                         onClick={handleSignOut}
-                        disabled={isSigningOut}
-                        className={cn(
-                          "w-full flex items-center gap-3 p-3 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-900/20 text-rose-600 transition-all cursor-pointer font-medium select-none",
-                          isSigningOut && "opacity-60 cursor-wait pointer-events-none"
-                        )}
+                        className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-900/20 text-rose-600 transition-all"
                       >
-                        {isSigningOut ? (
-                          <Loader2 size={18} className="animate-spin text-rose-600 shrink-0" />
-                        ) : (
-                          <LogOut size={18} className="shrink-0" />
-                        )}
-                        <span className="flex-1 text-left">{isSigningOut ? "Logging out..." : "Logout"}</span>
+                        <LogOut size={18} />
+                        <span className="font-medium flex-1 text-left">Sign Out</span>
                       </button>
-
-                      {/* Version Display */}
-                      <div className="pt-2 pb-0.5 px-3 mt-1 border-t border-slate-100 dark:border-zinc-800/80 text-center select-none">
-                        <span className="text-[11px] font-medium text-slate-400 dark:text-zinc-500 tracking-wide">
-                          {versionDisplay}
-                        </span>
-                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -9417,8 +6273,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   value={searchQueryInput}
                   onChange={(e) => setSearchQueryInput(e.target.value)}
                   className={cn(
-                    "flex-1 rounded-none py-2 px-3 border outline-none text-sm transition-all",
-                    theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-slate-50 border-slate-200 text-slate-900"
+                    "flex-1 rounded-full py-2 px-4 outline-none text-sm transition-all",
+                    theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-100 text-black"
                   )}
                 />
                 {searchQueryInput && (
@@ -9433,75 +6289,44 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       )}
 
       {/* Main Content Area */}
-      <main className="w-full max-w-none px-4 sm:px-6 md:px-8 py-6 sm:py-8 overflow-x-hidden min-w-0">
-        {!activeBookId ? (
-          /* PAGE 1: HOME / BOOKS LIST */
-          <motion.div
-            key="home"
-            initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.16, ease: "easeOut" }}
-            className="w-full space-y-6 min-w-0"
-          >
-              {isOffline && (
-                <div className={cn(
-                  "flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-xs font-semibold border transition-all animate-fade-in shadow-xs",
-                  theme === 'dark' 
-                    ? "bg-rose-950/20 border-rose-800/40 text-rose-300" 
-                    : "bg-rose-50 border-rose-200 text-rose-800"
-                )}>
-                  <div className="flex items-center gap-2.5">
-                    <CloudOff size={16} className="text-rose-500 shrink-0 animate-pulse" />
-                    <span className="leading-tight">
-                      <strong className="font-bold">Offline Mode:</strong> Viewing cached cashbooks in read-only mode. Connect to the internet to create cashbooks or entries.
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleRetryConnection}
-                    className="px-3 py-1 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold shrink-0 cursor-pointer"
-                  >
-                    Retry
-                  </button>
-                </div>
-              )}
-
+      <main className="w-full mx-auto p-2 sm:p-4 lg:p-6 lg:px-6 xl:px-10">
+        <AnimatePresence mode="wait">
+          {!activeBookId ? (
+            /* PAGE 1: HOME / BOOKS LIST */
+            <motion.div
+              key="home"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="space-y-8"
+            >
               {/* User Welcome Section */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full min-w-0">
-                <div className="space-y-0.5 sm:space-y-1 min-w-0">
-                  <h2 className={cn(
-                    "text-xl sm:text-2xl lg:text-[clamp(1.35rem,2vw,1.75rem)] font-bold transition-colors duration-300 flex items-center gap-2 flex-wrap",
-                    theme === 'dark' ? "text-slate-100" : "text-slate-800"
-                  )}>
-                    Hello, <span className="text-indigo-600 dark:text-indigo-400">{userName}</span>!
-                    {userPhoneVerified && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-none text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/40 dark:border-emerald-900/30">
-                        ✓ Verified
-                      </span>
-                    )}
-                  </h2>
-                  <p className={cn(
-                    "text-xs sm:text-sm transition-colors duration-300",
-                    theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                  )}>Welcome back to your financial dashboard.</p>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-0.5 sm:space-y-1">
+                    <h2 className={cn(
+                      "text-2xl sm:text-3xl font-bold transition-colors duration-300 flex items-center gap-2 flex-wrap",
+                      theme === 'dark' ? "text-slate-100" : "text-slate-800"
+                    )}>
+                      Hello, <span className="text-indigo-600 dark:text-indigo-400">{userName}</span>!
+                      {userPhoneVerified && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/40 dark:border-emerald-900/30">
+                          ✓ Verified
+                        </span>
+                      )}
+                    </h2>
+                    <p className={cn(
+                      "text-sm sm:text-base transition-colors duration-300",
+                      theme === 'dark' ? "text-slate-400" : "text-slate-500"
+                    )}>Welcome back to your financial dashboard.</p>
                 </div>
 
-                <div className="flex items-center gap-3 sm:gap-4 shrink-0">
+                <div className="flex items-center gap-3 sm:gap-4">
                   {selectedBooks.size > 0 ? (
                     <button
-                      onClick={() => {
-                        if (isOffline) {
-                          vibrate(50);
-                          setShowOfflineDialog(true);
-                          return;
-                        }
-                        vibrate();
-                        setShowBulkDeleteConfirm(true);
-                        setDeleteConfirmed(false);
-                      }}
+                      onClick={() => { vibrate(); setShowBulkDeleteConfirm(true); setDeleteConfirmed(false); }}
                       className={cn(
-                        "flex-1 sm:flex-none py-2 sm:py-2.5 px-4 sm:px-6 bg-rose-600 hover:bg-rose-700 text-white rounded-none font-bold transition-all flex items-center justify-center gap-2 text-sm sm:text-base animate-in fade-in zoom-in duration-200 cursor-pointer shadow-xs",
-                        theme === 'dark' ? "shadow-none" : ""
+                        "flex-1 sm:flex-none py-2 sm:py-2.5 px-4 sm:px-6 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm sm:text-base animate-in fade-in zoom-in duration-200",
+                        theme === 'dark' ? "shadow-none" : "shadow-lg shadow-rose-100"
                       )}
                     >
                       <Trash2 size={18} />
@@ -9510,24 +6335,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   ) : (
                     books.length > 0 && (
                       <button
-                        onClick={() => {
-                          if (isOffline) {
-                            vibrate(50);
-                            setShowOfflineDialog(true);
-                            return;
-                          }
-                          vibrate();
-                          setIsCreatingBook(true);
-                        }}
+                        onClick={() => { vibrate(); setIsCreatingBook(true); }}
                         className={cn(
-                          "group/shortcut relative py-2 sm:py-2.5 px-4 sm:px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-none font-semibold transition-colors inline-flex items-center justify-center gap-1.5 text-xs sm:text-sm active:scale-[0.98] duration-150 cursor-pointer w-auto shrink-0 shadow-xs",
-                          theme === 'dark' ? "shadow-none" : ""
+                          "group/shortcut relative flex-1 sm:flex-none py-2 sm:py-2.5 px-4 sm:px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm sm:text-base hover:scale-[1.02] active:scale-[0.98] duration-200 cursor-pointer",
+                          theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
                         )}
                       >
-                        <Plus size={16} />
-                        <span>Create a Book</span>
-                        <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded-none shadow-lg whitespace-nowrap items-center gap-1 z-50">
-                          Press <kbd className="bg-slate-700 px-1 rounded-none">C</kbd> + <kbd className="bg-slate-700 px-1 rounded-none">B</kbd>
+                        <Plus size={18} />
+                        Create a Book
+                        <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
+                          Press <kbd className="bg-slate-700 px-1 rounded">C</kbd> + <kbd className="bg-slate-700 px-1 rounded">B</kbd>
                         </span>
                       </button>
                     )
@@ -9535,44 +6352,40 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
               </div>
 
-              {/* Books Section - Full-Width List with 1px Separators */}
+              {/* Books Section */}
               {filteredBooks.length === 0 ? (
                 <div className={cn(
-                  "w-full flex flex-col items-center justify-center py-16 px-6 text-center border transition-colors duration-200 rounded-none",
-                  theme === 'dark' ? "bg-zinc-950/60 border-zinc-800" : "bg-white border-slate-200"
+                  "flex flex-col items-center justify-center py-8 sm:py-12 text-center space-y-4 sm:space-y-6 border rounded-[24px] sm:rounded-[32px] shadow-sm mx-auto max-w-md transition-colors duration-300",
+                  theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
                 )}>
-                  <div className="w-12 h-12 rounded-none flex items-center justify-center bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 mb-4 border border-indigo-100 dark:border-indigo-900/40">
-                    <BookOpen size={22} />
+                  <div className={cn(
+                    "w-12 h-12 sm:w-16 sm:h-16 rounded-full flex items-center justify-center transition-colors duration-300",
+                    theme === 'dark' ? "bg-indigo-950/30 text-indigo-400" : "bg-indigo-50 text-indigo-600"
+                  )}>
+                    <BookOpen size={24} className="sm:w-8 sm:h-8" />
                   </div>
-                  <h3 className={cn(
-                    "text-base font-semibold transition-colors duration-200",
-                    theme === 'dark' ? "text-slate-100" : "text-slate-900"
-                  )}>
-                    {searchQuery ? "No matching Cashbooks found" : "No Cashbooks yet"}
-                  </h3>
-                  <p className={cn(
-                    "max-w-md text-xs sm:text-sm mt-1 transition-colors duration-200",
-                    theme === 'dark' ? "text-zinc-400" : "text-slate-500"
-                  )}>
-                    {searchQuery ? "Try searching with a different term." : "Create your first Cashbook to start tracking your finances."}
-                  </p>
-                  {!searchQuery && (
+                  <div className="space-y-1 sm:space-y-2 px-4">
+                    <h3 className={cn(
+                      "text-lg sm:text-xl font-black transition-colors duration-300",
+                      theme === 'dark' ? "text-slate-100" : "text-slate-800"
+                    )}>No Cashbooks Yet</h3>
+                    <p className={cn(
+                      "max-w-[200px] sm:max-w-xs mx-auto text-[10px] sm:text-xs transition-colors duration-300",
+                      theme === 'dark' ? "text-slate-500" : "text-slate-400"
+                    )}>Start your financial journey by creating your first cashbook today.</p>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-center gap-2 w-full justify-center">
                     <button
-                      onClick={() => {
-                        if (isOffline) {
-                          vibrate(50);
-                          setShowOfflineDialog(true);
-                          return;
-                        }
-                        vibrate();
-                        setIsCreatingBook(true);
-                      }}
-                      className="mt-6 inline-flex items-center justify-center gap-2 py-2 px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-none font-semibold text-xs sm:text-sm transition-colors cursor-pointer shadow-xs"
+                      onClick={() => { vibrate(); setIsCreatingBook(true); }}
+                      className={cn(
+                        "w-full sm:w-auto py-2 sm:py-2.5 px-5 sm:px-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 active:scale-95 text-xs sm:text-sm cursor-pointer",
+                        theme === 'dark' ? "shadow-none" : "shadow-xl shadow-indigo-100"
+                      )}
                     >
                       <Plus size={16} />
-                      <span>Create a Book</span>
+                      Create a Book
                     </button>
-                  )}
+                  </div>
                 </div>
               ) : (
                 /* FULL-WIDTH CASHBOOK LIST WITH SEPARATOR LINES */
@@ -9593,21 +6406,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         onPress={handleBookPress}
                         onEdit={(b, e) => {
                           e.stopPropagation();
-                          if (isOffline) {
-                            vibrate(50);
-                            setShowOfflineDialog(true);
-                            return;
-                          }
                           setIsEditingBook(b.id);
                           setEditBookName(b.name);
                         }}
                         onDelete={(id, e) => {
                           e.stopPropagation();
-                          if (isOffline) {
-                            vibrate(50);
-                            setShowOfflineDialog(true);
-                            return;
-                          }
                           handleDeleteBook(id);
                         }}
                         onOpen={handleSelectBook}
@@ -9618,20 +6421,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               )}
             </motion.div>
           ) : (
-              /* PAGE 2: INDIVIDUAL CASHBOOK VIEW */
+            /* PAGE 2: INDIVIDUAL CASHBOOK VIEW */
             <motion.div
-              key={activeBookId}
-              initial={shouldReduceMotion ? { opacity: 1, x: 0 } : { opacity: 0, x: 8 }}
+              key="cashbook"
+              initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.16, ease: "easeOut" }}
+              exit={{ opacity: 0, x: -20 }}
               className="w-full space-y-4 sm:space-y-6 pb-[180px] lg:pb-0"
             >
               {/* STICKY TOP CONTROLS SECTION */}
               <div className={cn(
-                "relative z-30 lg:sticky lg:top-0 transition-colors duration-300 border-b",
-                "-mt-2 pt-2 -mx-6 px-6 pb-3 mb-2",
-                "sm:-mt-4 sm:pt-4 sm:pb-4 sm:mb-4",
-                "md:-mt-6 md:pt-6 md:-mx-8 md:px-8 md:pb-5 md:mb-5",
+                "lg:sticky lg:top-0 z-30 transition-colors duration-300 border-b",
+                "-mt-2 pt-2 -mx-2 px-2 pb-3 mb-2",
+                "sm:-mt-4 sm:pt-4 sm:-mx-4 sm:px-4 sm:pb-4 sm:mb-4",
+                "lg:-mt-6 lg:pt-6 lg:-mx-6 lg:px-6 lg:pb-5 lg:mb-5",
+                "xl:-mx-10 xl:px-10",
                 "space-y-2.5 sm:space-y-4 shadow-sm",
                 theme === 'dark' ? "bg-black/95 backdrop-blur-md border-zinc-900" : "bg-slate-50/95 backdrop-blur-md border-slate-200"
               )}>
@@ -9653,146 +6457,31 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   >
                     <ArrowLeft size={22} className="sm:w-[24px] sm:h-[24px]" />
                   </button>
-                  <div className="flex items-center gap-2 font-sans font-bold text-base sm:text-lg tracking-tight select-none leading-none min-w-0">
+                  <div className="flex items-center font-sans font-bold text-base sm:text-lg tracking-tight select-none leading-none">
                     <h2 className={cn(
-                      "font-black truncate max-w-[140px] xs:max-w-[180px] sm:max-w-[280px] md:max-w-none lg:text-[clamp(1.125rem,2.2vw,1.5rem)] transition-colors duration-300 text-slate-900 dark:text-slate-100",
+                      "font-black truncate max-w-[160px] sm:max-w-[280px] md:max-w-none transition-colors duration-300 text-slate-900 dark:text-slate-100",
                     )}>{activeBook?.name}</h2>
-                    {currentUserRole && (
-                      <span className={cn(
-                        "text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md border tracking-wider shrink-0 select-none shadow-2xs",
-                        (currentUserRole === 'Primary Admin' || currentUserRole === 'Admin')
-                          ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/25"
-                          : currentUserRole === 'Book Admin'
-                          ? "bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/25"
-                          : currentUserRole === 'Data Operator'
-                          ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/25"
-                          : "bg-slate-500/10 text-slate-600 dark:text-zinc-400 border-slate-500/25"
-                      )}>
-                        {currentUserRole === 'Primary Admin' ? 'Admin' : currentUserRole}
-                      </span>
-                    )}
-                    <SyncStatusBadge theme={theme} className="hidden sm:inline-flex" />
                   </div>
                 </div>
                 </div>
                 
-                {/* Right actions: Import Entries + Add Member Icon (Admin Blue) + 3-Lines Menu */}
-                <div className="flex items-center gap-1 sm:gap-1.5">
-                  {canAddEntries(currentUserRole) && (
-                    <div className="relative hidden md:block" ref={importDropdownRef}>
-                      <button
-                        onClick={() => {
-                          vibrate();
-                          setShowImportDropdown(prev => !prev);
-                        }}
-                        title="Import Entries"
-                        className={cn(
-                          "flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 duration-150 whitespace-nowrap",
-                          showImportDropdown
-                            ? "bg-amber-100 border-amber-300 text-amber-900 dark:bg-amber-900/50 dark:border-amber-700 dark:text-amber-300"
-                            : theme === 'dark'
-                              ? "bg-amber-950/30 border-amber-900/50 text-amber-400 hover:bg-amber-950/50"
-                              : "bg-amber-50/80 border-amber-200/80 text-amber-800 hover:bg-amber-100/80"
-                        )}
-                      >
-                        <DownloadCloud size={15} className="text-amber-500 shrink-0" />
-                        <span className="font-bold">Import Entries</span>
-                        <ChevronDown size={13} className={cn("transition-transform duration-200", showImportDropdown ? "rotate-180 text-amber-600" : "text-amber-500")} />
-                      </button>
+                {/* Right actions: Download Center Trigger + 3-Dots Menu */}
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <DownloadCenterTrigger theme={theme} isOpen={showDownloadCenter} setIsOpen={setShowDownloadCenter} />
 
-                      {/* Dropdown Menu */}
-                      <AnimatePresence>
-                        {showImportDropdown && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 6, scale: 0.95 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 6, scale: 0.95 }}
-                            transition={{ duration: 0.12 }}
-                            className={cn(
-                              "absolute right-0 mt-1.5 w-56 rounded-2xl border shadow-xl py-1.5 z-40 backdrop-blur-md overflow-hidden",
-                              theme === 'dark'
-                                ? "bg-zinc-950/95 border-zinc-800 text-slate-200 divide-y divide-zinc-900"
-                                : "bg-white/95 border-slate-200 text-slate-800 divide-y divide-slate-100"
-                            )}
-                          >
-                            <div className="py-1">
-                              {/* Option 1: Import TrackBook Code */}
-                              <button
-                                onClick={() => {
-                                  setShowImportDropdown(false);
-                                  vibrate();
-                                  setShowImportModal(true);
-                                }}
-                                className={cn(
-                                  "w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-left transition-colors cursor-pointer",
-                                  theme === 'dark'
-                                    ? "hover:bg-amber-950/40 text-amber-300"
-                                    : "hover:bg-amber-50 text-amber-900"
-                                )}
-                              >
-                                <DownloadCloud size={15} className="text-amber-500 shrink-0" />
-                                <span>Import TrackBook Code</span>
-                              </button>
-
-                              {/* Option 2: Import an Excel */}
-                              <button
-                                onClick={() => {
-                                  setShowImportDropdown(false);
-                                  vibrate();
-                                  const slug = getBookSlug(activeBook?.name || '', activeBook?.id || '');
-                                  navigate(`/import/excel?bookSlug=${slug}&bookId=${activeBook?.id || ''}`);
-                                }}
-                                className={cn(
-                                  "w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-bold text-left transition-colors cursor-pointer",
-                                  theme === 'dark'
-                                    ? "hover:bg-emerald-950/40 text-emerald-400"
-                                    : "hover:bg-emerald-50 text-emerald-800"
-                                )}
-                              >
-                                <FileSpreadsheet size={15} className="text-emerald-500 shrink-0" />
-                                <span>Import an Excel</span>
-                              </button>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  )}
-
-                  {/* Add Member Icon (Admin Blue, No Border, positioned right next to 3-lines menu) */}
-                  {canManageMembers(currentUserRole) && (
-                    <button
-                      onClick={() => {
-                        vibrate();
-                        const slug = getBookSlug(activeBook?.name || '', activeBook?.id || '');
-                        navigate(`/cashbooks/${slug}/members`);
-                      }}
-                      title="Add Member / Members & Access"
-                      aria-label="Add Member"
-                      className={cn(
-                        "flex items-center justify-center w-10 h-10 rounded-xl transition-all cursor-pointer active:scale-95 duration-150 shrink-0 border-0 outline-none",
-                        currentTabName === 'members'
-                          ? "bg-blue-600 text-white shadow-blue-500/20"
-                          : "text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40"
-                      )}
-                    >
-                      <UserPlus size={20} />
-                    </button>
-                  )}
-
-                  {/* 3-Lines Overflow/Book Actions Menu */}
+                  {/* 3-Dots Overflow/Book Actions Menu */}
                   <div className="relative" ref={bookMenuRef}>
                   <button 
                     onClick={() => setShowBookMenu(!showBookMenu)}
                     className={cn(
-                      "flex items-center justify-center w-10 h-10 rounded-xl transition-all cursor-pointer active:scale-95 duration-150 hover:bg-slate-100 dark:hover:bg-slate-800/60 border-0 outline-none",
+                      "flex items-center justify-center w-10 h-10 border rounded-xl transition-all cursor-pointer active:scale-95 duration-150 hover:bg-slate-100 dark:hover:bg-slate-800",
                       theme === 'dark' 
-                        ? "text-slate-200" 
-                        : "text-slate-600"
+                        ? "border-zinc-800 text-slate-200" 
+                        : "border-slate-200 text-slate-600 shadow-sm bg-white"
                     )}
                     aria-label="Book Options"
                   >
-                    <Menu size={20} />
+                    <MoreVertical size={20} />
                   </button>
                   <AnimatePresence>
                     {showBookMenu && (
@@ -9843,40 +6532,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           );
                         })}
 
-                        <div className="border-t border-slate-100 dark:border-zinc-900/60 my-1.5 md:hidden" />
+                        <div className="border-t border-slate-100 dark:border-zinc-900/60 my-1.5" />
 
-                        {/* Actions Section - Mobile View */}
-                        <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500 mb-1 md:hidden">
-                          Import Entries
+                        {/* Actions Section */}
+                        <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500 mb-1">
+                          Book Actions
                         </div>
                         <button 
-                          onClick={() => { setShowBookMenu(false); vibrate(); setShowImportModal(true); }}
+                          onClick={() => { setShowBookMenu(false); setShowImportModal(true); }}
                           className={cn(
-                            "w-full flex md:hidden items-center gap-2.5 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs mb-1",
+                            "w-full flex items-center gap-3 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs",
                             theme === 'dark' 
                               ? "bg-amber-950/20 border-amber-900/40 text-amber-400 hover:bg-amber-950/45" 
                               : "bg-amber-50/50 border-amber-100/70 text-amber-800 hover:bg-amber-50"
                           )}
                         >
                           <DownloadCloud size={14} className="text-amber-500 shrink-0" />
-                          <span className="font-bold">Import TrackBook Code</span>
-                        </button>
-                        <button 
-                          onClick={() => { 
-                            setShowBookMenu(false); 
-                            vibrate();
-                            const slug = getBookSlug(activeBook?.name || '', activeBook?.id || '');
-                            navigate(`/import/excel?bookSlug=${slug}&bookId=${activeBook?.id || ''}`); 
-                          }}
-                          className={cn(
-                            "w-full flex md:hidden items-center gap-2.5 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs",
-                            theme === 'dark' 
-                              ? "bg-emerald-950/20 border-emerald-900/40 text-emerald-400 hover:bg-emerald-950/45" 
-                              : "bg-emerald-50/50 border-emerald-100/70 text-emerald-800 hover:bg-emerald-50"
-                          )}
-                        >
-                          <FileSpreadsheet size={14} className="text-emerald-500 shrink-0" />
-                          <span className="font-bold">Import an Excel</span>
+                          <span className="font-bold">Import Entries</span>
                         </button>
                       </motion.div>
                     )}
@@ -9888,58 +6560,47 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             {currentTabName === 'entries' && (
               <>
                 {/* Mobile Summary Card (Reference Image Style) */}
-              <div
-                className={cn(
-                  "lg:hidden rounded-2xl border shadow-sm relative overflow-hidden transition-colors duration-300",
-                  theme === 'dark' ? "bg-zinc-950/90 border-zinc-800/80 backdrop-blur-md" : "bg-white/90 border-slate-200/80 backdrop-blur-md"
-                )}
-              >
-                <div className="p-3.5 px-4 space-y-2.5">
+              <div className={cn(
+                "lg:hidden rounded-2xl border shadow-sm overflow-hidden transition-colors duration-300",
+                theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
+              )}>
+                <div className="p-3 px-4 space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Wallet size={15} className="text-indigo-500 shrink-0" />
-                      <h3 className={cn(
-                        "text-sm font-bold transition-colors duration-300",
-                        theme === 'dark' ? "text-slate-100" : "text-black"
-                      )}>Net Balance</h3>
-                    </div>
+                    <h3 className={cn(
+                      "text-sm font-bold transition-colors duration-300",
+                      theme === 'dark' ? "text-slate-100" : "text-black"
+                    )}>Net Balance</h3>
                     <p className={cn(
-                      "font-black transition-colors duration-300 tracking-tight",
+                      "font-black transition-colors duration-300",
                       theme === 'dark' ? "text-slate-100" : "text-black",
-                      "text-base"
+                      "text-sm"
                     )}>
                       {formatCurrency(totals.net)}
                     </p>
                   </div>
                   
                   <div className={cn(
-                    "space-y-1.5 pt-2 border-t transition-colors duration-300",
-                    theme === 'dark' ? "border-zinc-800/70" : "border-slate-100"
+                    "space-y-1.5 pt-1.5 border-t transition-colors duration-300",
+                    theme === 'dark' ? "border-zinc-800" : "border-slate-50"
                   )}>
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        <p className={cn(
-                          "text-xs font-bold transition-colors duration-300",
-                          theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                        )}>Total In (+)</p>
-                      </div>
                       <p className={cn(
-                        "font-black text-emerald-600 dark:text-emerald-400",
-                        "text-xs font-mono"
+                        "text-xs font-bold transition-colors duration-300",
+                        theme === 'dark' ? "text-slate-400" : "text-slate-500"
+                      )}>Total In (+)</p>
+                      <p className={cn(
+                        "font-black text-emerald-600",
+                        "text-xs"
                       )}>{formatCurrency(totals.in)}</p>
                     </div>
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                        <p className={cn(
-                          "text-xs font-bold transition-colors duration-300",
-                          theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                        )}>Total Out (-)</p>
-                      </div>
                       <p className={cn(
-                        "font-black text-rose-600 dark:text-rose-400",
-                        "text-xs font-mono"
+                        "text-xs font-bold transition-colors duration-300",
+                        theme === 'dark' ? "text-slate-400" : "text-slate-500"
+                      )}>Total Out (-)</p>
+                      <p className={cn(
+                        "font-black text-rose-600",
+                        "text-xs"
                       )}>{formatCurrency(totals.out)}</p>
                     </div>
                   </div>
@@ -9948,86 +6609,56 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
 
               {/* Action Buttons Row (Desktop Only) */}
-              {canAddEntries(currentUserRole) ? (
-                <div className="hidden lg:flex items-center gap-3">
-                  <button
-                    onClick={() => {
-                      if (isOffline) {
-                        vibrate(50);
-                        setShowOfflineDialog(true);
-                        return;
-                      }
-                      vibrate();
-                      setShowForm('in');
-                      setTransactionDate(safeToDateTimeLocal(new Date()));
-                    }}
-                    className={cn(
-                      "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
-                      theme === 'dark' 
-                        ? "bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/40" 
-                        : "bg-emerald-50/50 border border-emerald-150 text-emerald-800 hover:bg-emerald-100/70 shadow-sm shadow-emerald-50/20"
-                    )}
-                  >
-                    <Plus size={20} />
-                    Cash In
-                    <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
-                      Press <kbd className="bg-slate-700 px-1 rounded">C</kbd> + <kbd className="bg-slate-700 px-1 rounded">I</kbd>
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (isOffline) {
-                        vibrate(50);
-                        setShowOfflineDialog(true);
-                        return;
-                      }
-                      vibrate();
-                      setShowForm('out');
-                      setTransactionDate(safeToDateTimeLocal(new Date()));
-                    }}
-                    className={cn(
-                      "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
-                      theme === 'dark' 
-                        ? "bg-rose-900/20 text-rose-400 hover:bg-rose-900/40" 
-                        : "bg-rose-50/50 border border-rose-150 text-rose-800 hover:bg-rose-100/70 shadow-sm shadow-rose-50/20"
-                    )}
-                  >
-                    <Minus size={20} />
-                    Cash Out
-                    <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
-                      Press <kbd className="bg-slate-700 px-1 rounded">C</kbd> + <kbd className="bg-slate-700 px-1 rounded">O</kbd>
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => { 
-                      if (isOffline) {
-                        vibrate(50);
-                        setShowOfflineDialog(true);
-                        return;
-                      }
-                      vibrate(); 
-                      setShowAiWarning(true);
-                    }}
-                    className={cn(
-                      "group/shortcut relative flex-1 sm:flex-none lg:w-44 lg:h-12 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
-                      theme === 'dark' 
-                        ? "bg-indigo-900/20 text-indigo-400 hover:bg-indigo-900/40" 
-                        : "bg-indigo-50/40 border border-indigo-150 text-indigo-750 hover:bg-indigo-100 shadow-sm shadow-indigo-100/20"
-                    )}
-                  >
-                    <Upload size={20} className="text-indigo-650 dark:text-indigo-400 shrink-0" />
-                    AI Upload
-                    <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
-                      Press <kbd className="bg-slate-700 px-1 rounded">A</kbd> + <kbd className="bg-slate-700 px-1 rounded">U</kbd>
-                    </span>
-                  </button>
-                </div>
-              ) : (
-                <div className="hidden lg:flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-xs font-semibold text-slate-600 dark:text-zinc-400">
-                  <Eye size={16} className="text-indigo-500 shrink-0" />
-                  <span>Viewing as <strong>{currentUserRole}</strong> (Read-only). New entries, edits, and deletions are restricted.</span>
-                </div>
-              )}
+              <div className="hidden lg:flex items-center gap-3">
+                <button
+                  onClick={() => { vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
+                  className={cn(
+                    "group/shortcut relative flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
+                    theme === 'dark' 
+                      ? "bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/40" 
+                      : "bg-emerald-50/50 border border-emerald-150 text-emerald-800 hover:bg-emerald-100/70 shadow-sm shadow-emerald-50/20"
+                  )}
+                >
+                  <Plus size={20} />
+                  Cash In
+                  <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
+                    Press <kbd className="bg-slate-700 px-1 rounded">C</kbd> + <kbd className="bg-slate-700 px-1 rounded">I</kbd>
+                  </span>
+                </button>
+                <button
+                  onClick={() => { vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
+                  className={cn(
+                    "group/shortcut relative flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
+                    theme === 'dark' 
+                      ? "bg-rose-900/20 text-rose-400 hover:bg-rose-900/40" 
+                      : "bg-rose-50/50 border border-rose-150 text-rose-800 hover:bg-rose-100/70 shadow-sm shadow-rose-50/20"
+                  )}
+                >
+                  <Minus size={20} />
+                  Cash Out
+                  <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
+                    Press <kbd className="bg-slate-700 px-1 rounded">C</kbd> + <kbd className="bg-slate-700 px-1 rounded">O</kbd>
+                  </span>
+                </button>
+                <button
+                  onClick={() => { 
+                    vibrate(); 
+                    setShowAiWarning(true);
+                  }}
+                  className={cn(
+                    "group/shortcut relative flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
+                    theme === 'dark' 
+                      ? "bg-indigo-900/20 text-indigo-400 hover:bg-indigo-900/40" 
+                      : "bg-indigo-50/40 border border-indigo-150 text-indigo-750 hover:bg-indigo-100 shadow-sm shadow-indigo-100/20"
+                  )}
+                >
+                  <Upload size={20} className="text-indigo-650 dark:text-indigo-400 shrink-0" />
+                  AI Upload
+                  <span className="hidden lg:group-hover/shortcut:flex absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded shadow-lg whitespace-nowrap items-center gap-1 z-50">
+                    Press <kbd className="bg-slate-700 px-1 rounded">A</kbd> + <kbd className="bg-slate-700 px-1 rounded">U</kbd>
+                  </span>
+                </button>
+              </div>
 
               {/* Filters & Search Row */}
               <div className="flex flex-col lg:flex-row items-center gap-3 sm:gap-4">
@@ -10045,88 +6676,78 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   />
                 </div>                {/* Desktop Action & Filter Row */}
                 <div className="hidden lg:flex items-center gap-2 pb-1 sm:pb-0">
-                  {currentUserRole !== 'Viewer' && (
-                    <>
-                      {selectedTransactions.size === 0 ? (
-                        <button
-                          onClick={toggleSelectAll}
-                          className={cn(
-                            "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200",
-                            theme === 'dark' ? "bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm"
-                          )}
-                        >
-                          <Square size={16} />
-                          Select All
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => setSelectedTransactions(new Set())}
-                            className={cn(
-                              "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm",
-                              theme === 'dark' && "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800"
-                            )}
-                          >
-                            <X size={16} />
-                            <span>Deselect All</span>
-                          </button>
-                          <button
-                            onClick={() => setShowShareModal(true)}
-                            className={cn(
-                              "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
-                              theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
-                            )}
-                          >
-                            <Share size={16} />
-                            Share Entries
-                          </button>
-                          {canDeleteEntries(currentUserRole) && (
-                            <button
-                              onClick={() => { setShowBulkTransactionDeleteConfirm(true); setDeleteConfirmed(false); }}
-                              className={cn(
-                                "flex items-center gap-2 px-4 h-11 lg:min-w-[145px] lg:justify-center bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
-                                theme === 'dark' ? "shadow-none" : "shadow-lg shadow-rose-100"
-                              )}
-                            >
-                              <Trash size={16} />
-                              Delete ({selectedTransactions.size})
-                            </button>
-                          )}
-                        </>
+                  {selectedTransactions.size === 0 ? (
+                    <button
+                      onClick={toggleSelectAll}
+                      className={cn(
+                        "flex items-center gap-2 px-4 h-11 rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200",
+                        theme === 'dark' ? "bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm"
                       )}
+                    >
+                      <Square size={16} />
+                      Select All
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setSelectedTransactions(new Set())}
+                        className={cn(
+                          "flex items-center gap-2 px-4 h-11 rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 shadow-sm",
+                          theme === 'dark' && "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800"
+                        )}
+                      >
+                        <X size={16} />
+                        <span>Deselect All</span>
+                      </button>
+                      <button
+                        onClick={() => setShowShareModal(true)}
+                        className={cn(
+                          "flex items-center gap-2 px-4 h-11 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
+                          theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
+                        )}
+                      >
+                        <Share size={16} />
+                        Share Entries
+                      </button>
+                      <button
+                        onClick={() => { setShowBulkTransactionDeleteConfirm(true); setDeleteConfirmed(false); }}
+                        className={cn(
+                          "flex items-center gap-2 px-4 h-11 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition-all hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap text-sm cursor-pointer duration-200",
+                          theme === 'dark' ? "shadow-none" : "shadow-lg shadow-rose-100"
+                        )}
+                      >
+                        <Trash size={16} />
+                        Delete ({selectedTransactions.size})
+                      </button>
                     </>
                   )}
-                  <div className="relative min-w-[130px]">
-                    <InAppSelect
-                      id="filter-transaction-type-desktop"
+                  <div className="relative min-w-[120px]">
+                    <select 
                       value={transactionTypeFilter}
-                      onChange={(val) => setTransactionTypeFilter(val as any)}
-                      options={[
-                        { value: 'all', label: 'All Types' },
-                        { value: 'in', label: 'Cash In' },
-                        { value: 'out', label: 'Cash Out' },
-                      ]}
-                      theme={theme}
-                      size="md"
-                      triggerClassName={cn(
-                        "w-full px-3.5 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold",
+                      onChange={(e) => setTransactionTypeFilter(e.target.value as any)}
+                      className={cn(
+                        "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold appearance-none",
                         theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
                       )}
-                    />
+                    >
+                      <option value="all">All Types</option>
+                      <option value="in">Cash In</option>
+                      <option value="out">Cash Out</option>
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                   </div>
                   <div className="relative min-w-[140px]">
-                    <InAppSelect
-                      id="filter-transaction-duration-desktop"
+                    <select 
                       value={transactionDurationFilter}
-                      onChange={(val) => setTransactionDurationFilter(val)}
-                      options={DURATIONS.map(d => ({ value: d, label: d }))}
-                      theme={theme}
-                      size="md"
-                      triggerClassName={cn(
-                        "w-full px-3.5 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold",
+                      onChange={(e) => setTransactionDurationFilter(e.target.value)}
+                      className={cn(
+                        "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold appearance-none",
                         theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
                       )}
-                    />
+                    >
+                      {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                   </div>
                   {transactionDurationFilter === 'Custom' && (
                     <div className="relative min-w-[150px]">
@@ -10148,38 +6769,34 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <div className="lg:hidden w-full flex flex-col gap-2.5">
 
                   {/* ROW 3: [All Types] [All] */}
-                  <div className="grid grid-cols-2 gap-2.5 w-full relative z-20">
+                  <div className="grid grid-cols-2 gap-2.5 w-full">
                     <div className="relative w-full">
-                      <InAppSelect
-                        id="filter-transaction-type-mobile"
+                      <select 
                         value={transactionTypeFilter}
-                        onChange={(val) => setTransactionTypeFilter(val as any)}
-                        options={[
-                          { value: 'all', label: 'All Types' },
-                          { value: 'in', label: 'Cash In' },
-                          { value: 'out', label: 'Cash Out' },
-                        ]}
-                        theme={theme}
-                        size="md"
-                        triggerClassName={cn(
-                          "w-full px-3 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-xs font-bold",
+                        onChange={(e) => setTransactionTypeFilter(e.target.value as any)}
+                        className={cn(
+                          "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-xs font-bold appearance-none",
                           theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
                         )}
-                      />
+                      >
+                        <option value="all">All Types</option>
+                        <option value="in">Cash In</option>
+                        <option value="out">Cash Out</option>
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                     </div>
                     <div className="relative w-full">
-                      <InAppSelect
-                        id="filter-transaction-duration-mobile"
+                      <select 
                         value={transactionDurationFilter}
-                        onChange={(val) => setTransactionDurationFilter(val)}
-                        options={DURATIONS.map(d => ({ value: d, label: d }))}
-                        theme={theme}
-                        size="md"
-                        triggerClassName={cn(
-                          "w-full px-3 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-xs font-bold",
+                        onChange={(e) => setTransactionDurationFilter(e.target.value)}
+                        className={cn(
+                          "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-xs font-bold appearance-none",
                           theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
                         )}
-                      />
+                      >
+                        {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                     </div>
                   </div>
                   {transactionDurationFilter === 'Custom' && (
@@ -10199,7 +6816,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
 
               {/* Balance Cards Row (Desktop Only) */}
-              <div className="hidden lg:grid lg:grid-cols-3 w-full gap-4 sm:gap-6">
+              <div className="hidden lg:grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
                 <div className={cn(
                   "p-6 rounded-3xl border flex items-center gap-4 shadow-sm transition-colors duration-300",
                   theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
@@ -10280,23 +6897,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               {currentTabName === 'entries' && (
                 <>
                   <div className="space-y-4">
-                    {isOffline && (
-                      <div className={cn(
-                        "flex items-center gap-2.5 px-4 py-2.5 rounded-2xl text-xs font-medium border transition-all animate-fade-in shadow-xs",
-                        theme === 'dark' 
-                          ? "bg-rose-950/20 border-rose-800/40 text-rose-300" 
-                          : "bg-rose-50 border-rose-200 text-rose-800"
-                      )}>
-                        <CloudOff size={15} className="text-rose-500 shrink-0 animate-pulse" />
-                        <span className="leading-tight">
-                          <strong className="font-bold">Offline Mode:</strong> Viewing cached entries in read-only mode. Adding, editing, or deleting entries is disabled until internet is restored.
-                        </span>
-                      </div>
-                    )}
-
                 {/* Mobile Transaction List (Card Based) */}
                  <div ref={mobileContainerRef} className="lg:hidden space-y-3">
-                  {(isEntriesLoading || (activeBookId !== null && !entriesCache.has(activeBookId))) && filteredTransactions.length === 0 ? (
+                  {(isEntriesLoading || (activeBookId !== null && (!entriesCache.has(activeBookId) || !lastFetchTimeCache.has(activeBookId)))) && filteredTransactions.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
                       <div className="relative flex items-center justify-center">
                         <div className="w-12 h-12 rounded-full border-2 border-indigo-500/20 animate-ping absolute" />
@@ -10311,29 +6914,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   ) : filteredTransactions.length === 0 ? (
                     <div className={cn(
-                      "py-12 px-6 text-center rounded-3xl border transition-colors duration-300 space-y-3",
+                      "py-12 text-center rounded-3xl border transition-colors duration-300",
                       theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
                     )}>
-                      {isOffline ? (
-                        <>
-                          <CloudOff size={36} className="mx-auto text-rose-500 animate-pulse" />
-                          <h4 className="text-sm font-bold">No Entries Found</h4>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed max-w-xs mx-auto">
-                            No entries recorded yet for this cashbook. Connect to the internet to record transactions.
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <History size={40} className={cn(
-                            "mx-auto mb-2 transition-colors duration-300",
-                            theme === 'dark' ? "text-slate-700" : "text-slate-200"
-                          )} />
-                          <p className={cn(
-                            "text-sm font-medium transition-colors duration-300",
-                            theme === 'dark' ? "text-slate-500" : "text-black"
-                          )}>No entries found</p>
-                        </>
-                      )}
+                      <History size={40} className={cn(
+                        "mx-auto mb-2 transition-colors duration-300",
+                        theme === 'dark' ? "text-slate-700" : "text-slate-200"
+                      )} />
+                      <p className={cn(
+                        "text-sm font-medium transition-colors duration-300",
+                        theme === 'dark' ? "text-slate-500" : "text-black"
+                      )}>No entries found</p>
                     </div>
                   ) : (
                     (() => {
@@ -10358,7 +6949,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                   theme === 'dark' ? "text-slate-500" : "text-slate-600"
                                 )}>{date}</h4>
                               </div>
-                                                        {transactions.map((t) => (
+                              
+                              {transactions.map((t) => (
                                 <MobileTransactionRow
                                   key={t.id}
                                   t={t}
@@ -10372,16 +6964,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                   handleDeleteTransaction={handleDeleteTransaction}
                                   handleRetryUpload={handleRetryUpload}
                                   uploadStatuses={uploadStatuses}
-                                  setPreviewImages={handleOpenPreview}
+                                  setPreviewImages={setPreviewImages}
                                   setPreviewIndex={setPreviewIndex}
                                   setPreviewRotation={setPreviewRotation}
                                   setPreviewZoom={setPreviewZoom}
                                   theme={theme}
                                   index={visibleSlice.indexOf(t)}
                                   isJustEdited={justEditedTransactionId === t.id}
-                                  canEdit={canEditEntries(currentUserRole)}
-                                  canDelete={canDeleteEntries(currentUserRole)}
-                                  canSelect={currentUserRole !== 'Viewer'}
                                 />
                               ))}
                             </div>
@@ -10414,26 +7003,24 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             "text-xs font-bold uppercase tracking-wider transition-colors duration-300",
                             theme === 'dark' ? "bg-slate-800/50 text-slate-300" : "bg-slate-50 text-slate-400"
                           )}>
-                            {currentUserRole !== 'Viewer' && (
-                              <th className="px-3 sm:px-6 py-4 w-12">
-                                <button 
-                                  onClick={toggleSelectAll}
-                                  className={cn(
-                                    "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
-                                    selectedTransactions.size === filteredTransactions.length && filteredTransactions.length > 0
-                                      ? "bg-indigo-600 border-indigo-600 text-white"
-                                      : "border-slate-300 dark:border-slate-700"
-                                  )}
-                                >
-                                  {selectedTransactions.size === filteredTransactions.length && filteredTransactions.length > 0 && <CheckSquare size={14} />}
-                                </button>
-                              </th>
-                            )}
+                            <th className="px-3 sm:px-6 py-4 w-12">
+                              <button 
+                                onClick={toggleSelectAll}
+                                className={cn(
+                                  "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
+                                  selectedTransactions.size === filteredTransactions.length && filteredTransactions.length > 0
+                                    ? "bg-indigo-600 border-indigo-600 text-white"
+                                    : "border-slate-300 dark:border-slate-700"
+                                )}
+                              >
+                                {selectedTransactions.size === filteredTransactions.length && filteredTransactions.length > 0 && <CheckSquare size={14} />}
+                              </button>
+                            </th>
                              <th className="px-3 sm:px-6 py-4">
-                                <div className="flex items-center gap-2">
-                                  Date & Time
-                                </div>
-                              </th>
+                               <div className="flex items-center gap-2">
+                                 Date & Time
+                               </div>
+                             </th>
                             <th className="px-3 sm:px-6 py-4">Details</th>
                             <th 
                               className="px-3 sm:px-6 py-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
@@ -10461,9 +7048,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             "divide-y transition-colors duration-300",
                             theme === 'dark' ? "divide-slate-800" : "divide-slate-50"
                           )}
-                        >{(isEntriesLoading || (activeBookId !== null && !entriesCache.has(activeBookId))) && filteredTransactions.length === 0 ? (
+                        >{(isEntriesLoading || (activeBookId !== null && (!entriesCache.has(activeBookId) || !lastFetchTimeCache.has(activeBookId)))) && filteredTransactions.length === 0 ? (
                             <tr>
-                              <td colSpan={currentUserRole !== 'Viewer' ? 9 : 8} className="px-6 py-20">
+                              <td colSpan={9} className="px-6 py-20">
                                 <div className="flex flex-col items-center justify-center py-12 text-center space-y-4">
                                   <div className="relative flex items-center justify-center">
                                     <div className="w-12 h-12 rounded-full border-2 border-indigo-500/20 animate-ping absolute" />
@@ -10480,32 +7067,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             </tr>
                           ) : filteredTransactions.length === 0 ? (
                             <tr>
-                              <td colSpan={currentUserRole !== 'Viewer' ? 9 : 8} className="px-6 py-20 text-center">
-                                <div className="flex flex-col items-center justify-center space-y-3 max-w-md mx-auto">
-                                  {isOffline ? (
-                                    <>
-                                      <div className="w-12 h-12 rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-500 flex items-center justify-center">
-                                        <CloudOff size={24} className="animate-pulse" />
-                                      </div>
-                                      <h4 className="text-sm font-bold">No Entries Found</h4>
-                                      <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
-                                        No entries recorded yet for this cashbook. Connect to the internet to record transactions.
-                                      </p>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <div className={cn(
-                                        "w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-300",
-                                        theme === 'dark' ? "bg-slate-800 text-slate-700" : "bg-slate-50 text-slate-300"
-                                      )}>
-                                        <History size={24} />
-                                      </div>
-                                      <p className={cn(
-                                        "text-sm font-medium transition-colors duration-300",
-                                        theme === 'dark' ? "text-slate-500" : "text-black"
-                                      )}>No entries found for this book.</p>
-                                    </>
-                                  )}
+                              <td colSpan={9} className="px-6 py-20 text-center">
+                                <div className="flex flex-col items-center justify-center space-y-3">
+                                  <div className={cn(
+                                    "w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-300",
+                                    theme === 'dark' ? "bg-slate-800 text-slate-700" : "bg-slate-50 text-slate-300"
+                                  )}>
+                                    <History size={24} />
+                                  </div>
+                                  <p className={cn(
+                                    "text-sm font-medium transition-colors duration-300",
+                                    theme === 'dark' ? "text-slate-500" : "text-black"
+                                  )}>No entries found for this book.</p>
                                 </div>
                               </td>
                             </tr>
@@ -10513,7 +7086,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             <>
                               {desktopPaddingTop > 0 && (
                                 <tr style={{ height: `${desktopPaddingTop}px` }}>
-                                  <td colSpan={currentUserRole !== 'Viewer' ? 9 : 8} style={{ padding: 0, height: `${desktopPaddingTop}px` }} />
+                                  <td colSpan={9} style={{ padding: 0, height: `${desktopPaddingTop}px` }} />
                                 </tr>
                               )}
                               {pagedTransactions.slice(desktopStart, desktopEnd + 1).map((t, index) => (
@@ -10528,21 +7101,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                   handleDeleteTransaction={handleDeleteTransaction}
                                   handleRetryUpload={handleRetryUpload}
                                   uploadStatuses={uploadStatuses}
-                                  setPreviewImages={handleOpenPreview}
+                                  setPreviewImages={setPreviewImages}
                                   setPreviewIndex={setPreviewIndex}
                                   setPreviewRotation={setPreviewRotation}
                                   setPreviewZoom={setPreviewZoom}
                                   theme={theme}
                                   index={index}
                                   isJustEdited={justEditedTransactionId === t.id}
-                                  canEdit={canEditEntries(currentUserRole)}
-                                  canDelete={canDeleteEntries(currentUserRole)}
-                                  canSelect={currentUserRole !== 'Viewer'}
                                 />
                               ))}
                               {desktopPaddingBottom > 0 && (
                                 <tr style={{ height: `${desktopPaddingBottom}px` }}>
-                                  <td colSpan={currentUserRole !== 'Viewer' ? 9 : 8} style={{ padding: 0, height: `${desktopPaddingBottom}px` }} />
+                                  <td colSpan={9} style={{ padding: 0, height: `${desktopPaddingBottom}px` }} />
                                 </tr>
                               )}
                             </>
@@ -10572,95 +7142,59 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
 
               {/* Mobile Sticky Bottom Buttons */}
-              {canAddEntries(currentUserRole) && (
-                <div
-                  className={cn(
-                    "lg:hidden fixed bottom-0 left-0 right-0 p-4 pb-6 backdrop-blur-xl border-t z-40 transition-colors duration-300 shadow-[0_-10px_35px_rgba(0,0,0,0.08)] dark:shadow-[0_-10px_35px_rgba(0,0,0,0.4)]",
-                    theme === 'dark' ? "bg-slate-950/85 border-zinc-800/80" : "bg-white/85 border-slate-200/80"
-                  )}
-                >
-                  <div className="w-full font-sans">
-                    <div className="flex flex-col gap-3 w-full">
-                      {/* Row 1: AI UPLOAD */}
-                      <motion.button
-                        whileHover={{ scale: 1.01 }}
-                        whileTap={{ scale: 0.96 }}
-                        transition={{ duration: 0.12 }}
-                        onClick={() => { 
-                          vibrate(); 
-                          setShowAiWarning(true);
-                        }}
+              <div className={cn(
+                "lg:hidden fixed bottom-0 left-0 right-0 p-4 pb-6 backdrop-blur-lg border-t z-40 transition-colors duration-300",
+                theme === 'dark' ? "bg-slate-900/80 border-slate-800" : "bg-white/80 border-slate-100"
+              )}>
+                <div className="w-full font-sans">
+                  <div className="flex flex-col gap-3 w-full">
+                    {/* Row 1: AI UPLOAD */}
+                    <button
+                      onClick={() => { 
+                        vibrate(); 
+                        setShowAiWarning(true);
+                      }}
+                      className={cn(
+                        "w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
+                        theme === 'dark' 
+                          ? "bg-indigo-950/25 text-indigo-400 border-indigo-900/50 hover:bg-indigo-950/40" 
+                          : "bg-white border-indigo-200 text-indigo-650 shadow-sm shadow-indigo-100/30 hover:bg-indigo-50"
+                      )}
+                    >
+                      <Upload size={18} className="shrink-0" />
+                      AI UPLOAD
+                    </button>
+
+                    {/* Row 2: CASH IN & CASH OUT */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={() => { vibrate(); vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
                         className={cn(
-                          "relative w-full flex items-center justify-center gap-2.5 py-3.5 rounded-2xl font-black shadow-sm cursor-pointer text-xs sm:text-sm border transition-colors duration-200",
+                          "flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
                           theme === 'dark' 
-                            ? "bg-indigo-950/35 text-indigo-300 border-indigo-800/60 hover:bg-indigo-900/45 hover:border-indigo-700" 
-                            : "bg-indigo-50/80 border-indigo-200 text-indigo-700 hover:bg-indigo-100/70"
+                            ? "bg-emerald-950/20 text-emerald-400 border-emerald-900/40 shadow-none hover:bg-emerald-950/35" 
+                            : "bg-white border-emerald-200 text-emerald-700 shadow-sm shadow-emerald-100/30 hover:bg-emerald-50"
                         )}
                       >
-                        <Upload size={18} className="shrink-0 text-indigo-500" />
-                        <span className="tracking-wide">AI UPLOAD</span>
-                      </motion.button>
-
-                      {/* Row 2: CASH IN & CASH OUT */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <motion.button
-                          whileHover={{ scale: 1.015 }}
-                          whileTap={{ scale: 0.95 }}
-                          transition={{ duration: 0.12 }}
-                          onClick={() => {
-                            if (isOffline) {
-                              vibrate(50);
-                              setShowOfflineDialog(true);
-                              return;
-                            }
-                            vibrate();
-                            setShowForm('in');
-                            setTransactionDate(safeToDateTimeLocal(new Date()));
-                          }}
-                          className={cn(
-                            "relative flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm cursor-pointer text-xs sm:text-sm border transition-colors duration-200",
-                            theme === 'dark' 
-                              ? "bg-emerald-950/30 text-emerald-300 border-emerald-800/60 hover:bg-emerald-900/40 hover:border-emerald-600/70" 
-                              : "bg-emerald-50/90 border-emerald-200/90 text-emerald-700 hover:bg-emerald-100/70"
-                          )}
-                        >
-                          <div className="p-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                            <Plus size={15} className="stroke-[3]" />
-                          </div>
-                          <span className="tracking-wide">CASH IN</span>
-                        </motion.button>
-
-                        <motion.button
-                          whileHover={{ scale: 1.015 }}
-                          whileTap={{ scale: 0.95 }}
-                          transition={{ duration: 0.12 }}
-                          onClick={() => {
-                            if (isOffline) {
-                              vibrate(50);
-                              setShowOfflineDialog(true);
-                              return;
-                            }
-                            vibrate();
-                            setShowForm('out');
-                            setTransactionDate(safeToDateTimeLocal(new Date()));
-                          }}
-                          className={cn(
-                            "relative flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm cursor-pointer text-xs sm:text-sm border transition-colors duration-200",
-                            theme === 'dark' 
-                              ? "bg-rose-950/30 text-rose-300 border-rose-800/60 hover:bg-rose-900/40 hover:border-rose-600/70" 
-                              : "bg-rose-50/90 border-rose-200/90 text-rose-700 hover:bg-rose-100/70"
-                          )}
-                        >
-                          <div className="p-1 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400">
-                            <Minus size={15} className="stroke-[3]" />
-                          </div>
-                          <span className="tracking-wide">CASH OUT</span>
-                        </motion.button>
-                      </div>
+                        <Plus size={16} />
+                        CASH IN
+                      </button>
+                      <button
+                        onClick={() => { vibrate(); vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
+                        className={cn(
+                          "flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
+                          theme === 'dark' 
+                            ? "bg-rose-950/20 text-rose-400 border-rose-900/40 shadow-none hover:bg-rose-950/35" 
+                            : "bg-white border-rose-200 text-rose-700 shadow-sm shadow-rose-100/30 hover:bg-rose-50"
+                        )}
+                      >
+                        <Minus size={16} />
+                        CASH OUT
+                      </button>
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
               </>
             )}
 
@@ -10808,9 +7342,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <h3 className={cn(
                         "text-lg font-extrabold transition-colors duration-300",
                         theme === 'dark' ? "text-white" : "text-black"
-                      )}>Upload Bill Image</h3>
+                      )}>Upload Bill or Document</h3>
                       <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm">
-                        JPG, JPEG, PNG, or WEBP receipts are supported (Max 7 images).
+                        Camera snapshots, library photos, or PDF invoices are fully supported.
                       </p>
                     </div>
 
@@ -10841,16 +7375,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <p className={cn(
                           "font-bold transition-colors duration-300",
                           theme === 'dark' ? "text-white" : "text-black"
-                        )}>Drag & Drop image here</p>
+                        )}>Drag & Drop bill here</p>
                         <p className={cn(
                           "text-sm transition-colors duration-300",
                           theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                        )}>or click to browse image files</p>
+                        )}>or click to browse files</p>
                       </div>
                     </div>
 
                     {/* Quick Selection Buttons */}
-                    <div className="pt-2">
+                    <div className="grid grid-cols-2 gap-3 pt-2">
                       <button
                         type="button"
                         onClick={() => {
@@ -10859,13 +7393,29 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           if (el) el.click();
                         }}
                         className={cn(
-                          "w-full flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
+                          "flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
                           theme === 'dark' ? "border-zinc-800 text-slate-300" : "border-slate-200 text-slate-700"
                         )}
                         id="btn-upload-camera"
                       >
                         <Camera size={14} />
-                        Select Receipt Images (Camera / Gallery)
+                        Camera / Gallery
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          vibrate();
+                          const el = document.getElementById('custom-ai-file-picker');
+                          if (el) el.click();
+                        }}
+                        className={cn(
+                          "flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
+                          theme === 'dark' ? "border-zinc-800 text-slate-300" : "border-slate-200 text-slate-700"
+                        )}
+                        id="btn-upload-doc"
+                      >
+                        <FileText size={14} />
+                        Upload PDF Bill
                       </button>
                     </div>
 
@@ -10873,7 +7423,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     <input 
                       type="file"
                       multiple
-                      accept="image/jpeg,image/png,image/webp,image/jpg,image/*"
+                      accept="image/*,application/pdf"
                       onChange={(e) => {
                         if (e.target.files && e.target.files.length > 0) {
                           startAiUploadReceiptParsing(e.target.files);
@@ -10949,7 +7499,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </div>
 
                       <p className="text-xs text-slate-400 dark:text-slate-500 max-w-sm mx-auto">
-                        AI TrackBook is reading text, classifying merchants, and matching time structures.
+                        TrackBook AI is reading text, classifying merchants, and matching time structures.
                       </p>
                     </div>
 
@@ -11203,37 +7753,35 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           {/* Bill Type Category selection */}
                           <div className="space-y-1.5 col-span-1">
                             <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Bill Type</label>
-                            <InAppSelect
-                              id="ai-quick-bill-type-select"
+                            <select 
                               value={aiBillType}
-                              onChange={(val) => setAiBillType(val)}
-                              options={["Restaurant", "Food", "Taxi", "Cab", "Bus", "Train", "Flight", "Fuel", "Groceries", "Medical", "Shopping", "Utilities", "Internet", "Recharge", "Hotel", "Entertainment"]}
-                              theme={theme}
-                              size="md"
-                              searchable={true}
-                              triggerClassName={cn(
-                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors",
+                              onChange={(e) => setAiBillType(e.target.value)}
+                              className={cn(
+                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors appearance-none cursor-pointer",
                                 theme === 'dark' ? "border-zinc-800 bg-zinc-900 text-white" : "border-slate-200 bg-slate-50 text-slate-900"
                               )}
-                            />
+                            >
+                              {["Restaurant", "Food", "Taxi", "Cab", "Bus", "Train", "Flight", "Fuel", "Groceries", "Medical", "Shopping", "Utilities", "Internet", "Recharge", "Hotel", "Entertainment"].map(t => (
+                                <option key={t} value={t}>{t}</option>
+                              ))}
+                            </select>
                           </div>
 
                           {/* Ledger Category selection */}
                           <div className="space-y-1.5 col-span-1">
                             <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Category</label>
-                            <InAppSelect
-                              id="ai-quick-category-select"
+                            <select 
                               value={aiCategory}
-                              onChange={(val) => setAiCategory(val)}
-                              options={["Food", "Transport", "Utilities", "Shopping", "Entertainment", "Health", "Education", "Salary", "Other"]}
-                              theme={theme}
-                              size="md"
-                              searchable={true}
-                              triggerClassName={cn(
-                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors",
+                              onChange={(e) => setAiCategory(e.target.value)}
+                              className={cn(
+                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors appearance-none cursor-pointer",
                                 theme === 'dark' ? "border-zinc-800 bg-zinc-900 text-white" : "border-slate-200 bg-slate-50 text-slate-900"
                               )}
-                            />
+                            >
+                              {["Food", "Transport", "Utilities", "Shopping", "Entertainment", "Health", "Education", "Salary", "Other"].map(c => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
                           </div>
 
                           {/* Description field */}
@@ -11255,7 +7803,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-zinc-900/60 font-sans">
                           <button
                             type="button"
-                            onClick={() => handleDiscardAiItem(handwrittenQueue[currentQueueIndex]?.id)}
+                            onClick={() => {
+                              vibrate();
+                              setAiWorkflowStep('upload');
+                              setAiFile(null);
+                              setAiFilePreviewUrl('');
+                            }}
                             className={cn(
                               "flex-1 py-3.5 rounded-2xl font-bold text-xs tracking-wide border cursor-pointer active:scale-95 transition-all text-center flex items-center justify-center gap-1.5",
                               theme === 'dark' 
@@ -11265,7 +7818,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             id="btn-cancel-ai"
                           >
                             <Trash2 size={14} />
-                            {handwrittenQueue.length > 1 ? `Discard Receipt ${currentQueueIndex + 1}` : 'Change Bill'}
+                            Change Bill
                           </button>
                           
                           <button
@@ -11366,32 +7919,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             )}
 
             {currentTabName === 'reports' && (
-              <div className="space-y-6 max-w-4xl mx-auto py-4 sm:py-6 px-4 pb-20">
-                {/* Back to Entries Navigation Header */}
-                <div className="flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      vibrate();
-                      const slug = getBookSlug(activeBook?.name || '', activeBook?.id || '');
-                      navigate(`/cashbooks/${slug}/entries`);
-                    }}
-                    className={cn(
-                      "flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-xs cursor-pointer active:scale-95",
-                      theme === 'dark'
-                        ? "bg-zinc-900 border-zinc-800 text-slate-300 hover:bg-zinc-800 hover:text-white"
-                        : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-black"
-                    )}
-                  >
-                    <ArrowLeft size={15} />
-                    <span>Back to Entries</span>
-                  </button>
-
-                  <span className="text-xs font-black uppercase tracking-wider text-slate-400 dark:text-zinc-500">
-                    Reports & Analytics
-                  </span>
-                </div>
-
+              <div className="space-y-6 max-w-4xl mx-auto py-6 px-4 pb-20">
                 {/* Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className={cn(
@@ -11452,42 +7980,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   )}
                 </div>
 
-                {/* Quick Export & Share Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {/* WhatsApp Share Card */}
-                  <div 
-                    onClick={() => {
-                      vibrate();
-                      if (activeBook) {
-                        navigate(`/whatsapp-reports?book=${encodeURIComponent(activeBook.name || '')}&id=${encodeURIComponent(activeBook.id || '')}`);
-                      } else {
-                        navigate('/whatsapp-reports');
-                      }
-                    }}
-                    className={cn(
-                      "p-6 rounded-3xl border transition-all cursor-pointer shadow-sm hover:scale-[1.01] active:scale-[0.99] duration-150 flex items-center gap-4 group col-span-1 sm:col-span-3 lg:col-span-1",
-                      theme === 'dark' ? "bg-zinc-950 hover:bg-emerald-950/20 border-emerald-900/40" : "bg-emerald-50/40 hover:bg-emerald-50/80 border-emerald-200/80"
-                    )}
-                  >
-                    <div className="p-3 bg-emerald-600 text-white rounded-xl shadow-xs shrink-0">
-                      <MessageSquare size={24} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-sm text-slate-800 dark:text-slate-100">Share Reports to WhatsApp</h4>
-                        <span className="px-1.5 py-0.5 text-[9px] font-black uppercase bg-emerald-600 text-white rounded-md tracking-wider shrink-0">NEW</span>
-                      </div>
-                      <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">Send Excel and PDF reports directly to any WhatsApp number.</p>
-                    </div>
-                  </div>
-
+                {/* Quick Export Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div 
                     onClick={() => {
                       if (activeBook) {
-                        if (!filteredTransactions || filteredTransactions.length === 0) {
-                          showInAppAlert('No Transactions', 'No transactions found to export in this cashbook.', 'info');
-                          return;
-                        }
                         backgroundExportManager.enqueueExcelTask(activeBook.id, activeBook.name, filteredTransactions);
                         setShowDownloadCenter(true);
                       }
@@ -11497,7 +7994,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       theme === 'dark' ? "bg-zinc-950 hover:bg-emerald-950/10 border-zinc-900" : "bg-white hover:bg-emerald-50/20 border-slate-100"
                     )}
                   >
-                    <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-xl shrink-0">
+                    <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-xl">
                       <FileSpreadsheet size={24} />
                     </div>
                     <div className="min-w-0">
@@ -11506,7 +8003,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   </div>
 
-                  {/* PDF Export Card */}
                   <div 
                     onClick={() => {
                       if (activeBook) {
@@ -11515,7 +8011,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           ? filteredTransactions
                           : (activeBook.transactions || []);
                         if (!txs || txs.length === 0) {
-                          showInAppAlert('No Transactions', 'No transactions found to export in this cashbook.', 'info');
+                          alert('No transactions found to export in this cashbook.');
                           return;
                         }
                         setPdfQualityModalState({
@@ -11531,7 +8027,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       theme === 'dark' ? "bg-zinc-950 hover:bg-rose-950/10 border-zinc-900" : "bg-white hover:bg-rose-50/20 border-slate-100"
                     )}
                   >
-                    <div className="p-3 bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 rounded-xl shrink-0">
+                    <div className="p-3 bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 rounded-xl">
                       <FileText size={24} />
                     </div>
                     <div className="min-w-0">
@@ -11540,20 +8036,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {currentTabName === 'members' && activeBook && (
-              <div className="max-w-6xl mx-auto py-4 px-2 sm:px-4 pb-20">
-                <MembersAccessManagement
-                  cashbookId={activeBook.id}
-                  cashbookName={activeBook.name}
-                  theme={theme}
-                  currentUserRole={currentUserRole}
-                  currentUserId={session?.user?.id || 'u1'}
-                  currentUserName={userName || 'Siva'}
-                  currentUserEmail={session?.user?.email || 'siva@gmail.com'}
-                />
               </div>
             )}
 
@@ -11716,6 +8198,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             )}
             </motion.div>
           )}
+        </AnimatePresence>
       </main>
 
       {/* MODALS */}
@@ -11869,13 +8352,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               <div className="flex items-center gap-3 border-b border-slate-100 dark:border-zinc-900 pb-3">
                 <span className="text-xl">⚠️</span>
                 <h3 className="text-sm font-black tracking-tight font-sans uppercase">
-                  AI TrackBook (Testing Phase)
+                  TrackBook AI (Testing Phase)
                 </h3>
               </div>
 
               <div className="space-y-3 font-sans text-xs">
                 <p className="font-semibold text-slate-500 dark:text-zinc-400 leading-relaxed">
-                  AI TrackBook is currently under active testing.
+                  TrackBook AI is currently under active testing.
                 </p>
                 <p className="font-semibold text-slate-500 dark:text-zinc-400 leading-relaxed">
                   While most receipts are processed correctly, some receipts may occasionally produce incorrect:
@@ -12298,9 +8781,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <h3 className={cn(
                         "text-lg font-extrabold transition-colors duration-300",
                         theme === 'dark' ? "text-white" : "text-black"
-                      )}>Upload Bill Image</h3>
+                      )}>Upload Bill or Document</h3>
                       <p className="text-slate-500 dark:text-slate-400 text-xs text-center">
-                        JPG, JPEG, PNG, or WEBP receipts are supported (Max 7 images).
+                        Camera snapshots, library photos, or PDF invoices are fully supported.
                       </p>
                     </div>
 
@@ -12330,16 +8813,16 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <p className={cn(
                           "font-bold transition-colors text-sm",
                           theme === 'dark' ? "text-white" : "text-black"
-                        )}>Drag & Drop image here</p>
+                        )}>Drag & Drop bill here</p>
                         <p className={cn(
                           "text-xs transition-colors",
                           theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                        )}>or click to browse image files</p>
+                        )}>or click to browse files</p>
                       </div>
                     </div>
 
                     {/* Quick Selection Buttons */}
-                    <div className="pt-1">
+                    <div className="grid grid-cols-2 gap-3 pt-1">
                       <button
                         type="button"
                         onClick={() => {
@@ -12348,19 +8831,116 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           if (el) el.click();
                         }}
                         className={cn(
-                          "w-full flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
+                          "flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
                           theme === 'dark' ? "border-zinc-800 text-slate-300" : "border-slate-200 text-slate-700"
                         )}
                       >
                         <Camera size={14} />
-                        Select Receipt Images (Camera / Gallery)
+                        Camera / Gallery
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          vibrate();
+                          const el = document.getElementById('modal-ai-file-picker');
+                          if (el) el.click();
+                        }}
+                        className={cn(
+                          "flex items-center justify-center gap-2 py-3 border rounded-xl text-xs font-bold transition-all cursor-pointer hover:bg-slate-50 dark:hover:bg-zinc-900 active:scale-95",
+                          theme === 'dark' ? "border-zinc-800 text-slate-300" : "border-slate-200 text-slate-700"
+                        )}
+                      >
+                        <FileText size={14} />
+                        Upload PDF Bill
+                      </button>
+                    </div>
+
+                    {/* Handwritten Bill Configuration Section */}
+                    <div className={cn(
+                      "p-3.5 rounded-2xl border transition-all space-y-3 font-sans",
+                      isHandwritten 
+                        ? (theme === 'dark' ? "bg-amber-950/20 border-amber-900/40 text-amber-300" : "bg-amber-50/50 border-amber-200 text-amber-900")
+                        : (theme === 'dark' ? "bg-zinc-900/30 border-zinc-900/60 text-slate-400" : "bg-slate-50 border-slate-150 text-slate-600")
+                    )}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText size={16} className={isHandwritten ? "text-amber-500" : "text-slate-400"} />
+                          <div>
+                            <span className="text-xs font-bold block">Hand-written Bill?</span>
+                            <span className="text-[10px] text-slate-400 dark:text-zinc-500 block">Optimized accuracy for hand-written bills</span>
+                          </div>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input 
+                            type="checkbox" 
+                            checked={isHandwritten}
+                            onChange={(e) => {
+                              vibrate();
+                              setIsHandwritten(e.target.checked);
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-slate-200 dark:bg-zinc-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                        </label>
+                      </div>
+
+                      {isHandwritten && (
+                        <div className="space-y-3 pt-2.5 border-t border-amber-200/40 dark:border-amber-900/30">
+                          {/* Time Picker/Input */}
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500 block">
+                              What time was this bill paid?
+                            </label>
+                            <input 
+                              type="text"
+                              value={handwrittenTime}
+                              onChange={(e) => setHandwrittenTime(e.target.value)}
+                              placeholder="e.g., 01:20 PM or 21:30"
+                              className={cn(
+                                "w-full px-3 py-2 text-xs font-bold rounded-xl border focus:ring-1 focus:ring-amber-500 focus:outline-none transition-colors",
+                                theme === 'dark' ? "border-zinc-800 bg-zinc-900 text-white" : "border-slate-200 bg-white text-zinc-900"
+                              )}
+                            />
+                          </div>
+
+                          {/* Food Item Toggle */}
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Is this a Food Item?</span>
+                            <div className="flex bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200/50 dark:border-zinc-800">
+                              {[
+                                { val: true, label: "Yes" },
+                                { val: false, label: "No" }
+                              ].map((opt) => {
+                                const isSel = handwrittenIsFood === opt.val;
+                                return (
+                                  <button
+                                    key={opt.label}
+                                    type="button"
+                                    onClick={() => {
+                                      vibrate();
+                                      setHandwrittenIsFood(opt.val);
+                                    }}
+                                    className={cn(
+                                      "px-3 py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap",
+                                      isSel 
+                                        ? "bg-amber-500 text-black shadow-sm" 
+                                        : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                                    )}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <input 
                       type="file"
                       multiple
-                      accept="image/jpeg,image/png,image/webp,image/jpg,image/*"
+                      accept="image/*,application/pdf"
                       onChange={(e) => {
                         if (e.target.files && e.target.files.length > 0) {
                           startAiUploadReceiptParsing(e.target.files);
@@ -12414,7 +8994,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       <h3 className={cn(
                         "text-xl font-black tracking-tight",
                         theme === 'dark' ? "text-white" : "text-zinc-900"
-                      )}>AI TrackBook is scanning your bills...</h3>
+                      )}>TrackBook AI is scanning your bills...</h3>
                       <p className="text-indigo-600 dark:text-indigo-400 font-bold text-xs uppercase tracking-widest animate-pulse max-w-xs mx-auto">
                         {aiScanStatus}
                       </p>
@@ -12446,11 +9026,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
 
                     <div className="text-xs text-slate-400 dark:text-zinc-500 max-w-xs mx-auto leading-relaxed">
-                      AI TrackBook is extracting receipt data, mapping categories, and parsing your splits. Please do not close this window.
+                      TrackBook AI is extracting receipt data, mapping categories, and parsing your splits. Please do not close this window.
                     </div>
 
                     {/* Floating Network Status Badge */}
-                    <div className="absolute bottom-28 right-4 md:right-6 z-50">
+                    <div className="absolute bottom-16 right-4 md:right-6 z-50">
                       <AnimatePresence>
                         {aiNetworkState === 'good' && (
                           <motion.div
@@ -12569,32 +9149,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </div>
                     </div>
 
-                    {/* Multi-receipt Queue Selector Tabs */}
-                    {handwrittenQueue.length > 1 && (
-                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none shrink-0">
-                        <span className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider shrink-0 mr-1">
-                          Scanned ({handwrittenQueue.length}):
-                        </span>
-                        {handwrittenQueue.map((item, qIdx) => (
-                          <button
-                            key={item.id || `modal_queue_tab_${qIdx}`}
-                            type="button"
-                            onClick={() => selectQueueItem(qIdx)}
-                            className={cn(
-                              "px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 flex items-center gap-1",
-                              currentQueueIndex === qIdx
-                                ? "bg-indigo-600 text-white shadow-xs"
-                                : theme === 'dark'
-                                  ? "bg-zinc-900 border border-zinc-800 text-slate-400 hover:text-white"
-                                  : "bg-slate-100 border border-slate-200 text-slate-600 hover:text-slate-900"
-                            )}
-                          >
-                            <span>Receipt {qIdx + 1}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
                     <div className="flex flex-col md:grid md:grid-cols-5 gap-4 overflow-hidden flex-1 min-h-0 w-full">
                       {/* Left Side: Thumbnail Preview */}
                       <div className="md:col-span-2 space-y-3 shrink-0">
@@ -12707,37 +9261,35 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           {/* Bill Type Category selection */}
                           <div className="space-y-1.5 col-span-1">
                             <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Bill Type</label>
-                            <InAppSelect
-                              id="ai-modal-bill-type-select"
+                            <select 
                               value={aiBillType}
-                              onChange={(val) => setAiBillType(val)}
-                              options={["Restaurant", "Food", "Taxi", "Cab", "Bus", "Train", "Flight", "Fuel", "Groceries", "Medical", "Shopping", "Utilities", "Internet", "Recharge", "Hotel", "Entertainment"]}
-                              theme={theme}
-                              size="md"
-                              searchable={true}
-                              triggerClassName={cn(
-                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors",
+                              onChange={(e) => setAiBillType(e.target.value)}
+                              className={cn(
+                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors appearance-none cursor-pointer",
                                 theme === 'dark' ? "border-zinc-800 bg-zinc-900 text-white" : "border-slate-200 bg-slate-50 text-slate-900"
                               )}
-                            />
+                            >
+                              {["Restaurant", "Food", "Taxi", "Cab", "Bus", "Train", "Flight", "Fuel", "Groceries", "Medical", "Shopping", "Utilities", "Internet", "Recharge", "Hotel", "Entertainment"].map(t => (
+                                <option key={t} value={t}>{t}</option>
+                              ))}
+                            </select>
                           </div>
 
                           {/* Ledger Category selection */}
                           <div className="space-y-1.5 col-span-1">
                             <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Category</label>
-                            <InAppSelect
-                              id="ai-modal-category-select"
+                            <select 
                               value={aiCategory}
-                              onChange={(val) => setAiCategory(val)}
-                              options={["Food", "Transport", "Utilities", "Shopping", "Entertainment", "Health", "Education", "Salary", "Other"]}
-                              theme={theme}
-                              size="md"
-                              searchable={true}
-                              triggerClassName={cn(
-                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors",
+                              onChange={(e) => setAiCategory(e.target.value)}
+                              className={cn(
+                                "w-full px-4 py-3 rounded-xl border text-sm font-bold focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors appearance-none cursor-pointer",
                                 theme === 'dark' ? "border-zinc-800 bg-zinc-900 text-white" : "border-slate-200 bg-slate-50 text-slate-900"
                               )}
-                            />
+                            >
+                              {["Food", "Transport", "Utilities", "Shopping", "Entertainment", "Health", "Education", "Salary", "Other"].map(c => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
                           </div>
 
                           {/* Description field */}
@@ -12759,7 +9311,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-zinc-900/60 font-sans">
                           <button
                             type="button"
-                            onClick={() => handleDiscardAiItem(handwrittenQueue[currentQueueIndex]?.id)}
+                            onClick={() => {
+                              vibrate();
+                              setAiWorkflowStep('group');
+                              setAiFile(null);
+                              setAiFilePreviewUrl('');
+                              setAiConstructionModal(null);
+                            }}
                             className={cn(
                               "flex-1 py-3 rounded-xl font-bold text-xs tracking-wide border cursor-pointer active:scale-95 transition-all text-center flex items-center justify-center gap-1.5",
                               theme === 'dark' 
@@ -12768,7 +9326,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             )}
                           >
                             <Trash2 size={13} />
-                            {handwrittenQueue.length > 1 ? `Discard Receipt ${currentQueueIndex + 1}` : 'Discard'}
+                            Discard
                           </button>
                           
                           <button
@@ -12922,7 +9480,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               <div className="flex items-center gap-2 p-4 bg-amber-50 dark:bg-amber-900/10 rounded-xl text-amber-700 dark:text-amber-400 text-xs">
                 <div className="shrink-0"><Loader2 size={14} className="animate-spin" /></div>
-                <p>AI will process images one by one. Max 7 images allowed.</p>
+                <p>AI will process images one by one. Max 5 images allowed.</p>
               </div>
             </motion.div>
           </div>
@@ -12949,24 +9507,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <h3 className={cn(
                   "text-xl font-bold transition-colors duration-300",
                   theme === 'dark' ? "text-white" : "text-black"
-                )}>Create New Cashbook</h3>
-                <button onClick={() => { setIsCreatingBook(false); setCreateBookError(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                )}>Create New Book</h3>
+                <button onClick={() => setIsCreatingBook(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
                   <X size={20} className="text-slate-400" />
                 </button>
               </div>
               <form onSubmit={handleCreateBook} className="space-y-4">
-                {isOffline && (
-                  <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl flex items-start gap-2 text-xs font-semibold dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400">
-                    <CloudOff size={15} className="shrink-0 text-rose-500 mt-0.5" />
-                    <span className="flex-1 leading-relaxed">You are offline. Cashbooks cannot be created while offline.</span>
-                  </div>
-                )}
-                {createBookError && (
-                  <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl flex items-start gap-2 text-xs font-semibold dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400 animate-shake">
-                    <AlertCircle size={15} className="shrink-0 text-rose-500 mt-0.5 dark:text-rose-400" />
-                    <span className="flex-1 leading-relaxed">{createBookError}</span>
-                  </div>
-                )}
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Book Name</label>
                   <input
@@ -12974,10 +9520,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     type="text"
                     placeholder="e.g., Personal, Business"
                     value={newBookName}
-                    onChange={(e) => {
-                      setNewBookName(e.target.value);
-                      if (createBookError) setCreateBookError(null);
-                    }}
+                    onChange={(e) => setNewBookName(e.target.value)}
                     className={cn(
                       "w-full px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
                       theme === 'dark' ? "bg-slate-800 border-slate-800 text-white" : "bg-slate-50 border-slate-200 text-black"
@@ -12998,15 +9541,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
                 <button
                   type="submit"
-                  disabled={isOffline || !newBookName.trim()}
                   className={cn(
-                    "w-full py-4 rounded-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed text-white",
-                    isOffline ? "bg-slate-400 dark:bg-slate-700" : (
-                      theme === 'dark' ? "bg-indigo-600 hover:bg-indigo-700 shadow-none" : "bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100"
-                    )
+                    "w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all",
+                    theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
                   )}
                 >
-                  {isOffline ? "Offline (Cannot Create)" : "Create Cashbook"}
+                  Create Book
                 </button>
               </form>
             </motion.div>
@@ -13035,33 +9575,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   "text-xl font-bold transition-colors duration-300",
                   theme === 'dark' ? "text-white" : "text-black"
                 )}>Edit Book Name</h3>
-                <button onClick={() => { setIsEditingBook(null); setEditBookError(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                <button onClick={() => setIsEditingBook(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
                   <X size={20} className="text-slate-400" />
                 </button>
               </div>
               <form onSubmit={handleUpdateBook} className="space-y-4">
-                {isOffline && (
-                  <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl flex items-start gap-2 text-xs font-semibold dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400">
-                    <CloudOff size={15} className="shrink-0 text-rose-500 mt-0.5" />
-                    <span className="flex-1 leading-relaxed">You are offline. Cashbooks cannot be renamed while offline.</span>
-                  </div>
-                )}
-                {editBookError && (
-                  <div className="bg-rose-50 border border-rose-100 text-rose-600 px-4 py-3 rounded-xl flex items-start gap-2 text-xs font-semibold dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400 animate-shake">
-                    <AlertCircle size={15} className="shrink-0 text-rose-500 mt-0.5 dark:text-rose-400" />
-                    <span className="flex-1 leading-relaxed">{editBookError}</span>
-                  </div>
-                )}
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Book Name</label>
                   <input
                     autoFocus
                     type="text"
                     value={editBookName}
-                    onChange={(e) => {
-                      setEditBookName(e.target.value);
-                      if (editBookError) setEditBookError(null);
-                    }}
+                    onChange={(e) => setEditBookName(e.target.value)}
                     className={cn(
                       "w-full px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
                       theme === 'dark' ? "bg-slate-800 border-slate-800 text-white" : "bg-slate-50 border-slate-200 text-black"
@@ -13070,15 +9595,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
                 <button
                   type="submit"
-                  disabled={isOffline || !editBookName.trim()}
                   className={cn(
-                    "w-full py-4 rounded-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed text-white",
-                    isOffline ? "bg-slate-400 dark:bg-slate-700" : (
-                      theme === 'dark' ? "bg-indigo-600 hover:bg-indigo-700 shadow-none" : "bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100"
-                    )
+                    "w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all",
+                    theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
                   )}
                 >
-                  {isOffline ? "Offline (Cannot Save)" : "Save Changes"}
+                  Save Changes
                 </button>
               </form>
             </motion.div>
@@ -13110,103 +9632,48 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           return;
         };
 
-        const handleAvatarFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-          if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            if (!file.type.startsWith('image/')) {
-              setProfileError('Please select a valid image file (JPG, PNG, WebP).');
-              return;
-            }
-            if (file.size > 10 * 1024 * 1024) {
-              setProfileError('Image size should be less than 10MB.');
-              return;
-            }
-            setAvatarFile(file);
-            const preview = URL.createObjectURL(file);
-            setAvatarPreview(preview);
-            setProfileError(null);
-          }
-        };
-
-        const handleRemoveAvatar = () => {
-          setAvatarFile(null);
-          setAvatarPreview(null);
-          setUserAvatarUrl(null);
-          try { localStorage.removeItem('trackbook_avatar'); } catch (e) {}
-        };
-
         const handleSaveProfileName = async () => {
           if (!supabase || !session?.user) return;
+          const trimmed = userName.trim();
+          if (!trimmed) {
+            setProfileError('Username cannot be empty.');
+            return;
+          }
           setProfileLoading(true);
           setProfileError(null);
           setProfileSuccess(null);
           
           try {
-            let finalAvatarUrl = userAvatarUrl;
-            if (avatarFile) {
-              try {
-                const profileFolder = await getUserProfileCloudinaryFolder(session?.user);
-                const uploadedUrl = await uploadToCloudinary(avatarFile, profileFolder);
-                if (uploadedUrl) {
-                  finalAvatarUrl = uploadedUrl;
-                  setUserAvatarUrl(uploadedUrl);
-                  try { localStorage.setItem('trackbook_avatar', uploadedUrl); } catch (e) {}
-                }
-              } catch (uploadErr) {
-                console.warn('Profile image upload failed, falling back to preview URL:', uploadErr);
-                if (avatarPreview) {
-                  finalAvatarUrl = avatarPreview;
-                  setUserAvatarUrl(avatarPreview);
-                  try { localStorage.setItem('trackbook_avatar', avatarPreview); } catch (e) {}
-                }
+            const { error: authErr } = await supabase.auth.updateUser({
+              data: { 
+                full_name: trimmed,
+                name: trimmed,
+                username: trimmed,
+                user_name: trimmed
               }
-            } else if (avatarPreview === null && !userAvatarUrl) {
-              finalAvatarUrl = null;
-            }
-
-            try {
-              const { error: authErr } = await supabase.auth.updateUser({
-                data: { full_name: userName, avatar_url: finalAvatarUrl }
-              });
-              if (authErr) console.warn('Auth user metadata update note:', authErr);
-            } catch (e) {}
+            });
+            if (authErr) throw authErr;
             
             try {
-              const { error: profErr } = await supabase.from('profiles').upsert({
+              await supabase.from('profiles').upsert({
                 id: session.user.id,
                 email: session.user.email || null,
-                full_name: userName,
-                avatar_url: finalAvatarUrl,
+                full_name: trimmed,
                 phone: session.user.phone || null,
                 phone_verified: session.user.phone_confirmed_at ? true : false,
-                updated_at: new Date().toISOString()
               }, { onConflict: 'id' });
-              
-              if (profErr) {
-                console.warn('Profiles table sync note:', profErr);
-                if (profErr.code === '42703' || profErr.message?.includes('column')) {
-                  await supabase.from('profiles').upsert({
-                    id: session.user.id,
-                    email: session.user.email || null,
-                    full_name: userName,
-                    phone: session.user.phone || null,
-                    phone_verified: session.user.phone_confirmed_at ? true : false,
-                  }, { onConflict: 'id' });
-                }
-              }
             } catch (dbErr) {
               console.warn('Profiles table sync failed:', dbErr);
             }
             
-            setProfileSuccess('Profile updated successfully!');
+            setUserName(trimmed);
+            setProfileSuccess('Profile name updated successfully!');
             setTimeout(() => {
               setIsEditingName(false);
-              setAvatarFile(null);
-              setAvatarPreview(null);
               setProfileSuccess(null);
-            }, 1200);
+            }, 1500);
           } catch (err: any) {
-            console.error('Error saving profile settings:', err);
+            console.error('Error saving profile name:', err);
             setProfileError(err.message || 'Failed to save changes.');
           } finally {
             setProfileLoading(false);
@@ -13215,8 +9682,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         const handleCloseProfileModal = () => {
           setIsEditingName(false);
-          setAvatarFile(null);
-          setAvatarPreview(null);
           setLinkingMode('view');
           setPhoneNumberToLink('');
           setLinkingOtp('');
@@ -13324,110 +9789,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         />
                       </div>
 
-                      {/* Profile Picture (WhatsApp DP Style under Your Name) */}
-                      <div className="space-y-2 pt-1">
-                        <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block ml-1">Profile Picture</label>
-                        
-                        <div className={cn(
-                          "p-4 rounded-2xl border flex items-center gap-4 transition-colors",
-                          theme === 'dark' ? "bg-slate-950/40 border-slate-800" : "bg-slate-50/70 border-slate-200/80"
-                        )}>
-                          {/* Round WhatsApp DP Avatar */}
-                          <div className="relative group shrink-0">
-                            <div 
-                              onClick={() => {
-                                if (avatarPreview || userAvatarUrl) {
-                                  setShowAvatarPreviewModal(true);
-                                }
-                              }}
-                              className={cn(
-                                "w-16 h-16 sm:w-20 sm:h-20 rounded-full ring-4 ring-indigo-500/20 overflow-hidden bg-indigo-600 flex items-center justify-center text-white font-black text-xl sm:text-2xl shadow-md relative aspect-square group/avatar transition-all select-none",
-                                (avatarPreview || userAvatarUrl) ? "cursor-pointer hover:ring-indigo-500/50 hover:shadow-indigo-500/20" : ""
-                              )}
-                              title={avatarPreview || userAvatarUrl ? "Click to view photo preview" : "Click to upload photo"}
-                            >
-                              {avatarPreview || userAvatarUrl ? (
-                                <>
-                                  <img 
-                                    src={avatarPreview || userAvatarUrl || ''} 
-                                    alt="Profile Avatar" 
-                                    className="w-full h-full object-cover rounded-full transition-transform duration-300 group-hover/avatar:scale-105"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                  {/* Hover Overlay to view preview */}
-                                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/avatar:opacity-100 flex flex-col items-center justify-center text-white text-[10px] font-bold transition-opacity backdrop-blur-[1px] rounded-full">
-                                    <Eye size={18} className="mb-0.5" />
-                                    <span>View</span>
-                                  </div>
-                                </>
-                              ) : (
-                                <label
-                                  htmlFor="profile-avatar-input"
-                                  className="w-full h-full flex flex-col items-center justify-center cursor-pointer select-none"
-                                >
-                                  <span>{userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}</span>
-                                </label>
-                              )}
-                            </div>
-                            
-                            {/* Floating camera button (WhatsApp style badge) */}
-                            <label
-                              htmlFor="profile-avatar-input"
-                              className="absolute bottom-0 right-0 p-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-full shadow-lg border-2 border-white dark:border-slate-900 cursor-pointer transition-all z-10"
-                              title={avatarPreview || userAvatarUrl ? "Change Photo" : "Upload profile picture"}
-                            >
-                              <Camera size={13} />
-                            </label>
-                            
-                            <input 
-                              id="profile-avatar-input"
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={handleAvatarFileSelect}
-                            />
-                          </div>
-
-                          {/* Action details & buttons */}
-                          <div className="flex flex-col items-start gap-1 flex-1 min-w-0">
-                            <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-                              {avatarPreview || userAvatarUrl ? 'Custom Profile Photo' : 'Add an image'}
-                            </p>
-                            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
-                              Same as WhatsApp DP. JPG, PNG or WebP.
-                            </p>
-                            <div className="flex items-center gap-2 mt-1 flex-wrap">
-                              <label
-                                htmlFor="profile-avatar-input"
-                                className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl text-[11px] font-bold cursor-pointer transition-all inline-flex items-center gap-1.5 border border-indigo-200/50 dark:border-indigo-800/40 select-none shadow-sm"
-                              >
-                                <ImagePlus size={13} />
-                                <span>{avatarPreview || userAvatarUrl ? 'Change Photo' : 'Add an image'}</span>
-                              </label>
-                              {(avatarPreview || userAvatarUrl) && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowAvatarPreviewModal(true)}
-                                    className="px-2.5 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-[11px] font-bold transition-all cursor-pointer select-none inline-flex items-center gap-1 border border-slate-200/60 dark:border-slate-800"
-                                  >
-                                    <Eye size={12} />
-                                    <span>Preview</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={handleRemoveAvatar}
-                                    className="px-2.5 py-1.5 text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl text-[11px] font-bold transition-all cursor-pointer select-none"
-                                  >
-                                    Remove
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
                       {/* Email (Read Only) */}
                       <div className="space-y-1">
                         <label className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block ml-1">Email Address</label>
@@ -13524,13 +9885,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             'Save Settings'
                           )}
                         </button>
-                      </div>
-
-                      {/* Version Display in Profile Settings */}
-                      <div className="pt-2 text-center select-none">
-                        <span className="text-xs font-medium text-slate-400 dark:text-zinc-500 tracking-wide">
-                          {versionDisplay}
-                        </span>
                       </div>
                     </div>
                   ) : (
@@ -13688,104 +10042,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         );
       })()}
 
-      {/* Profile Photo Fullscreen Preview Modal */}
-      <AnimatePresence>
-        {showAvatarPreviewModal && (avatarPreview || userAvatarUrl) && (
-          <div 
-            className="fixed inset-0 z-[250] bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-4 select-none"
-            onClick={() => setShowAvatarPreviewModal(false)}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.85 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              onClick={(e) => e.stopPropagation()}
-              className="relative max-w-sm sm:max-w-md w-full bg-slate-900/95 border border-slate-800 rounded-3xl p-5 shadow-2xl flex flex-col items-center text-white"
-            >
-              {/* Header with Title and Actions */}
-              <div className="w-full flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white font-black text-xs shrink-0 ring-2 ring-indigo-500/30">
-                    {userName && userName.length > 0 ? userName[0].toUpperCase() : 'U'}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-white truncate">Profile Photo Preview</p>
-                    <p className="text-[11px] text-slate-400 truncate">{userName || 'User Profile'}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const url = avatarPreview || userAvatarUrl;
-                      if (url) {
-                        const link = document.createElement('a');
-                        link.href = url;
-                        link.download = `${userName ? userName.toLowerCase().replace(/\s+/g, '_') : 'profile'}_dp.jpg`;
-                        link.target = '_blank';
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                      }
-                    }}
-                    className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                    title="Download Photo"
-                  >
-                    <Download size={18} />
-                  </button>
-                  <label
-                    htmlFor="profile-avatar-input"
-                    onClick={() => setShowAvatarPreviewModal(false)}
-                    className="p-2 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/40 rounded-xl transition-colors cursor-pointer"
-                    title="Change Photo"
-                  >
-                    <ImagePlus size={18} />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowAvatarPreviewModal(false)}
-                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                    title="Close"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Large Photo Preview */}
-              <div className="w-56 h-56 sm:w-72 sm:h-72 rounded-full overflow-hidden border-4 border-indigo-500/40 shadow-2xl bg-black/50 flex items-center justify-center my-3 ring-8 ring-indigo-500/10 shrink-0 aspect-square">
-                <img
-                  src={avatarPreview || userAvatarUrl || ''}
-                  alt={userName || "Profile Preview"}
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              </div>
-
-              {/* Footer Action Buttons */}
-              <div className="w-full mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-3">
-                <label
-                  htmlFor="profile-avatar-input"
-                  onClick={() => setShowAvatarPreviewModal(false)}
-                  className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-98 text-white rounded-xl text-xs font-bold text-center cursor-pointer transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25"
-                >
-                  <Camera size={15} />
-                  <span>Change Photo</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowAvatarPreviewModal(false)}
-                  className="py-2.5 px-5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
-                >
-                  Close
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
       {/* Mobile Linking Coming Soon Modal */}
       <AnimatePresence>
         {showPhoneLinkingComingSoon && (
@@ -13798,133 +10054,19 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         )}
       </AnimatePresence>
 
-      {/* Automation Mail Beta Confirmation Modal */}
+      {/* Transaction Form Modal */}
       <AnimatePresence>
-        {isAutomationMailConfirmOpen && (
+        {showForm && (
           <div className={cn(
-            "fixed inset-0 z-[110] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
+            "fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
             theme === 'dark' ? "bg-black/60" : "bg-indigo-900/10"
           )}>
             <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
+              initial={{ opacity: 0, y: 100 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 100 }}
               className={cn(
-                "w-full max-w-md rounded-3xl border p-6 space-y-6 shadow-2xl relative overflow-hidden",
-                theme === 'dark' ? "bg-[#12131a] border-zinc-800 text-[#c5c6c7]" : "bg-white border-slate-200 text-slate-800"
-              )}
-            >
-              {/* Background gradient blur */}
-              <div className="absolute -top-10 -right-10 w-24 h-24 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
-              
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-indigo-500/10 rounded-2xl text-indigo-500 border border-indigo-500/10 shrink-0">
-                  <Mail size={22} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className={cn(
-                      "font-black text-lg uppercase tracking-wide",
-                      theme === 'dark' ? "text-slate-100" : "text-slate-900"
-                    )}>
-                      🚀 Automation Mail
-                    </h3>
-                    <span className="px-2 py-0.5 text-[9px] font-extrabold bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 rounded-full uppercase tracking-widest border border-indigo-500/10">BETA</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className={cn(
-                  "text-sm space-y-3 leading-relaxed",
-                  theme === 'dark' ? "text-slate-300" : "text-slate-600"
-                )}>
-                  <p>This feature is currently available as a Beta Version.</p>
-                  <p>We're continuously improving it and adding more enterprise automation features.</p>
-                  <p>Thank you for helping us test the experience.</p>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button
-                  onClick={() => { vibrate(5); setIsAutomationMailConfirmOpen(false); }}
-                  className={cn(
-                    "px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest transition-all cursor-pointer",
-                    theme === 'dark' 
-                      ? "bg-zinc-900 border border-zinc-800 text-slate-300 hover:bg-zinc-850 hover:text-slate-200" 
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  )}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    vibrate(10);
-                    setIsAutomationMailConfirmOpen(false);
-                    navigate('/automation-mail');
-                  }}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-600/15"
-                >
-                  Continue to Beta
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Transaction Form Modal / Desktop Drawer */}
-      <AnimatePresence>
-        {showForm && (
-          <div 
-            onClick={(e) => {
-              if (e.target === e.currentTarget) {
-                resetForm();
-              }
-            }}
-            className={cn(
-              "fixed inset-0 z-[100] flex transition-colors duration-300",
-              "items-end sm:items-center justify-center p-4 backdrop-blur-sm",
-              "lg:items-stretch lg:justify-end lg:p-0 lg:backdrop-blur-none",
-              theme === 'dark' ? "bg-black/60" : "bg-slate-900/40"
-            )}
-          >
-            <motion.div
-              initial={isDrawerDesktop ? { opacity: 0, x: "100%" } : { opacity: 0, y: 100 }}
-              animate={isDrawerDesktop ? { opacity: 1, x: 0 } : { opacity: 1, y: 0 }}
-              exit={isDrawerDesktop ? { opacity: 0, x: "100%" } : { opacity: 0, y: 100 }}
-              transition={{ type: "spring", damping: 28, stiffness: 280 }}
-              onDragEnter={(e) => {
-                e.preventDefault();
-                dragCounterRef.current++;
-                setIsDraggingAttachments(true);
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'copy';
-                if (!isDraggingAttachments) setIsDraggingAttachments(true);
-              }}
-              onDragLeave={(e) => {
-                e.preventDefault();
-                dragCounterRef.current--;
-                if (dragCounterRef.current <= 0) {
-                  dragCounterRef.current = 0;
-                  setIsDraggingAttachments(false);
-                }
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                dragCounterRef.current = 0;
-                setIsDraggingAttachments(false);
-                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                  processUploadedFiles(e.dataTransfer.files);
-                }
-              }}
-              className={cn(
-                "relative w-full shadow-2xl overflow-hidden transition-colors duration-300 flex flex-col",
-                "max-w-lg rounded-t-3xl sm:rounded-3xl max-h-[90vh]",
-                "lg:w-[700px] xl:w-[780px] 2xl:w-[840px] lg:max-w-[860px] lg:h-screen lg:max-h-screen lg:rounded-none lg:border-l lg:border-slate-200 dark:lg:border-slate-800",
+                "relative w-full max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden transition-colors duration-300",
                 theme === 'dark' ? "bg-zinc-950" : "bg-white"
               )}
             >
@@ -13945,8 +10087,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               {/* Modal Header */}
               <div className={cn(
-                "flex items-center justify-between p-4 sm:p-6 border-b transition-colors duration-300 shrink-0",
-                theme === 'dark' ? "border-slate-800 bg-zinc-950" : "border-slate-100 bg-white"
+                "flex items-center justify-between p-4 sm:p-6 border-b transition-colors duration-300",
+                theme === 'dark' ? "border-slate-800" : "border-slate-100"
               )}>
                 <div className="flex flex-col gap-1">
                   <h3 className={cn(
@@ -13976,58 +10118,41 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </button>
               </div>
 
-              <form noValidate onSubmit={handleAddTransaction} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-                <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 flex-1 overflow-y-auto no-scrollbar">
-                  {/* Type Tabs */}
-                  <div className="flex flex-col gap-4">
-                    <div className={cn(
-                      "p-1 rounded-xl flex gap-1 transition-colors duration-300",
-                      theme === 'dark' ? "bg-slate-800" : "bg-slate-100"
-                    )}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowForm('in');
-                          setTimeout(() => amountInputRef.current?.focus(), 60);
-                        }}
-                        className={cn(
-                          "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm flex items-center justify-center gap-1.5",
-                          showForm === 'in' 
-                            ? (theme === 'dark' ? "bg-slate-700 text-emerald-400 shadow-sm" : "bg-white text-emerald-600 shadow-sm")
-                            : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
-                        )}
-                      >
-                        <span>CASH IN</span>
-                        <span className={cn(
-                          "text-[10px] px-1.5 py-0.5 rounded font-mono font-medium",
-                          showForm === 'in'
-                            ? (theme === 'dark' ? "bg-emerald-500/20 text-emerald-300" : "bg-emerald-100 text-emerald-700")
-                            : (theme === 'dark' ? "bg-slate-800 text-slate-400" : "bg-slate-200 text-slate-500")
-                        )}>C I</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowForm('out');
-                          setTimeout(() => amountInputRef.current?.focus(), 60);
-                        }}
-                        className={cn(
-                          "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm flex items-center justify-center gap-1.5",
-                          showForm === 'out' 
-                            ? (theme === 'dark' ? "bg-slate-700 text-rose-400 shadow-sm" : "bg-white text-rose-600 shadow-sm")
-                            : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
-                        )}
-                      >
-                        <span>CASH OUT</span>
-                        <span className={cn(
-                          "text-[10px] px-1.5 py-0.5 rounded font-mono font-medium",
-                          showForm === 'out'
-                            ? (theme === 'dark' ? "bg-rose-500/20 text-rose-300" : "bg-rose-100 text-rose-700")
-                            : (theme === 'dark' ? "bg-slate-800 text-slate-400" : "bg-slate-200 text-slate-500")
-                        )}>C O</span>
-                      </button>
-                    </div>
+              <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-h-[80vh] overflow-y-auto no-scrollbar">
+                {/* Type Tabs */}
+                <div className="flex flex-col gap-4">
+                  <div className={cn(
+                    "p-1 rounded-xl flex gap-1 transition-colors duration-300",
+                    theme === 'dark' ? "bg-slate-800" : "bg-slate-100"
+                  )}>
+                    <button
+                      type="button"
+                      onClick={() => setShowForm('in')}
+                      className={cn(
+                        "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm",
+                        showForm === 'in' 
+                          ? (theme === 'dark' ? "bg-slate-700 text-emerald-400 shadow-sm" : "bg-white text-emerald-600 shadow-sm")
+                          : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
+                      )}
+                    >
+                      CASH IN
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowForm('out')}
+                      className={cn(
+                        "flex-1 py-2 sm:py-3 rounded-lg font-bold transition-all text-xs sm:text-sm",
+                        showForm === 'out' 
+                          ? (theme === 'dark' ? "bg-slate-700 text-rose-400 shadow-sm" : "bg-white text-rose-600 shadow-sm")
+                          : (theme === 'dark' ? "text-slate-400 hover:bg-slate-700/50" : "text-slate-500 hover:bg-slate-200/50")
+                      )}
+                    >
+                      CASH OUT
+                    </button>
                   </div>
+                </div>
+
+                <form onSubmit={handleAddTransaction} className="space-y-4 sm:space-y-6">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Date & Time</label>
@@ -14035,7 +10160,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         type="datetime-local"
                         value={transactionDate}
                         onChange={(e) => setTransactionDate(e.target.value)}
-                        tabIndex={-1}
+                        tabIndex={5}
                         className={cn(
                           "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
                           theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
@@ -14044,7 +10169,14 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount (₹)</label>
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black uppercase tracking-widest flex items-center gap-1 text-slate-400">
+                          Amount (₹) <span className="text-rose-500 font-bold">*</span>
+                        </label>
+                        {formErrors.amount && (
+                          <span className="text-[10px] font-bold text-rose-500">Required</span>
+                        )}
+                      </div>
                       <input
                         ref={amountInputRef}
                         type="number"
@@ -14052,56 +10184,93 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         min="0"
                         value={amount}
                         onChange={(e) => {
-                          const val = e.target.value;
-                          setAmount(val);
-                          if (amountError && val.trim() && !isNaN(parseFloat(val)) && parseFloat(val) > 0) {
-                            setAmountError(false);
+                          setAmount(e.target.value);
+                          if (formErrors.amount && e.target.value && parseFloat(e.target.value) > 0) {
+                            setFormErrors(prev => ({ ...prev, amount: undefined }));
                           }
                         }}
                         placeholder="0.00"
                         tabIndex={1}
                         className={cn(
-                          "w-full h-[52px] px-4 py-3 rounded-xl outline-none text-sm font-medium transition-all duration-200 border",
-                          amountError
-                            ? (theme === 'dark' 
-                                ? "border-rose-500 ring-1 ring-rose-500/50 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/30" 
-                                : "border-rose-500 ring-1 ring-rose-500/40 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20")
-                            : "border-transparent focus:ring-2 focus:ring-indigo-500",
-                          theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                          "w-full h-[52px] px-4 py-3 rounded-xl outline-none text-sm font-medium transition-all duration-200",
+                          formErrors.amount
+                            ? "border-2 border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-100"
+                            : cn(
+                                "border-none focus:ring-2 focus:ring-indigo-500",
+                                theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                              )
                         )}
                       />
-                      {amountError && (
-                        <p className="text-xs text-rose-500 dark:text-rose-400 font-medium mt-1 animate-fade-in">
-                          Amount is required
+                      {formErrors.amount && (
+                        <p className="text-[11px] font-semibold text-rose-500 mt-1 flex items-center gap-1">
+                          <AlertCircle size={12} className="shrink-0" /> {formErrors.amount}
                         </p>
                       )}
                     </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black uppercase tracking-widest flex items-center gap-1 text-slate-400">
+                        Details <span className="text-rose-500 font-bold">*</span>
+                      </label>
+                      {formErrors.description && (
+                        <span className="text-[10px] font-bold text-rose-500">Required</span>
+                      )}
+                    </div>
+                    <textarea
+                      ref={descriptionInputRef}
+                      value={description}
+                      onChange={(e) => {
+                        setDescription(e.target.value);
+                        if (formErrors.description && e.target.value.trim().length > 0) {
+                          setFormErrors(prev => ({ ...prev, description: undefined }));
+                        }
+                      }}
+                      placeholder="Enter transaction details"
+                      rows={2}
+                      tabIndex={2}
+                      className={cn(
+                        "w-full px-4 py-3 rounded-xl outline-none text-sm font-medium resize-none transition-all duration-200",
+                        formErrors.description
+                          ? "border-2 border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-100"
+                          : cn(
+                              "border-none focus:ring-2 focus:ring-indigo-500",
+                              theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                            )
+                      )}
+                    />
+                    {formErrors.description && (
+                      <p className="text-[11px] font-semibold text-rose-500 mt-1 flex items-center gap-1">
+                        <AlertCircle size={12} className="shrink-0" /> {formErrors.description}
+                      </p>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</label>
                       <div className="space-y-2">
-                        <InAppSelect
-                          id="cash-entry-category-select"
-                          value={category}
-                          onChange={(val) => setCategory(val)}
-                          options={activeCategoryOptions}
-                          theme={theme}
-                          size="lg"
-                          tabIndex={2}
-                          triggerClassName={cn(
-                            "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
-                            theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
-                          )}
-                        />
+                        <div className="relative">
+                          <select
+                            value={category}
+                            onChange={(e) => setCategory(e.target.value)}
+                            tabIndex={3}
+                            className={cn(
+                              "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium appearance-none transition-colors duration-300",
+                              theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                            )}
+                          >
+                            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                        </div>
                         {category === 'Custom' && (
                           <input
                             type="text"
                             placeholder="Enter custom category"
                             value={customCategory}
                             onChange={(e) => setCustomCategory(e.target.value)}
-                            tabIndex={2}
                             className={cn(
                               "w-full h-[52px] px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition-all",
                               theme === 'dark' ? "bg-slate-800 border-indigo-900/30 text-white" : "bg-slate-50 border-indigo-100 text-black"
@@ -14114,26 +10283,26 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Mode</label>
                       <div className="space-y-2">
-                        <InAppSelect
-                          id="cash-entry-mode-select"
-                          value={mode}
-                          onChange={(val) => setMode(val)}
-                          options={activeModeOptions}
-                          theme={theme}
-                          size="lg"
-                          tabIndex={3}
-                          triggerClassName={cn(
-                            "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
-                            theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
-                          )}
-                        />
+                        <div className="relative">
+                          <select
+                            value={mode}
+                            onChange={(e) => setMode(e.target.value)}
+                            tabIndex={4}
+                            className={cn(
+                              "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium appearance-none transition-colors duration-300",
+                              theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                            )}
+                          >
+                            {MODES.map(m => <option key={m} value={m}>{m}</option>)}
+                          </select>
+                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                        </div>
                         {mode === 'Custom' && (
                           <input
                             type="text"
                             placeholder="Enter custom mode"
                             value={customMode}
                             onChange={(e) => setCustomMode(e.target.value)}
-                            tabIndex={3}
                             className={cn(
                               "w-full h-[52px] px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition-all",
                               theme === 'dark' ? "bg-slate-800 border-indigo-900/30 text-white" : "bg-slate-50 border-indigo-100 text-black"
@@ -14142,43 +10311,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         )}
                       </div>
                     </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Details</label>
-                    <input
-                      type="text"
-                      ref={descriptionInputRef}
-                      value={description}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/[\r\n]+/g, ' ');
-                        setDescription(val);
-                        if (detailsError && val.trim()) {
-                          setDetailsError(false);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                        }
-                      }}
-                      placeholder="Enter transaction details"
-                      tabIndex={4}
-                      className={cn(
-                        "w-full h-[52px] px-4 py-3 rounded-xl outline-none text-sm font-medium transition-all duration-200 border whitespace-nowrap overflow-x-auto",
-                        detailsError
-                          ? (theme === 'dark' 
-                              ? "border-rose-500 ring-1 ring-rose-500/50 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/30" 
-                              : "border-rose-500 ring-1 ring-rose-500/40 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20")
-                          : "border-transparent focus:ring-2 focus:ring-indigo-500",
-                        theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
-                      )}
-                    />
-                    {detailsError && (
-                      <p className="text-xs text-rose-500 dark:text-rose-400 font-medium mt-1 animate-fade-in">
-                        Details are required
-                      </p>
-                    )}
                   </div>
 
                   {/* Image Layout Selection */}
@@ -14221,73 +10353,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   </div>
 
-                  <div 
-                    onDragEnter={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      dragCounterRef.current++;
-                      setIsDraggingAttachments(true);
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      e.dataTransfer.dropEffect = 'copy';
-                      if (!isDraggingAttachments) setIsDraggingAttachments(true);
-                    }}
-                    onDragLeave={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      dragCounterRef.current--;
-                      if (dragCounterRef.current <= 0) {
-                        dragCounterRef.current = 0;
-                        setIsDraggingAttachments(false);
-                      }
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      dragCounterRef.current = 0;
-                      setIsDraggingAttachments(false);
-                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                        processUploadedFiles(e.dataTransfer.files);
-                      }
-                    }}
-                    className={cn(
-                      "space-y-1.5 relative rounded-2xl transition-all duration-200",
-                      isDraggingAttachments ? "ring-2 ring-indigo-500 rounded-2xl p-1 bg-indigo-50/40 dark:bg-indigo-950/30" : ""
-                    )}
-                  >
-                    {/* Visual Drag & Drop Active Overlay */}
-                    <AnimatePresence>
-                      {isDraggingAttachments && (
-                        <motion.div 
-                          initial={{ opacity: 0, scale: 0.98 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.98 }}
-                          transition={{ duration: 0.15 }}
-                          className="absolute inset-0 z-30 rounded-2xl border-2 border-dashed border-indigo-500 bg-indigo-600/10 dark:bg-indigo-500/15 backdrop-blur-xs flex flex-col items-center justify-center gap-2 p-4 pointer-events-none"
-                        >
-                          <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white shadow-lg flex items-center justify-center animate-bounce">
-                            <Upload size={24} />
-                          </div>
-                          <p className="text-xs sm:text-sm font-black text-indigo-600 dark:text-indigo-400">
-                            Drop bills or PDF here to attach
-                          </p>
-                          <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                            Supports Images (JPG, PNG) &amp; Multi-page PDF (Max 7)
-                          </p>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bills / Attachments (Max 7)</label>
-                      <span className="text-[9px] font-bold text-indigo-500 dark:text-indigo-400 flex items-center gap-1">
-                        <Upload size={10} />
-                        Drag &amp; Drop supported
-                      </span>
-                    </div>
-
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bills / Attachments (Max 5)</label>
                     <div className="space-y-3">
                       {selectedImages.length > 0 && (
                         <div className="space-y-4">
@@ -14312,177 +10379,103 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             </div>
                           )}
 
-                          <div className="flex flex-wrap gap-3">
+                          <div className="flex flex-wrap gap-2">
                             {selectedImages.map((img, i) => (
                               <div key={i} className="relative group w-20 h-20 sm:w-24 sm:h-24">
-                                <div 
-                                  onClick={() => setSelectedFormatIndex(i)}
-                                  className={cn(
-                                    "w-full h-full rounded-xl overflow-hidden border cursor-pointer transition-all duration-300 relative bg-slate-100 dark:bg-zinc-800",
-                                    selectedFormatIndex === i 
-                                      ? "border-emerald-500 ring-4 ring-emerald-500/20" 
-                                      : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
-                                  )}
-                                >
-                                  <OptimizedImage 
-                                    src={img} 
-                                    alt="preview" 
-                                    type="preview"
-                                    className="w-full h-full object-cover" 
-                                  />
-                                </div>
+                                <OptimizedImage 
+                                  src={img} 
+                                  alt="preview" 
+                                  type="preview"
+                                  className="w-full h-full object-cover rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer" 
+                                  onClick={() => {
+                                    setPreviewImages(selectedImages);
+                                    setPreviewIndex(i);
+                                    setPreviewRotation(0);
+                                    setPreviewZoom(1);
+                                  }}
+                                />
                                 
                                 {/* Reorder Controls - Always Visible on Hover, but semi-visible always */}
-                                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-between px-0.5 pointer-events-none">
+                                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-between px-1 pointer-events-none">
                                   <button 
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); moveImage(i, 'up'); }}
                                     disabled={i === 0}
                                     className={cn(
-                                      "p-0.5 bg-black/60 hover:bg-black/90 text-white rounded-full transition-all pointer-events-auto",
+                                      "p-1 bg-black/40 hover:bg-black/70 text-white rounded-full transition-all pointer-events-auto",
                                       i === 0 ? "opacity-0" : "opacity-60 group-hover:opacity-100"
                                     )}
                                   >
-                                    <ChevronLeft size={12} />
+                                    <ChevronLeft size={14} />
                                   </button>
                                   <button 
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); moveImage(i, 'down'); }}
                                     disabled={i === selectedImages.length - 1}
                                     className={cn(
-                                      "p-0.5 bg-black/60 hover:bg-black/90 text-white rounded-full transition-all pointer-events-auto",
+                                      "p-1 bg-black/40 hover:bg-black/70 text-white rounded-full transition-all pointer-events-auto",
                                       i === selectedImages.length - 1 ? "opacity-0" : "opacity-60 group-hover:opacity-100"
                                     )}
                                   >
-                                    <ChevronRight size={12} />
+                                    <ChevronRight size={14} />
                                   </button>
                                 </div>
 
                                 <button 
                                   type="button"
-                                  onClick={() => {
-                                    removeImage(i);
-                                    if (selectedFormatIndex >= selectedImages.length - 1) {
-                                      setSelectedFormatIndex(Math.max(0, selectedImages.length - 2));
-                                    }
-                                  }}
+                                  onClick={() => removeImage(i)}
                                   className={cn(
-                                    "absolute -top-1.5 -right-1.5 p-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-full transition-all z-20 shadow-md border border-white dark:border-zinc-900 flex items-center justify-center cursor-pointer"
+                                    "absolute -top-2 -right-2 p-1.5 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-full transition-all z-20 shadow-md border-2 border-white dark:border-zinc-900 flex items-center justify-center cursor-pointer"
                                   )}
                                   title="Remove image"
                                 >
-                                  <X size={10} className="stroke-[3]" />
+                                  <X size={12} className="stroke-[3]" />
                                 </button>
                                 
-                                <div className="absolute bottom-1 right-1 bg-black/50 text-[8px] text-white px-1.5 rounded-full">
+                                <div className="absolute bottom-1 left-1/2 -translate-x-1/2 bg-black/50 text-[8px] text-white px-1.5 rounded-full">
                                   {i + 1}
                                 </div>
                               </div>
                             ))}
-                            {selectedImages.length < 7 && (
+                            {selectedImages.length < 5 && (
                               <button 
                                 type="button"
                                 onClick={() => triggerUploadSelector('transaction')}
                                 className={cn(
-                                  "w-20 h-20 sm:w-24 sm:h-24 flex flex-col items-center justify-center border-2 border-dashed rounded-xl text-slate-400 hover:border-emerald-500 hover:text-emerald-500 transition-all gap-1 cursor-pointer",
-                                  theme === 'dark' ? "border-slate-800 bg-zinc-900/40" : "border-slate-200 bg-slate-50/50"
+                                  "w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center border-2 border-dashed rounded-xl text-slate-400 hover:border-indigo-500 hover:text-indigo-500 transition-all",
+                                  theme === 'dark' ? "border-slate-800" : "border-slate-200"
                                 )}
                               >
-                                <Plus size={20} />
-                                <span className="text-[8px] font-black uppercase tracking-wider">Add / Drop</span>
+                                <Plus size={24} />
                               </button>
                             )}
                           </div>
-
-                          {/* Formatting Panel for Selected Image */}
-                          {selectedImages[selectedFormatIndex] && (
-                            (() => {
-                              return (
-                                <div className={cn(
-                                  "p-4 rounded-xl border border-slate-100 dark:border-zinc-800 flex items-center justify-between",
-                                  theme === 'dark' ? "bg-zinc-900/40" : "bg-slate-50/50"
-                                )}>
-                                  <div className="flex items-center gap-1.5">
-                                    <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-zinc-300">
-                                      Attachment #{selectedFormatIndex + 1} Selected
-                                    </span>
-                                  </div>
-
-                                  <div className="flex justify-end gap-2">
-                                    <button
-                                      type="button"
-                                      disabled={isEditingLoading}
-                                      onClick={handleReeditImage}
-                                      className="py-1.5 px-3 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-400 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
-                                    >
-                                      {isEditingLoading ? (
-                                        <Loader2 size={12} className="animate-spin" />
-                                      ) : (
-                                        <Crop size={12} />
-                                      )}
-                                      Edit Image
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        handleOpenPreview(selectedImages);
-                                        setPreviewIndex(selectedFormatIndex);
-                                        setPreviewRotation(0);
-                                        setPreviewZoom(1);
-                                      }}
-                                      className="py-1.5 px-3 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-400 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                                    >
-                                      <ZoomIn size={12} />
-                                      View Fullscreen
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })()
-                          )}
                         </div>
                       )}
                       
-                      {isOffline && (
-                        <div className="mb-4 p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 text-xs font-bold flex items-center gap-2.5">
-                          <CloudOff size={18} className="shrink-0 text-rose-500" />
-                          <span>You are offline. Adding or editing entries is disabled until internet connection is restored.</span>
-                        </div>
-                      )}
-
                       {selectedImages.length === 0 && (
                         <div 
-                          tabIndex={5}
                           onClick={() => triggerUploadSelector('transaction')}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); triggerUploadSelector('transaction'); } }}
                           className={cn(
-                            "border-2 border-dashed rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center gap-2.5 transition-all cursor-pointer group focus:outline-none focus:ring-2 focus:ring-indigo-500",
-                            isDraggingAttachments
-                              ? "border-indigo-500 bg-indigo-50/60 dark:bg-indigo-950/40 ring-4 ring-indigo-500/20 scale-[1.01]"
-                              : theme === 'dark' ? "border-slate-800 hover:border-indigo-500 bg-slate-900/30" : "border-slate-200 hover:border-indigo-300 bg-slate-50/50"
+                            "border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center gap-2 hover:border-indigo-300 transition-all cursor-pointer group",
+                            theme === 'dark' ? "border-slate-800 hover:border-indigo-500" : "border-slate-200"
                           )}
                         >
                           <div className={cn(
-                            "p-3 rounded-2xl text-slate-400 group-hover:text-indigo-500 group-hover:scale-110 transition-all shadow-xs",
-                            theme === 'dark' ? "bg-slate-800" : "bg-white"
+                            "p-2 rounded-full text-slate-400 group-hover:text-indigo-500 transition-colors",
+                            theme === 'dark' ? "bg-slate-800" : "bg-slate-50"
                           )}>
-                            <Upload size={26} />
+                            <Upload size={24} />
                           </div>
-                          <div className="text-center space-y-0.5">
-                            <p className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-200 group-hover:text-indigo-500 transition-colors">
-                              Drag &amp; Drop or Click to attach bills or PDF
-                            </p>
-                            <p className="text-[10px] font-medium text-slate-400">
-                              Supports Images (JPG, PNG) &amp; Multi-page PDF • Max 7 items
-                            </p>
-                          </div>
+                          <p className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-500 transition-colors">
+                            Click to upload bills (Max 5)
+                          </p>
                         </div>
                       )}
                       <input 
                         type="file"
                         multiple
-                        accept="image/*,application/pdf,.pdf"
+                        accept="image/*"
                         ref={multiFileInputRef}
                         onChange={handleImageUpload}
                         className="hidden"
@@ -14490,65 +10483,64 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   </div>
 
-                </div>
-
-                {/* Sticky Bottom Actions */}
-                <div className={cn(
-                  "shrink-0 p-4 sm:p-6 border-t flex gap-3 transition-colors duration-300",
-                  theme === 'dark' ? "border-slate-800 bg-zinc-950" : "border-slate-100 bg-white"
-                )}>
-                  <button
-                    type="button"
-                    tabIndex={7}
-                    disabled={isSubmitting}
-                    onClick={resetForm}
-                    className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    tabIndex={6}
-                    disabled={isSubmitting || isOffline}
-                    onClick={(e) => {
-                      if (isOffline) {
-                        e.preventDefault();
-                        vibrate(50);
-                        setShowOfflineDialog(true);
-                        return;
-                      }
-                      vibrate(30);
-                      setSubmitAndAddNew(false);
-                      const isAmountEmpty = !amount || !amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0;
-                      const isDetailsEmpty = !description || !description.trim();
-                      if (isAmountEmpty || isDetailsEmpty) {
-                        e.preventDefault();
-                        if (isAmountEmpty) setAmountError(true);
-                        if (isDetailsEmpty) setDetailsError(true);
-                        if (isAmountEmpty) {
-                          amountInputRef.current?.focus();
-                        } else if (isDetailsEmpty) {
-                          descriptionInputRef.current?.focus();
-                        }
-                      }
-                    }}
-                    className={cn(
-                      "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed",
-                      (isSubmitting || isOffline) ? "bg-slate-400 dark:bg-slate-700" : (
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={resetForm}
+                      className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-xs sm:text-sm"
+                    >
+                      Cancel
+                    </button>
+                    {!editingTransaction && (
+                      <button
+                        type="submit"
+                        onClick={() => { vibrate(30); setSubmitAndAddNew(true); }}
+                        className={cn(
+                          "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm",
+                          theme === 'dark' ? "bg-indigo-600 hover:bg-indigo-700 shadow-none" : "bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100"
+                        )}
+                      >
+                        Save &amp; Add New
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      onClick={() => { vibrate(30); setSubmitAndAddNew(false); }}
+                      className={cn(
+                        "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm",
                         showForm === 'in' 
                           ? (theme === 'dark' ? "bg-emerald-600 hover:bg-emerald-700 shadow-none" : "bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-100")
                           : (theme === 'dark' ? "bg-rose-600 hover:bg-rose-700 shadow-none" : "bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-100")
-                      )
-                    )}
-                  >
-                    {isOffline ? "Offline (Cannot Save)" : (isSubmitting ? "Saving..." : (editingTransaction ? 'Save Changes' : 'Save'))}
-                  </button>
-                </div>
-              </form>
+                      )}
+                    >
+                      {editingTransaction ? 'Save Changes' : 'Save'}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
+      {/* Premium Transaction Processing Modal */}
+      <TransactionProcessingModal
+        isOpen={txProgressModal.isOpen}
+        mode={txProgressModal.mode}
+        progress={txProgressModal.progress}
+        currentStepMessage={txProgressModal.currentStepMessage}
+        steps={txProgressModal.steps}
+        status={txProgressModal.status}
+        errorMessage={txProgressModal.errorMessage}
+        onRetry={() => {
+          if (txProgressModal.retryAction) {
+            txProgressModal.retryAction();
+          }
+        }}
+        onCancel={() => {
+          setTxProgressModal(prev => ({ ...prev, isOpen: false }));
+        }}
+      />
 
       {/* Processing Overlay */}
       <AnimatePresence mode="wait">
@@ -14557,7 +10549,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-indigo-600 text-white"
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-xl text-white"
           >
             <div className="text-center space-y-6 px-6">
               <div className="relative flex items-center justify-center">
@@ -14588,225 +10580,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         )}
       </AnimatePresence>
 
-      {/* Premium Transaction Saving/Updating Modal */}
-      <AnimatePresence>
-        {progressModal && (
-          <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-4">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 15 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 15 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-              className={cn(
-                "relative w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center text-center overflow-hidden border transition-all duration-300",
-                theme === 'dark' 
-                  ? "bg-zinc-950/90 border-slate-800/80" 
-                  : "bg-white border-slate-200"
-              )}
-            >
-              {/* Star-sparkle glow background effect */}
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-
-              {/* Success, Loading, or Error Circular Header */}
-              <div className="relative w-24 h-24 flex items-center justify-center mt-2">
-                {/* Outer Circular loader svg */}
-                <svg className="w-full h-full transform -rotate-90 absolute">
-                  <circle
-                    cx="48"
-                    cy="48"
-                    r="40"
-                    strokeWidth="4"
-                    stroke="currentColor"
-                    fill="transparent"
-                    className={cn(
-                      theme === 'dark' ? "text-slate-800/40" : "text-slate-200"
-                    )}
-                  />
-                  <motion.circle
-                    cx="48"
-                    cy="48"
-                    r="40"
-                    strokeWidth="4"
-                    stroke="currentColor"
-                    fill="transparent"
-                    strokeDasharray={251.2}
-                    initial={{ strokeDashoffset: 251.2 }}
-                    animate={{ strokeDashoffset: 251.2 - (251.2 * progressModal.progress) / 100 }}
-                    transition={{ duration: 0.3, ease: "easeOut" }}
-                    className={cn(
-                      progressModal.errorMsg ? "text-rose-500" : progressModal.success ? "text-emerald-400" : "text-indigo-500"
-                    )}
-                  />
-                </svg>
-
-                {/* Inner Icon */}
-                <div className="relative z-10 flex items-center justify-center">
-                  {progressModal.success ? (
-                    <motion.div
-                      initial={{ scale: 0, rotate: -20 }}
-                      animate={{ scale: 1, rotate: 0 }}
-                      className="w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center text-emerald-400"
-                    >
-                      <Check size={24} className="stroke-[3]" />
-                    </motion.div>
-                  ) : progressModal.errorMsg ? (
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      className="w-12 h-12 rounded-full bg-rose-500/15 border border-rose-400/30 flex items-center justify-center text-rose-400"
-                    >
-                      <AlertCircle size={24} />
-                    </motion.div>
-                  ) : (
-                    <div className="w-12 h-12 rounded-full bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 relative">
-                      <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                        className="absolute inset-0 border-2 border-indigo-400/10 border-t-indigo-400/50 rounded-full"
-                      />
-                      <Sparkles size={20} className="animate-pulse" />
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Progress Percentage Text */}
-              <div className="mt-4 flex flex-col items-center">
-                <span className={cn(
-                  "text-3xl font-black font-mono tracking-tight",
-                  progressModal.errorMsg ? "text-rose-400" : progressModal.success ? "text-emerald-400" : (theme === 'dark' ? "text-white" : "text-slate-900")
-                )}>
-                  {progressModal.progress}%
-                </span>
-                
-                {/* Horizontal Progress bar */}
-                <div className={cn(
-                  "w-56 h-1.5 rounded-full overflow-hidden mt-3 border transition-all",
-                  theme === 'dark' ? "bg-slate-900 border-slate-800/40" : "bg-slate-100 border-slate-200"
-                )}>
-                  <motion.div 
-                    className={cn(
-                      "h-full rounded-full",
-                      progressModal.errorMsg ? "bg-rose-500" : progressModal.success ? "bg-emerald-400" : "bg-gradient-to-r from-indigo-500 to-indigo-400"
-                    )}
-                    initial={{ width: 0 }}
-                    animate={{ width: `${progressModal.progress}%` }}
-                    transition={{ duration: 0.3, ease: "easeOut" }}
-                  />
-                </div>
-              </div>
-
-              {/* Titles and Subtitles */}
-              <div className="mt-6 space-y-2 px-2">
-                <h3 className={cn(
-                  "text-lg font-black tracking-tight",
-                  theme === 'dark' ? "text-white" : "text-slate-900"
-                )}>
-                  {progressModal.success ? (
-                    progressModal.type === 'create' ? "✓ Entry saved successfully" : "✓ Entry updated successfully"
-                  ) : progressModal.errorMsg ? (
-                    "Couldn't save your entry"
-                  ) : (
-                    progressModal.type === 'create' ? "Saving your entry..." : "Updating your entry..."
-                  )}
-                </h3>
-                
-                <p className={cn(
-                  "text-xs leading-relaxed font-medium",
-                  theme === 'dark' ? "text-slate-400" : "text-slate-600"
-                )}>
-                  {progressModal.success ? (
-                    "Your secure ledger has been successfully updated."
-                  ) : progressModal.errorMsg ? (
-                    "Couldn't save your entry. Please check your connection and retry."
-                  ) : (
-                    progressModal.type === 'create' 
-                      ? (selectedImages.some(img => img.startsWith('blob:')) 
-                          ? "Your receipt is being securely uploaded to TrackBook Cloud." 
-                          : "Saving your transaction ledger entry securely.")
-                      : "Saving your latest changes securely."
-                  )}
-                </p>
-              </div>
-
-              {/* Steps Timeline checklist */}
-              <div className={cn(
-                "mt-8 w-full max-w-[280px] rounded-2xl p-4 text-left space-y-3.5 border transition-all duration-300",
-                theme === 'dark' 
-                  ? "bg-slate-900/40 border-slate-800/40" 
-                  : "bg-slate-50 border-slate-150"
-              )}>
-                {progressModal.steps.map((step, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-xs font-bold tracking-tight">
-                    <span className={cn(
-                      "transition-colors duration-200 font-sans",
-                      step.status === 'success' ? (theme === 'dark' ? "text-emerald-400" : "text-emerald-600") :
-                      step.status === 'loading' ? (theme === 'dark' ? "text-white" : "text-slate-900") :
-                      step.status === 'error' ? (theme === 'dark' ? "text-rose-400" : "text-rose-600") : 
-                      (theme === 'dark' ? "text-slate-500" : "text-slate-400")
-                    )}>
-                      {step.label}
-                    </span>
-                    
-                    <div className="flex items-center gap-1.5 font-mono text-[10px]">
-                      {step.status === 'success' && (
-                        <span className={cn(
-                          "flex items-center gap-1",
-                          theme === 'dark' ? "text-emerald-400" : "text-emerald-600"
-                        )}>
-                          <Check size={12} className="stroke-[3]" />
-                          <span>Done</span>
-                        </span>
-                      )}
-                      {step.status === 'loading' && (
-                        <span className="text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 animate-pulse">
-                          <Loader2 size={11} className="animate-spin" />
-                          <span>Active</span>
-                        </span>
-                      )}
-                      {step.status === 'pending' && (
-                        <span className={cn(
-                          theme === 'dark' ? "text-slate-600" : "text-slate-400"
-                        )}>Waiting</span>
-                      )}
-                      {step.status === 'error' && (
-                        <span className="text-rose-600 dark:text-rose-500 font-black">Failed</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Error Actions */}
-              {progressModal.errorMsg && (
-                <div className="mt-8 flex gap-3 w-full">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      vibrate(30);
-                      saveTransaction();
-                    }}
-                    className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black tracking-widest uppercase cursor-pointer transition-all active:scale-95 shadow-lg shadow-indigo-600/10"
-                  >
-                    Retry
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      vibrate(20);
-                      setProgressModal(null);
-                    }}
-                    className="flex-1 py-3 border border-slate-800 hover:bg-slate-900 text-slate-300 rounded-xl text-xs font-black tracking-widest uppercase cursor-pointer transition-all"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
       {/* Image Gallery Preview Modal */}
       <AnimatePresence>
         {previewImages && (
@@ -14815,187 +10588,95 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             <div className="flex items-center justify-between p-4 text-white">
               <div className="flex items-center gap-4">
                 <button 
-                  onClick={handleClosePreview}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                  onClick={() => setPreviewImages(null)}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
                 >
                   <X size={24} />
                 </button>
                 <div>
                   <p className="font-bold">Attachment Preview</p>
-                  <div className="flex flex-col text-xs text-slate-400 gap-0.5 mt-0.5">
-                    <p>{previewIndex + 1} of {previewImages.length}</p>
-                    {(() => {
-                      const activePreviewTx = activeBook?.transactions.find(tx => tx.id === previewTransactionId);
-                      const activeAttDetail = activePreviewTx?.attachment_details?.find(att => att.file_url === previewImages[previewIndex]) || activePreviewTx?.attachment_details?.[previewIndex];
-                      if (!activeAttDetail) return null;
-                      return (
-                        <div className="flex flex-col gap-0.5 mt-1 border-t border-white/10 pt-1">
-                          {(activeAttDetail.created_at || activePreviewTx?.created_at) && (
-                            <p className="flex items-center gap-1 text-slate-350">
-                              <Clock size={10} className="text-indigo-400 shrink-0" />
-                              <span>Uploaded: <strong>{formatDateTime12h(activeAttDetail.created_at || activePreviewTx?.created_at)}</strong></span>
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
+                  <p className="text-xs text-slate-400">{previewIndex + 1} of {previewImages.length}</p>
                 </div>
               </div>
               
               <div className="flex items-center gap-2">
                 <button 
                   onClick={() => setPreviewZoom(prev => Math.max(0.5, prev - 0.25))}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
                   title="Zoom Out"
-                  disabled={previewValidationStatus[previewIndex] === false}
                 >
                   <ZoomOut size={20} />
                 </button>
                 <button 
                   onClick={() => setPreviewZoom(prev => Math.min(3, prev + 0.25))}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
                   title="Zoom In"
-                  disabled={previewValidationStatus[previewIndex] === false}
                 >
                   <ZoomIn size={20} />
                 </button>
                 <button 
-                  onClick={handleDownloadAttachment}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors cursor-pointer text-white"
-                  title="Download Original"
+                  onClick={() => setPreviewRotation(prev => (prev + 90) % 360)}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                  title="Rotate"
+                >
+                  <RotateCw size={20} />
+                </button>
+                <a 
+                  href={previewImages[previewIndex]} 
+                  download={`attachment-${previewIndex + 1}.png`}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                  title="Download"
                 >
                   <Download size={20} />
-                </button>
+                </a>
               </div>
             </div>
 
-            {/* Main Preview Area with Touch Swipe and Tap Navigation */}
-            <div 
-              className="flex-1 relative flex items-center justify-center overflow-hidden touch-pan-y select-none"
-              onTouchStart={(e) => {
-                if (previewZoom > 1) return;
-                previewTouchStartX.current = e.touches[0].clientX;
-                previewTouchStartY.current = e.touches[0].clientY;
-                previewTouchEndX.current = null;
-              }}
-              onTouchMove={(e) => {
-                if (previewZoom > 1) return;
-                previewTouchEndX.current = e.touches[0].clientX;
-              }}
-              onTouchEnd={(e) => {
-                if (previewZoom > 1) return;
-                if (previewTouchStartX.current === null || previewTouchEndX.current === null) return;
-                const deltaX = previewTouchStartX.current - previewTouchEndX.current;
-                const deltaY = previewTouchStartY.current ? Math.abs(previewTouchStartY.current - e.changedTouches[0].clientY) : 0;
-                
-                // Horizontal swipe detection (> 35px and horizontal > vertical)
-                if (Math.abs(deltaX) > 35 && Math.abs(deltaX) > deltaY) {
-                  if (deltaX > 0) {
-                    // Swiped left (dragged left) -> Show next image
-                    handlePreviewNext();
-                  } else {
-                    // Swiped right (dragged right) -> Show previous image
-                    handlePreviewPrev();
-                  }
-                }
-                previewTouchStartX.current = null;
-                previewTouchStartY.current = null;
-                previewTouchEndX.current = null;
-              }}
-              onClick={(e) => {
-                // In mobile view, clicking on left/right edges of screen triggers navigation
-                if (previewImages && previewImages.length > 1 && window.innerWidth < 640 && previewZoom <= 1) {
-                  const target = e.target as HTMLElement;
-                  if (target.closest('button')) return;
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const clickX = e.clientX - rect.left;
-                  if (clickX > rect.width * 0.65) {
-                    handlePreviewNext();
-                  } else if (clickX < rect.width * 0.35) {
-                    handlePreviewPrev();
-                  }
-                }
-              }}
-            >
-              {isPreviewValidating && (
-                <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/60 backdrop-blur-sm text-white">
-                  <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" />
-                  <p className="text-sm font-bold animate-pulse text-indigo-300">Validating Receipt Accessibility...</p>
-                </div>
-              )}
-
-              {!isPreviewValidating && previewValidationStatus[previewIndex] === false ? (
-                <div className="flex flex-col items-center justify-center p-8 max-w-md bg-zinc-900/90 border border-zinc-800 rounded-2xl text-center shadow-2xl mx-4 relative z-10">
-                  <div className="w-16 h-16 rounded-full bg-rose-500/10 flex items-center justify-center text-rose-500 mb-6 border border-rose-500/20">
-                    <CloudOff size={32} />
-                  </div>
-                  <h3 className="text-lg font-black text-slate-100 mb-2">This receipt couldn't be previewed.</h3>
-                  <p className="text-xs text-slate-400 leading-relaxed mb-6">
-                    The receipt attachment could not be accessed. This can happen if the image is private, storage is unavailable, or you are offline.
-                  </p>
-                  <div className="flex items-center gap-3 w-full">
-                    <button
-                      onClick={() => handleRetryPreview(previewIndex)}
-                      className="flex-1 py-3 px-4 rounded-xl bg-indigo-650 hover:bg-indigo-600 active:scale-95 text-xs font-bold text-white transition-all cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      <RotateCw size={14} />
-                      <span>Retry</span>
-                    </button>
-                    <button
-                      onClick={() => handleOpenOriginal(previewIndex)}
-                      className="flex-1 py-3 px-4 rounded-xl bg-zinc-850 hover:bg-zinc-850 text-slate-200 border border-zinc-700 active:scale-95 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      <Download size={14} />
-                      <span>Open Original</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={previewIndex}
-                    initial={{ opacity: 0, x: previewSlideDirection * 50, scale: 0.95 }}
-                    animate={{ 
-                      opacity: 1, 
-                      x: 0,
-                      scale: previewZoom,
-                      rotate: previewRotation
-                    }}
-                    exit={{ opacity: 0, x: -previewSlideDirection * 50, scale: 0.95 }}
-                    transition={{ type: "spring", damping: 26, stiffness: 220 }}
-                    className="relative max-w-full max-h-full p-4"
-                  >
-                    <OptimizedImage 
-                      src={previewImages[previewIndex]} 
-                      alt="preview" 
-                      type="fullscreen"
-                      className="max-w-full max-h-[80vh] object-contain shadow-2xl rounded-lg pointer-events-none"
-                      referrerPolicy="no-referrer"
-                    />
-                  </motion.div>
-                </AnimatePresence>
-              )}
-
-              {/* Mobile Swipe Hint Pill */}
-              {previewImages.length > 1 && (
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm text-white/80 px-3 py-1 rounded-full text-[10px] font-medium sm:hidden pointer-events-none flex items-center gap-1.5 shadow-md">
-                  <span>Swipe left/right to view next</span>
-                </div>
-              )}
+            {/* Main Preview Area */}
+            <div className="flex-1 relative w-full h-full flex items-center justify-center overflow-hidden p-2">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={previewIndex}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ 
+                    opacity: 1, 
+                    scale: previewZoom,
+                    rotate: previewRotation
+                  }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ type: "spring", damping: 25, stiffness: 200 }}
+                  className="relative w-full h-full max-w-full max-h-full p-2 sm:p-4 flex items-center justify-center m-auto"
+                >
+                  <OptimizedImage 
+                    src={previewImages[previewIndex]} 
+                    alt="preview" 
+                    type="fullscreen"
+                    className="max-w-full max-h-[80vh] object-contain shadow-2xl rounded-lg"
+                    referrerPolicy="no-referrer"
+                  />
+                </motion.div>
+              </AnimatePresence>
 
               {/* Navigation Arrows */}
               {previewImages.length > 1 && (
                 <>
                   <button 
-                    onClick={handlePreviewPrev}
-                    className="absolute left-4 p-4 bg-white/5 hover:bg-white/10 rounded-full text-white backdrop-blur-md transition-all cursor-pointer"
+                    onClick={() => {
+                      setPreviewIndex(prev => (prev - 1 + previewImages.length) % previewImages.length);
+                      setPreviewRotation(0);
+                      setPreviewZoom(1);
+                    }}
+                    className="absolute left-4 p-4 bg-white/5 hover:bg-white/10 rounded-full text-white backdrop-blur-md transition-all"
                   >
                     <ChevronLeft size={32} />
                   </button>
                   <button 
-                    onClick={handlePreviewNext}
-                    className="absolute right-4 p-4 bg-white/5 hover:bg-white/10 rounded-full text-white backdrop-blur-md transition-all cursor-pointer"
+                    onClick={() => {
+                      setPreviewIndex(prev => (prev + 1) % previewImages.length);
+                      setPreviewRotation(0);
+                      setPreviewZoom(1);
+                    }}
+                    className="absolute right-4 p-4 bg-white/5 hover:bg-white/10 rounded-full text-white backdrop-blur-md transition-all"
                   >
                     <ChevronRight size={32} />
                   </button>
@@ -15015,7 +10696,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       setPreviewZoom(1);
                     }}
                     className={cn(
-                      "w-16 h-16 rounded-lg overflow-hidden border-2 transition-all shrink-0 cursor-pointer",
+                      "w-16 h-16 rounded-lg overflow-hidden border-2 transition-all shrink-0",
                       previewIndex === i 
                         ? (theme === 'dark' ? "border-indigo-500 scale-110 shadow-none" : "border-indigo-500 scale-110 shadow-lg shadow-indigo-500/20") 
                         : "border-transparent opacity-50 hover:opacity-100"
@@ -15376,26 +11057,45 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
       <AnimatePresence>
         {isSubmitting && (
-          <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            transition={{ duration: 0.15 }}
-            className="fixed bottom-6 right-6 z-[200] pointer-events-none"
-          >
-            <div className={cn(
-              "flex items-center gap-3 px-4 py-3 rounded-2xl shadow-xl border backdrop-blur-md",
-              theme === 'dark' ? "bg-zinc-900/95 border-zinc-800 text-white" : "bg-white/95 border-slate-200 text-slate-800"
-            )}>
-              <div className="relative w-5 h-5 shrink-0">
-                <div className="absolute inset-0 border-2 border-indigo-600/30 rounded-full" />
-                <div className="absolute inset-0 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+          <div className={cn(
+            "fixed inset-0 z-[200] flex items-center justify-center p-4 backdrop-blur-md transition-colors duration-300",
+            theme === 'dark' ? "bg-black/80" : "bg-slate-900/40"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className={cn(
+                "rounded-3xl p-8 shadow-2xl text-center space-y-6 max-w-xs w-full border transition-colors duration-300",
+                theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
+              )}
+            >
+              <div className="relative w-20 h-20 mx-auto">
+                <div className={cn(
+                  "absolute inset-0 border-4 rounded-full transition-colors duration-300",
+                  theme === 'dark' ? "border-indigo-900/30" : "border-indigo-100"
+                )} />
+                <motion.div 
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                  className="absolute inset-0 border-4 border-indigo-600 border-t-transparent rounded-full"
+                />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Sparkles className="text-indigo-600 animate-pulse" size={32} />
+                </div>
               </div>
-              <span className="text-xs font-semibold tracking-wide">
-                {submitAndAddNew ? "Saving & preparing next entry..." : (submittingMessage || "Saving changes...")}
-              </span>
-            </div>
-          </motion.div>
+              <div className="space-y-2">
+                <h3 className={cn(
+                  "text-xl font-black transition-colors duration-300",
+                  theme === 'dark' ? "text-white" : "text-black"
+                )}>{submittingMessage}</h3>
+                <p className={cn(
+                  "text-sm font-medium transition-colors duration-300",
+                  theme === 'dark' ? "text-slate-400" : "text-slate-600"
+                )}>Please wait a moment...</p>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -15461,144 +11161,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   )}
                 >
                   Delete
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Merge Transactions Confirmation Modal */}
-      <AnimatePresence>
-        {showMergeConfirmDialog && (
-          <div className={cn(
-            "fixed inset-0 z-[150] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300 overflow-y-auto",
-            theme === 'dark' ? "bg-black/60" : "bg-slate-900/40"
-          )}>
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className={cn(
-                "w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 transition-colors duration-300",
-                theme === 'dark' ? "bg-zinc-950 text-white" : "bg-white text-black"
-              )}
-            >
-              <div className="w-12 h-12 bg-indigo-50 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 rounded-full flex items-center justify-center">
-                <Merge size={24} />
-              </div>
-              
-              <div className="space-y-1">
-                <h3 className="text-lg font-extrabold tracking-tight">Merge Selected Entries?</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Merge <span className="font-bold text-indigo-600 dark:text-indigo-400">{selectedTransactions.size}</span> selected transactions into a single new transaction.
-                </p>
-              </div>
-
-              <div className="space-y-3.5 pt-1">
-                {/* Description Input */}
-                <div className="space-y-1 text-left">
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Description</label>
-                  <input
-                    type="text"
-                    value={mergeDescription}
-                    onChange={(e) => setMergeDescription(e.target.value)}
-                    placeholder="Enter merged description"
-                    className={cn(
-                      "w-full px-4.5 h-11 border-2 rounded-xl outline-none focus:border-indigo-500 transition-all text-sm font-semibold",
-                      theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-slate-50 border-slate-100 text-black"
-                    )}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  {/* Category Select */}
-                  <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Category</label>
-                    <InAppSelect
-                      id="merge-category-select"
-                      value={mergeCategory}
-                      onChange={(val) => setMergeCategory(val)}
-                      options={CATEGORIES}
-                      theme={theme}
-                      size="md"
-                      triggerClassName={cn(
-                        "w-full px-4 h-11 border-2 rounded-xl outline-none focus:border-indigo-500 transition-all text-sm font-semibold",
-                        theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-slate-50 border-slate-100 text-black"
-                      )}
-                    />
-                  </div>
-
-                  {/* Transaction Type Select */}
-                  <div className="space-y-1 text-left">
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Type</label>
-                    <InAppSelect
-                      id="merge-type-select"
-                      value={mergeType}
-                      onChange={(val) => setMergeType(val as any)}
-                      options={[
-                        { value: 'out', label: 'Cash Out (-)' },
-                        { value: 'in', label: 'Cash In (+)' },
-                      ]}
-                      theme={theme}
-                      size="md"
-                      triggerClassName={cn(
-                        "w-full px-4 h-11 border-2 rounded-xl outline-none focus:border-indigo-500 transition-all text-sm font-semibold",
-                        theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-slate-50 border-slate-100 text-black"
-                      )}
-                    />
-                  </div>
-                </div>
-
-                {/* Total Merged Amount Preview */}
-                <div className={cn(
-                  "p-3.5 rounded-xl flex items-center justify-between border border-dashed transition-colors duration-300",
-                  theme === 'dark' ? "bg-zinc-900/40 border-zinc-800" : "bg-slate-50/50 border-slate-200"
-                )}>
-                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Merged Total Amount:</span>
-                  <span className={cn(
-                    "text-base font-black font-mono",
-                    mergeType === 'in' ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-450"
-                  )}>
-                    {mergeType === 'in' ? '+' : '-'}{formatCurrency(
-                      books.find(b => b.id === activeBookId)
-                        ?.transactions.filter(t => selectedTransactions.has(t.id))
-                        .reduce((sum, t) => sum + t.amount, 0) || 0
-                    )}
-                  </span>
-                </div>
-              </div>
-
-              {error && (
-                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-955/20 border border-rose-200/50 text-rose-650 dark:text-rose-400 text-xs font-semibold text-left">
-                  {error}
-                </div>
-              )}
-
-              <div className="flex gap-3 pt-2">
-                <button 
-                  onClick={() => setShowMergeConfirmDialog(false)}
-                  disabled={isMerging}
-                  className={cn(
-                    "flex-1 py-3 border rounded-xl font-bold transition-all cursor-pointer text-sm disabled:opacity-50",
-                    theme === 'dark' ? "border-slate-800 text-slate-400 hover:bg-slate-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                  )}
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={handleMergeTransactions}
-                  disabled={isMerging}
-                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-650/50 text-white rounded-xl font-bold shadow-lg shadow-indigo-100 dark:shadow-none transition-all cursor-pointer flex items-center justify-center gap-2 text-sm disabled:cursor-not-allowed"
-                >
-                  {isMerging ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" />
-                      Merging...
-                    </>
-                  ) : (
-                    'Confirm Merge'
-                  )}
                 </button>
               </div>
             </motion.div>
@@ -15910,7 +11472,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </button>
                     ) : (
                       <a
-                        href={`https://api.whatsapp.com/send?text=${encodeURIComponent('Import my TrackBook entries using this code:\n\n' + generatedCode + '\n\nOpen TrackBook → Import Shared Entries')}`}
+                        href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Import my TrackBook entries using this code:
+
+${generatedCode}
+
+Open TrackBook → Import Shared Entries`)}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex-1 py-3 bg-[#25D366] hover:bg-[#20ba59] active:scale-95 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm text-center shadow-lg shadow-emerald-500/10"
@@ -15943,29 +11509,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       <AnimatePresence>
         {selectedTransactions.size > 0 && activeBookId && (
           <motion.div
-            initial={{ y: "100%", opacity: 0 }}
-            animate={{ 
-              y: isMobileView && isMobileToolbarHidden ? "100%" : 0, 
-              opacity: isMobileView && isMobileToolbarHidden ? 0 : 1 
-            }}
-            exit={{ y: "100%", opacity: 0 }}
-            transition={{ duration: 0.25, ease: "easeOut" }}
+            initial={{ y: "150%", opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: "150%", opacity: 0 }}
+            transition={{ type: "spring", damping: 28, stiffness: 300 }}
             className={cn(
-              "lg:hidden fixed bottom-0 left-0 right-0 max-w-md mx-auto rounded-t-[24px] rounded-b-none border-b-0 p-4 pt-2.5 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] md:bottom-6 md:left-4 md:right-4 md:max-w-sm md:rounded-[24px] md:border-b md:p-4.5 md:pb-5 backdrop-blur-xl border z-[100] transition-colors duration-300 shadow-[0_16px_50px_rgba(0,0,0,0.3)]",
-              isMobileView && isMobileToolbarHidden && "pointer-events-none",
+              "lg:hidden fixed bottom-6 left-4 right-4 max-w-sm mx-auto rounded-[24px] p-4.5 pb-5 backdrop-blur-xl border z-[100] transition-colors duration-300 shadow-[0_16px_50px_rgba(0,0,0,0.3)]",
               theme === 'dark' 
                 ? "bg-zinc-950/85 border-zinc-800/80 text-white" 
                 : "bg-white/90 border-slate-200/60 text-slate-900"
             )}
           >
-            {/* Center Handle / Mark (Mobile Only) */}
-            <div className="flex justify-center -mt-0.5 mb-2 md:hidden" aria-hidden="true">
-              <div className={cn(
-                "w-9 h-1 rounded-full transition-colors",
-                theme === 'dark' ? "bg-zinc-700/80" : "bg-slate-300"
-              )} />
-            </div>
-
             <div className="flex items-center justify-between pb-3 border-b border-slate-100/80 dark:border-zinc-900/60 mb-3">
               <span className={cn(
                 "text-[10px] font-extrabold tracking-widest uppercase",
@@ -15983,7 +11537,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </span>
               </div>
             </div>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-4 gap-2.5">
               <button
                 onClick={toggleSelectAll}
                 className={cn(
@@ -16170,7 +11724,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       {/* Hidden AI OCR File Input */}
       <input 
         type="file"
-        accept="image/jpeg,image/png,image/webp,image/jpg,image/*"
+        accept="image/*,application/pdf"
         ref={aiOcrFileInputRef}
         onChange={handleAiOcrFileSelected}
         className="hidden"
@@ -16179,12 +11733,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       {/* Floating Download Manager Portal */}
       <DownloadCenter theme={theme} isOpen={showDownloadCenter} setIsOpen={setShowDownloadCenter} />
 
+      {/* PDF Export Quality Selection Modal */}
+      <PdfExportQualityModal
+        isOpen={Boolean(pdfQualityModalState?.isOpen)}
+        onClose={() => setPdfQualityModalState(null)}
+        cashbookId={pdfQualityModalState?.cashbookId || ''}
+        cashbookName={pdfQualityModalState?.cashbookName || ''}
+        transactions={pdfQualityModalState?.transactions || []}
+        theme={theme}
+      />
+
       {/* Premium Media Picker Action Sheet */}
       <MediaPickerSheet
         isOpen={isMediaPickerOpen}
         onClose={() => setIsMediaPickerOpen(false)}
         theme={theme}
-        onOfflineAttempt={(msg) => showInAppAlert("Offline Mode", msg, "warning")}
         onSelectPhoto={() => {
           if (activeUploadTarget === 'ai') {
             fileInputRef.current?.click();
@@ -16199,34 +11762,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             handleImageUpload(e);
           }
         }}
-      />
-
-      {editorState && (
-        <ImageEditorModal
-          file={editorState.file}
-          onDone={(editedFile) => {
-            editorState.onDone(editedFile);
-            setEditorState(null);
-          }}
-          onCancel={() => {
-            editorState.onCancel();
-            setEditorState(null);
-          }}
-          theme={theme as 'light' | 'dark'}
-        />
-      )}
-
-      <PdfPageSelectorModal
-        isOpen={isPdfSelectorOpen}
-        file={pendingPdfFile}
-        currentCount={selectedImages.length}
-        maxLimit={7}
-        theme={theme as 'light' | 'dark'}
-        onClose={() => {
-          setIsPdfSelectorOpen(false);
-          setPendingPdfFile(null);
-        }}
-        onAddPages={handlePdfPagesAdded}
       />
 
       {/* Premium Undo Toast Overlay */}
@@ -16245,7 +11780,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 : "bg-white/95 border-slate-200 text-slate-800 backdrop-blur-md shadow-indigo-150"
             )}>
               {/* Top border animated indicator */}
-              <div className="absolute top-0 left-0 h-[3px] bg-indigo-600 transition-all duration-1000" style={{ width: `${(undoTimeLeft / 8) * 100}%` }} />
+              <div className="absolute top-0 left-0 h-[3px] bg-indigo-600 transition-all duration-1000" style={{ width: `${(undoTimeLeft / 6) * 100}%` }} />
               
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
@@ -16277,32 +11812,64 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       vibrate(40);
                       try {
                         if (undoAction.type === 'book') {
-                          const book = undoAction.data.book || undoAction.data;
-                          const bookId = book?.id;
-                          if (bookId) {
-                            if (supabase && session?.user?.id) {
-                              Promise.resolve(supabase.from('cashbooks').insert([{
-                                id: book.id,
-                                name: book.name,
-                                user_id: book.user_id || session.user.id,
-                                user_name: book.user_name || 'User',
-                                created_at: safeToISOString(book.createdAt)
-                              }])).catch(() => {});
-                            }
-                          }
-                          // Restore cashbook metadata
+                          const bookId = undoAction.data.book?.id || undoAction.data.id;
+                          const bookObj = undoAction.data.book || undoAction.data;
+
+                          // 1. Cancel pending backend deletion immediately
+                          pendingActionRef.current = null;
+                          pendingDeletedBookIdsRef.current.delete(bookId);
+
+                          // 2. Restore cashbook metadata immediately at original index
                           setBooks(prevBooks => {
+                            if (prevBooks.some(b => b.id === bookId)) return prevBooks;
                             const next = [...prevBooks];
-                            const insertIdx = undoAction.originalIndex !== undefined ? undoAction.originalIndex : next.length;
-                            next.splice(insertIdx, 0, book);
+                            const insertIdx = undoAction.originalIndex !== undefined 
+                              ? Math.min(undoAction.originalIndex, next.length) 
+                              : next.length;
+                            next.splice(insertIdx, 0, bookObj);
                             return next;
                           });
-                          // Restore entries cache
+
+                          // 3. Restore in memory cache
+                          if (cachedCashbooks && !cachedCashbooks.some((b: any) => b.id === bookId)) {
+                            const insertIdx = undoAction.originalIndex !== undefined 
+                              ? Math.min(undoAction.originalIndex, cachedCashbooks.length) 
+                              : cachedCashbooks.length;
+                            cachedCashbooks.splice(insertIdx, 0, bookObj);
+                          }
+
+                          // 4. Restore in localStorage
+                          try {
+                            if (session) {
+                              const savedBooks = localStorage.getItem(`cashbooks_${session.user.id}`);
+                              if (savedBooks) {
+                                const parsed = JSON.parse(savedBooks);
+                                if (Array.isArray(parsed) && !parsed.some((b: any) => b.id === bookId)) {
+                                  const insertIdx = undoAction.originalIndex !== undefined 
+                                    ? Math.min(undoAction.originalIndex, parsed.length) 
+                                    : parsed.length;
+                                  parsed.splice(insertIdx, 0, bookObj);
+                                  localStorage.setItem(`cashbooks_${session.user.id}`, JSON.stringify(parsed));
+                                }
+                              }
+                            }
+                          } catch (e) {
+                            console.warn('Failed to update localStorage on undo:', e);
+                          }
+
+                          // 5. Restore entries cache
                           if (undoAction.data.cachedEntries) {
                             entriesCache.set(bookId, undoAction.data.cachedEntries);
                           }
 
                         } else if (undoAction.type === 'bulk_books') {
+                          undoAction.data.forEach((item: any) => {
+                            if (item?.book?.id) {
+                              pendingDeletedBookIdsRef.current.delete(item.book.id);
+                            }
+                          });
+                          pendingActionRef.current = null;
+
                           setBooks(prevBooks => {
                             const next = [...prevBooks];
                             const items = undoAction.data;
@@ -16312,20 +11879,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             })).sort((a: any, b: any) => a.index - b.index);
 
                             sortedPairs.forEach((pair: any) => {
-                              const book = pair.item.book;
-                              const bId = book?.id;
-                              if (bId) {
-                                if (supabase && session?.user?.id) {
-                                  Promise.resolve(supabase.from('cashbooks').insert([{
-                                    id: book.id,
-                                    name: book.name,
-                                    user_id: book.user_id || session.user.id,
-                                    user_name: book.user_name || 'User',
-                                    created_at: safeToISOString(book.createdAt)
-                                  }])).catch(() => {});
-                                }
+                              if (!next.some(b => b.id === pair.item.book.id)) {
+                                next.splice(pair.index, 0, pair.item.book);
                               }
-                              next.splice(pair.index, 0, pair.item.book);
                               if (pair.item.cachedEntries) {
                                 entriesCache.set(pair.item.book.id, pair.item.cachedEntries);
                               }
@@ -16403,6 +11959,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       } finally {
                         setShowUndoToast(false);
                         setUndoAction(null);
+                        pendingActionRef.current = null;
                       }
                     }}
                     className={cn(
@@ -16421,6 +11978,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       }
                       setShowUndoToast(false);
                       setUndoAction(null);
+                      pendingActionRef.current = null;
                     }}
                     className={cn(
                       "p-1.5 rounded-lg transition-colors duration-200 shrink-0 cursor-pointer",
@@ -16433,63 +11991,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
             </div>
           </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Duplicate AI Entry Warning Modal */}
-      <AnimatePresence>
-        {showDuplicateAiWarning && (
-          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={showDuplicateAiWarning.onCancel}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className={cn(
-                "w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 transition-colors duration-300 relative z-10",
-                theme === 'dark' ? "bg-zinc-950 border border-zinc-850 text-white" : "bg-white border border-slate-100 text-slate-800"
-              )}
-            >
-              <div className={cn(
-                "w-16 h-16 rounded-full flex items-center justify-center mx-auto transition-colors duration-300",
-                theme === 'dark' ? "bg-amber-900/20 text-amber-400" : "bg-amber-50 text-amber-600"
-              )}>
-                <AlertCircle size={32} />
-              </div>
-              <div className="space-y-2">
-                <h3 className={cn(
-                  "text-xl font-bold transition-colors duration-300",
-                  theme === 'dark' ? "text-slate-100" : "text-slate-800"
-                )}>Duplicate Entry?</h3>
-                <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed">
-                  This image and entry are already added. Do you want to add it anyway?
-                </p>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button 
-                  onClick={showDuplicateAiWarning.onCancel}
-                  className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={showDuplicateAiWarning.onConfirm}
-                  className={cn(
-                    "flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold transition-all cursor-pointer",
-                    theme === 'dark' ? "shadow-none" : "shadow-lg shadow-amber-100"
-                  )}
-                >
-                  Add Anyway
-                </button>
-              </div>
-            </motion.div>
-          </div>
         )}
       </AnimatePresence>
 
@@ -16517,7 +12018,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
                 <div className="space-y-0.5 text-left">
                   <p className="text-xs font-black tracking-wider uppercase text-emerald-600 dark:text-emerald-400">
-                    AI TrackBook
+                    TrackBook AI
                   </p>
                   <p className="text-sm font-bold">
                     {backgroundScanResult}
@@ -16537,152 +12038,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* WhatsApp Share Modal */}
-      <ShareWhatsAppModal
-        isOpen={showWhatsAppModal}
-        onClose={() => setShowWhatsAppModal(false)}
-        cashbookId={activeBook?.id || ''}
-        cashbookName={activeBook?.name || ''}
-        filteredTransactions={filteredTransactions}
-        theme={theme}
-      />
-
-      {/* PDF Export Quality Selection Modal */}
-      <PdfExportQualityModal
-        isOpen={Boolean(pdfQualityModalState?.isOpen)}
-        onClose={() => setPdfQualityModalState(null)}
-        cashbookId={pdfQualityModalState?.cashbookId || ''}
-        cashbookName={pdfQualityModalState?.cashbookName || ''}
-        transactions={pdfQualityModalState?.transactions || []}
-        theme={theme}
-        onShowOfflineDialog={() => setShowOfflinePdfDialog(true)}
-      />
-
-      {/* Offline PDF Export Blocked Dialog Modal */}
-      <AnimatePresence>
-        {showOfflinePdfDialog && (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
-            <motion.div
-              initial={{ scale: 0.92, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.92, opacity: 0, y: 20 }}
-              className={cn(
-                "w-full max-w-sm p-6 rounded-3xl shadow-2xl space-y-5 text-center border transition-all duration-300",
-                theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
-              )}
-            >
-              <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shadow-inner">
-                <WifiOff size={26} className="stroke-[2.5]" />
-              </div>
-              
-              <div className="space-y-3">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-xs font-bold uppercase tracking-wider">
-                  <WifiOff size={13} />
-                  Offline Mode
-                </div>
-                <h3 className="text-lg sm:text-xl font-black tracking-tight text-slate-900 dark:text-white">
-                  You are Offline
-                </h3>
-                <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-900/50 text-center">
-                  <p className="text-sm font-bold text-amber-800 dark:text-amber-300 leading-snug">
-                    PDF reports cannot be downloaded while offline.
-                  </p>
-                  <p className="text-xs text-amber-700/80 dark:text-amber-400/80 mt-1 font-medium">
-                    Please reconnect to the internet to generate and download PDF reports.
-                  </p>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
-                  Generating PDF reports requires an active internet connection to download and render receipt attachments. As soon as you are reconnected, PDF download will work normally.
-                </p>
-                <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-zinc-900 text-[11px] text-slate-600 dark:text-slate-300 font-medium border border-slate-200/60 dark:border-zinc-800">
-                  💡 <span className="font-semibold text-slate-800 dark:text-slate-200">Tip:</span> Excel (.xlsx) reports are fully supported offline.
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="button"
-                  id="btn-close-offline-pdf-dialog"
-                  onClick={() => {
-                    vibrate();
-                    setShowOfflinePdfDialog(false);
-                  }}
-                  className="w-full py-3 px-4 rounded-xl text-xs font-bold transition-all shadow-md bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer active:scale-98"
-                >
-                  Understood
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Quit App Confirmation Dialog Modal */}
-      <AnimatePresence>
-        {showQuitDialog && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
-            <motion.div
-              initial={{ scale: 0.92, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.92, opacity: 0, y: 20 }}
-              className={cn(
-                "w-full max-w-sm p-6 rounded-3xl shadow-2xl space-y-5 text-center border transition-all duration-300",
-                theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
-              )}
-            >
-              <div className="mx-auto w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center border border-rose-500/20 shadow-inner">
-                <LogOut size={26} className="stroke-[2.5]" />
-              </div>
-              
-              <div className="space-y-1.5">
-                <h3 className="text-xl font-black tracking-tight">Quit TrackBook?</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
-                  Are you sure you want to quit the app?
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    vibrate();
-                    setShowQuitDialog(false);
-                  }}
-                  className={cn(
-                    "w-full py-3 rounded-xl font-bold text-xs transition-all border cursor-pointer",
-                    theme === 'dark' 
-                      ? "bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-slate-300" 
-                      : "bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700"
-                  )}
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    vibrate();
-                    setShowQuitDialog(false);
-                    exitNativeApp();
-                  }}
-                  className="w-full py-3 rounded-xl font-black text-xs bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-600/25 active:scale-95 transition-all cursor-pointer"
-                >
-                  Yes, Quit
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Global In-App Dialog / Alert */}
-      <InAppDialog
-        isOpen={Boolean(inAppDialog)}
-        options={inAppDialog}
-        onClose={() => setInAppDialog(null)}
-        theme={theme}
-      />
     </div>
   );
 }

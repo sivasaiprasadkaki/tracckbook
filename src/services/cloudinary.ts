@@ -4,29 +4,7 @@ import { supabase } from '../lib/supabase';
  * Cloudinary Upload Service for Expense/Cashbook Images
  */
 
-export async function getUserCloudinaryFolder(user?: { email?: string | null; id?: string } | null): Promise<string> {
-  let resolvedUser: any = user;
-  if (!resolvedUser && supabase) {
-    try {
-      const { data } = await supabase.auth.getSession();
-      if (data?.session?.user) {
-        resolvedUser = data.session.user;
-      }
-    } catch (_) {}
-  }
-
-  if (resolvedUser) {
-    const identifier = (resolvedUser.email && resolvedUser.email.trim()) 
-      ? resolvedUser.email.trim().toLowerCase() 
-      : (resolvedUser.id || 'general');
-    return `trackbook/${identifier.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
-  }
-
-  const fallbackId = typeof localStorage !== 'undefined' ? (localStorage.getItem('trackbook_last_user_id') || 'general') : 'general';
-  return `trackbook/${fallbackId}`;
-}
-
-export async function getUserProfileCloudinaryFolder(user?: { email?: string | null; id: string } | null): Promise<string> {
+export async function getUserCloudinaryFolder(user?: { email?: string | null; id: string } | null): Promise<string> {
   let resolvedUser = user;
   if (!resolvedUser && supabase) {
     const { data } = await supabase.auth.getSession();
@@ -36,250 +14,109 @@ export async function getUserProfileCloudinaryFolder(user?: { email?: string | n
   }
 
   if (resolvedUser) {
-    const identifier = (resolvedUser.email && resolvedUser.email.trim()) 
-      ? resolvedUser.email.trim().toLowerCase() 
-      : resolvedUser.id;
-    return `profiles/${identifier}`;
+    const identifier = resolvedUser.email || resolvedUser.id;
+    return `trackbook/${identifier}`;
   }
 
-  return `profiles/general`;
+  throw new Error("No authenticated user found for Cloudinary folder generation.");
 }
 
-export async function uploadToCloudinary(fileDataUriOrFile: string | File, folder?: string): Promise<string> {
-  // If it's already an uploaded HTTP(S) URL, return directly
-  if (typeof fileDataUriOrFile === 'string' && (fileDataUriOrFile.startsWith('http://') || fileDataUriOrFile.startsWith('https://'))) {
-    return fileDataUriOrFile;
-  }
-
+export async function uploadToCloudinary(
+  fileDataUriOrFile: string | File, 
+  folder?: string,
+  onProgress?: (percent: number) => void
+): Promise<string> {
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'dd2kcpetc';
   const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || 'trackbook_preset';
 
-  // Helper to convert File to Data URI
-  const toDataUrl = (file: File): Promise<string> => {
+  console.log(`[Cloudinary] Beginning upload process configured for:`, {
+    cloudName,
+    uploadPreset,
+    isString: typeof fileDataUriOrFile === 'string',
+    folder,
+  });
+
+  const formData = new FormData();
+  formData.append('file', fileDataUriOrFile);
+  formData.append('upload_preset', uploadPreset);
+  if (folder) {
+    formData.append('folder', folder);
+  }
+
+  const url = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
+  console.log(`[Cloudinary] Posting request to: ${url}`);
+
+  // Use XMLHttpRequest when available to get real-time upload progress events
+  if (typeof XMLHttpRequest !== 'undefined') {
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+
+      if (xhr.upload && onProgress) {
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable && event.total > 0) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            onProgress(percent);
+          }
+        };
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            if (data.secure_url) {
+              if (onProgress) onProgress(100);
+              console.log('[Cloudinary] Successfully uploaded image:', data.secure_url);
+              resolve(data.secure_url);
+            } else {
+              reject(new Error('Cloudinary response did not contain a valid secure_url field'));
+            }
+          } catch (e: any) {
+            reject(new Error('Failed to parse Cloudinary response: ' + e.message));
+          }
+        } else {
+          console.error(`[Cloudinary] API Error Response [${xhr.status}]:`, xhr.responseText);
+          reject(new Error(`Cloudinary upload failed with status ${xhr.status}: ${xhr.responseText}`));
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error('Network error during upload to TrackBook Cloud. Please check your connection.'));
+      };
+
+      xhr.ontimeout = () => {
+        reject(new Error('Upload to TrackBook Cloud timed out. Please try again.'));
+      };
+
+      xhr.send(formData);
     });
-  };
+  }
 
-  let base64String = typeof fileDataUriOrFile === 'string' ? fileDataUriOrFile : '';
-
-  // 1. Direct Cloudinary upload
+  // Fallback to fetch if XMLHttpRequest is unavailable
   try {
-    const formData = new FormData();
-    formData.append('file', fileDataUriOrFile);
-    formData.append('upload_preset', uploadPreset);
-    if (folder) {
-      formData.append('folder', folder);
-    }
-
-    const url = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
     const response = await fetch(url, {
       method: 'POST',
       body: formData,
     });
 
-    if (response.ok) {
-      const data = await response.json();
-      if (data.secure_url) {
-        return data.secure_url;
-      }
-    } else {
-      const errBody = await response.text().catch(() => '');
-      console.warn(`[Cloudinary] Direct upload status ${response.status}:`, errBody);
-    }
-  } catch (directErr) {
-    console.warn('[Cloudinary] Direct upload attempt failed, attempting server proxy fallback:', directErr);
-  }
-
-  // 2. Server proxy fallback (/api/cloudinary/upload)
-  try {
-    if (!base64String && fileDataUriOrFile instanceof File) {
-      base64String = await toDataUrl(fileDataUriOrFile);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Cloudinary] API Error Response [${response.status}]:`, errorText);
+      throw new Error(`Cloudinary upload failed with status ${response.status}: ${errorText}`);
     }
 
-    if (base64String) {
-      const proxyRes = await fetch('/api/cloudinary/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          file: base64String,
-          upload_preset: uploadPreset,
-          folder: folder
-        })
-      });
-
-      if (proxyRes.ok) {
-        const proxyData = await proxyRes.json();
-        if (proxyData.secure_url) {
-          console.log('[Cloudinary] Upload succeeded via server proxy fallback');
-          return proxyData.secure_url;
-        }
-      }
+    const data = await response.json();
+    if (!data.secure_url) {
+      throw new Error('Cloudinary response did not contain a valid secure_url field');
     }
-  } catch (proxyErr) {
-    console.warn('[Cloudinary] Server proxy upload fallback was unreachable:', proxyErr);
+
+    if (onProgress) onProgress(100);
+    return data.secure_url;
+  } catch (error: any) {
+    console.error('[Cloudinary] Failure in uploadToCloudinary catch block:', error);
+    throw error;
   }
-
-  // 3. Offline resilience fallback: preserve image locally so the transaction save succeeds
-  if (!base64String && fileDataUriOrFile instanceof File) {
-    try {
-      base64String = await toDataUrl(fileDataUriOrFile);
-    } catch (_) {}
-  }
-
-  if (base64String) {
-    console.warn('[Cloudinary] Network offline; stored image locally as data URI for offline sync.');
-    return base64String;
-  }
-
-  throw new Error('Unable to upload image and could not create offline image fallback.');
-}
-
-
-/**
- * Optimizes Cloudinary delivery URLs for ultra-low bandwidth usage
- * Also proxies any non-Cloudinary images through Cloudinary Fetch to protect Supabase egress
- */
-/**
- * Centralized attachment URL resolver that maintains full backward compatibility.
- * Supports:
- * - Old Cloudinary URLs (using /upload/ or legacy transforms)
- * - Current Cloudinary URLs (using /image/upload/)
- * - Existing Supabase records (e.g., external URLs, base64 data, etc.)
- * - Future uploads
- * 
- * Never hardcodes Cloudinary folder paths. It dynamically extracts folder structure
- * from the stored URL segment.
- */
-export function resolveAttachmentUrl(
-  url: string,
-  type: 'preview' | 'fullscreen' | 'export_strong' | 'export_low' | 'export_high' | 'original' = 'preview'
-): string {
-  if (!url || typeof url !== 'string') return '';
-  
-  // Extract hash parameter to append later
-  const hashIdx = url.indexOf('#');
-  const hash = hashIdx !== -1 ? url.substring(hashIdx) : '';
-  let cleanUrl = hashIdx !== -1 ? url.substring(0, hashIdx) : url;
-
-  // 1. Direct pass-through for local references
-  if (cleanUrl.startsWith('data:') || cleanUrl.startsWith('blob:') || cleanUrl.startsWith('local-img-')) {
-    return cleanUrl + hash;
-  }
-
-  // Normalize protocol for any domain references
-  if (cleanUrl.startsWith('//')) {
-    cleanUrl = 'https:' + cleanUrl;
-  } else if (cleanUrl.startsWith('res.cloudinary.com')) {
-    cleanUrl = 'https://' + cleanUrl;
-  } else if (cleanUrl.startsWith('cloudinary.com')) {
-    cleanUrl = 'https://' + cleanUrl;
-  }
-
-  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'dd2kcpetc';
-
-  // Define transformations
-  let transformation = '';
-  if (type === 'preview') {
-    transformation = 'f_auto,q_auto,w_300';
-  } else if (type === 'fullscreen') {
-    transformation = 'f_auto,q_auto,w_1200';
-  } else if (type === 'export_strong') {
-    transformation = 'f_jpg,q_35,w_800';
-  } else if (type === 'export_low') {
-    transformation = 'f_jpg,q_40,w_900';
-  } else if (type === 'export_high') {
-    transformation = 'f_jpg,q_82';
-  } else if (type === 'original') {
-    transformation = '';
-  }
-
-  // 2. If it's a non-Cloudinary external URL, proxy it through Cloudinary Fetch for egress protection
-  if (!cleanUrl.includes('cloudinary.com')) {
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      return cleanUrl + hash;
-    }
-    if (!transformation) {
-      return cleanUrl + hash;
-    }
-    return `https://res.cloudinary.com/${cloudName}/image/fetch/${transformation}/${encodeURIComponent(cleanUrl)}${hash}`;
-  }
-
-  // 3. For Cloudinary URLs, normalize and optimize them dynamically
-  // Find where the delivery/resource type ends and folder/public_id path begins.
-  let splitter = '/image/upload/';
-  if (cleanUrl.includes('/image/upload/')) {
-    splitter = '/image/upload/';
-  } else if (cleanUrl.includes('/upload/')) {
-    splitter = '/upload/';
-  } else if (cleanUrl.includes('/image/private/')) {
-    splitter = '/image/private/';
-  } else if (cleanUrl.includes('/image/authenticated/')) {
-    splitter = '/image/authenticated/';
-  } else if (cleanUrl.includes('/image/fetch/')) {
-    // If it's already a fetch url, extract the original URL and re-proxy or update transformations
-    const fetchParts = cleanUrl.split('/image/fetch/');
-    const remaining = fetchParts[1];
-    if (remaining) {
-      const segments = remaining.split('/');
-      const cleanSegments = segments.filter(s => {
-        if (!s) return false;
-        const transformationKeys = ['w_', 'h_', 'q_', 'f_', 'c_', 'r_', 'dpr_', 'auto'];
-        return !transformationKeys.some(key => s.startsWith(key) || s.includes(',' + key));
-      });
-      const originalUrlSegment = cleanSegments.join('/');
-      let originalUrl = originalUrlSegment;
-      try {
-        originalUrl = decodeURIComponent(originalUrlSegment);
-      } catch (e) {
-        // use as-is if decoding fails
-      }
-      return `https://res.cloudinary.com/${cloudName}/image/fetch/${transformation}/${encodeURIComponent(originalUrl)}${hash}`;
-    }
-    splitter = '/image/fetch/';
-  }
-
-  const parts = cleanUrl.split(splitter);
-  if (parts.length < 2) {
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      cleanUrl = 'https://' + cleanUrl.replace(/^\/+/, '');
-    }
-    return cleanUrl + hash;
-  }
-
-  let prefix = parts[0]; // e.g. "https://res.cloudinary.com/dd2kcpetc"
-  if (!prefix.startsWith('http://') && !prefix.startsWith('https://')) {
-    if (prefix.startsWith('//')) {
-      prefix = 'https:' + prefix;
-    } else {
-      prefix = 'https://' + prefix.replace(/^\/+/, '');
-    }
-  }
-  const remaining = parts[1]; // e.g. "v1700000000/trackbook/test@example.com/receipt123.jpg"
-
-  if (!remaining) return cleanUrl + hash;
-
-  // Split and filter out older transformations and version numbers
-  const segments = remaining.split('/');
-  const cleanSegments = segments.filter(s => {
-    if (!s) return false;
-    // Skip version tag (e.g. v170000000 or v1)
-    if (/^v\d+$/.test(s)) return false;
-    // Skip transformation segments
-    const transformationKeys = ['w_', 'h_', 'q_', 'f_', 'c_', 'r_', 'dpr_', 'bo_', 'co_', 'e_', 'fl_', 'l_', 'p_', 'pg_', 'x_', 'y_', 'z_', 'auto'];
-    const isTransformation = transformationKeys.some(key => s.startsWith(key) || s.includes(',' + key));
-    if (isTransformation) return false;
-    return true;
-  });
-
-  // Re-assemble the URL using the requested transformation
-  if (!transformation) {
-    return `${prefix}${splitter}${cleanSegments.join('/')}${hash}`;
-  }
-  return `${prefix}${splitter}${transformation}/${cleanSegments.join('/')}${hash}`;
 }
 
 /**
@@ -287,7 +124,32 @@ export function resolveAttachmentUrl(
  * Also proxies any non-Cloudinary images through Cloudinary Fetch to protect Supabase egress
  */
 export function getOptimizedCloudinaryUrl(url: string, type: 'preview' | 'fullscreen'): string {
-  return resolveAttachmentUrl(url, type);
+  if (!url || typeof url !== 'string') return '';
+  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'dd2kcpetc';
+  const transformation = type === 'preview' ? 'f_auto,q_auto,w_300' : 'f_auto,q_auto,w_1200';
+
+  if (!url.includes('cloudinary.com')) {
+    if (url.startsWith('data:') || url.startsWith('blob:')) {
+      return url;
+    }
+    // Egress protection: proxy non-Cloudinary images through Cloudinary image/fetch API
+    return `https://res.cloudinary.com/${cloudName}/image/fetch/${transformation}/${encodeURIComponent(url)}`;
+  }
+
+  if (url.includes('/image/upload/')) {
+    const parts = url.split('/image/upload/');
+    const remaining = parts[1];
+    if (!remaining) return url;
+    
+    const folderAndFile = remaining.split('/');
+    const cleanSegments = folderAndFile.filter(s => {
+      return !(s.includes('w_') || s.includes('q_') || s.includes('f_') || s.includes('c_') || s.includes('h_') || s.includes('dpr_'));
+    });
+    
+    return `${parts[0]}/image/upload/${transformation}/${cleanSegments.join('/')}`;
+  }
+  
+  return url;
 }
 
 /**
@@ -295,8 +157,47 @@ export function getOptimizedCloudinaryUrl(url: string, type: 'preview' | 'fullsc
  * Also proxies any non-Cloudinary images through Cloudinary Fetch
  */
 export function getExportOptimizedCloudinaryUrl(url: string, isCompressed: boolean, isHuge: boolean): string {
+  if (!url || typeof url !== 'string') return '';
+  const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'dd2kcpetc';
+
+  let transformation = '';
   if (isCompressed) {
-    return resolveAttachmentUrl(url, isHuge ? 'export_strong' : 'export_low');
+    if (isHuge) {
+      transformation = 'f_jpg,q_35,w_800';
+    } else {
+      transformation = 'f_jpg,q_40,w_900';
+    }
+  } else {
+    // Original quality mode preservation
+    transformation = 'f_jpg,q_82';
   }
-  return resolveAttachmentUrl(url, 'original');
+
+  if (!url.includes('cloudinary.com')) {
+    if (url.startsWith('data:') || url.startsWith('blob:')) {
+      return url;
+    }
+    // Egress protection: proxy non-Cloudinary images through Cloudinary image/fetch API
+    return `https://res.cloudinary.com/${cloudName}/image/fetch/${transformation}/${encodeURIComponent(url)}`;
+  }
+
+  // Support both /image/upload/ and /upload/ formats
+  const splitter = url.includes('/image/upload/') ? '/image/upload/' : '/upload/';
+  const parts = url.split(splitter);
+  const remaining = parts[1];
+  if (!remaining) return url;
+  
+  const folderAndFile = remaining.split('/');
+  const cleanSegments = folderAndFile.filter(s => {
+    return !(
+      s.includes('w_') || 
+      s.includes('q_') || 
+      s.includes('f_') || 
+      s.includes('c_') || 
+      s.includes('h_') || 
+      s.includes('dpr_') || 
+      s.includes('auto')
+    );
+  });
+  
+  return `${parts[0]}${splitter}${transformation}/${cleanSegments.join('/')}`;
 }

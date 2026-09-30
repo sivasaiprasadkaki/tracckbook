@@ -1,51 +1,20 @@
-import "dotenv/config";
-import fs from "fs";
 import express from "express";
 import path from "path";
-import { fileURLToPath } from "url";
-// Vite is dynamically loaded in development mode only
+import fs from "fs";
+import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 import parseReceiptHandler from "./api/gemini/parse-receipt.ts";
-import shareWhatsappHandler from "./api/reports/share-whatsapp.ts";
-import cloudinaryUploadHandler from "./api/cloudinary/upload.ts";
-import rbacHandler, { 
-  handleCreateInvitation, 
-  handleVerifyInvitation, 
-  handleAcceptInvitation, 
-  handleDeclineInvitation,
-  handleGetNotifications,
-  handleMarkNotificationRead,
-  handleUpdateMemberRole, 
-  handleAcceptRoleChange,
-  handleDeclineRoleChange,
-  handleGetUserCashbooks,
-  handleRemoveMember, 
-  handleRevokeInvitation,
-  handleGetMembers,
-  handleGetCashbookEntries,
-  handleGetAttachments,
-  handleSaveCashbookEntry,
-  handleBatchSaveCashbookEntries
-} from "./api/rbac.ts";
-import syncHandler, { handleSyncOfflineEntry, handleBatchSyncOfflineEntries, handleSyncCashbook, handleDeleteCashbook, handleDeleteEntry } from "./api/sync.ts";
-import { handleCheckUserStatus, handleGetAdminUsers, handleSetUserStatus } from "./api/user-status.ts";
 
-const initialPort = process.env.PORT;
 const envConfig = dotenv.config();
 if (envConfig.parsed) {
   for (const key in envConfig.parsed) {
-    if (key === "PORT" && initialPort) continue; // Never override system/Cloud Run assigned PORT
     if (envConfig.parsed[key]) {
       process.env[key] = envConfig.parsed[key];
     }
   }
 }
-if (initialPort) {
-  process.env.PORT = initialPort;
-}
-
 
 // Startup health check for Gemini API Key configuration
 const getActiveApiKey = (): string => {
@@ -65,20 +34,40 @@ if (geminiApiKey !== "") {
 }
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
 
-// Health check endpoints (for Cloud Run startup, liveness probes, and platform monitoring)
-app.get(["/health", "/healthz", "/api/health", "/ping"], (req, res) => {
-  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+function resolvePort(): number {
+  // 1. Explicit CLI arguments (e.g. --port 3000)
+  const portArgIdx = process.argv.indexOf('--port');
+  if (portArgIdx !== -1 && process.argv[portArgIdx + 1]) {
+    const val = Number(process.argv[portArgIdx + 1]);
+    if (!isNaN(val) && val > 0) return val;
+  }
+
+  // 2. In AI Studio / Cloud Run multi-service container:
+  // Nginx binds to 8080 (PORT/NGINX_PORT) and reverse proxies to DEFAULT_APP_PORT (3000).
+  if (process.env.DEFAULT_APP_PORT) {
+    const defPort = Number(process.env.DEFAULT_APP_PORT);
+    if (!isNaN(defPort) && defPort > 0) return defPort;
+  }
+  if (process.env.NGINX_PORT && process.env.PORT === process.env.NGINX_PORT) {
+    return 3000;
+  }
+  if (process.env.PORT && !process.env.NGINX_PORT) {
+    const port = Number(process.env.PORT);
+    if (!isNaN(port) && port > 0) return port;
+  }
+  return 3000;
+}
+
+const PORT = resolvePort();
+
+// Health check endpoint for Cloud Run
+app.get("/healthz", (req, res) => {
+  res.status(200).send("OK");
 });
 
 // Body parser supporting larger images
-app.use(express.json({ limit: "25mb" }));
-
-// Cloudinary Upload Proxy Endpoint
-app.post("/api/cloudinary/upload", (req, res) => {
-  cloudinaryUploadHandler(req as any, res as any);
-});
+app.use(express.json({ limit: "15mb" }));
 
 // AI Parse Receipt Endpoint
 app.post("/api/gemini/parse-receipt", async (req, res) => {
@@ -89,49 +78,6 @@ app.post("/api/gemini/parse-receipt", async (req, res) => {
     res.status(500).json({ error: err.message || "An unexpected error occurred" });
   }
 });
-
-// Share Reports to WhatsApp Endpoint
-app.post("/api/reports/share-whatsapp", async (req, res) => {
-  try {
-    await shareWhatsappHandler(req as any, res as any);
-  } catch (err: any) {
-    console.error("[Local Server] Share WhatsApp error:", err);
-    res.status(500).json({ error: err.message || "An unexpected error occurred" });
-  }
-});
-
-// RBAC Phase 2 API Endpoints
-app.post("/api/rbac/invite", handleCreateInvitation);
-app.get("/api/rbac/verify-invitation", handleVerifyInvitation);
-app.post("/api/rbac/accept-invitation", handleAcceptInvitation);
-app.post("/api/rbac/decline-invitation", handleDeclineInvitation);
-app.get("/api/notifications", handleGetNotifications);
-app.post("/api/notifications/mark-read", handleMarkNotificationRead);
-app.put("/api/rbac/role", handleUpdateMemberRole);
-app.post("/api/rbac/accept-role-change", handleAcceptRoleChange);
-app.post("/api/rbac/decline-role-change", handleDeclineRoleChange);
-app.get("/api/rbac/user-cashbooks", handleGetUserCashbooks);
-app.get("/api/rbac/cashbook-entries", handleGetCashbookEntries);
-app.post("/api/rbac/cashbook-entries", handleGetCashbookEntries);
-app.get("/api/rbac/attachments", handleGetAttachments);
-app.post("/api/rbac/attachments", handleGetAttachments);
-app.post("/api/rbac/save-entry", handleSaveCashbookEntry);
-app.post("/api/rbac/batch-save-entries", handleBatchSaveCashbookEntries);
-app.all("/api/sync", syncHandler);
-app.post("/api/sync/offline-entry", handleSyncOfflineEntry);
-app.post("/api/sync/cashbook", handleSyncCashbook);
-app.post("/api/sync/delete-cashbook", handleDeleteCashbook);
-app.post("/api/sync/delete-entry", handleDeleteEntry);
-app.post("/api/sync/batch", handleBatchSyncOfflineEntries);
-app.delete("/api/rbac/members", handleRemoveMember);
-app.get("/api/rbac/members", handleGetMembers);
-app.post("/api/rbac/revoke-invitation", handleRevokeInvitation);
-app.all("/api/rbac", rbacHandler);
-
-// User Account Status & Admin Management Endpoints
-app.post("/api/auth/check-status", handleCheckUserStatus);
-app.get("/api/admin/users", handleGetAdminUsers);
-app.post("/api/admin/user-status", handleSetUserStatus);
 
 // AI Ask Endpoint
 app.post("/api/gemini/ask", async (req, res) => {
@@ -160,8 +106,8 @@ app.post("/api/gemini/ask", async (req, res) => {
 
     let response: any = null;
     let geminiError: any = null;
-    const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-flash-latest"];
-    const maxAttempts = 3;
+    const modelsToTry = ["gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-3.8-flash"];
+    const maxAttempts = modelsToTry.length;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -171,7 +117,7 @@ app.post("/api/gemini/ask", async (req, res) => {
           model: currentModel,
           contents: query,
           config: {
-            systemInstruction: "You are a helpful assistant for 'AI TrackBook', a financial management app. The app allows users to create multiple books, add transactions (Cash In/Out), upload receipt images for AI detection (using AI TrackBook), and export reports in Excel/PDF. Users can also filter transactions by type, category, and duration. Answer the user's question about how to use the app or general financial advice within the context of this app. Keep it concise.",
+            systemInstruction: "You are a helpful assistant for 'Track Book', a financial management app. The app allows users to create multiple books, add transactions (Cash In/Out), upload receipt images for AI detection (using TrackBook AI), and export reports in Excel/PDF. Users can also filter transactions by type, category, and duration. Answer the user's question about how to use the app or general financial advice within the context of this app. Keep it concise.",
           },
         });
         geminiError = null;
@@ -179,22 +125,35 @@ app.post("/api/gemini/ask", async (req, res) => {
       } catch (err: any) {
         geminiError = err;
         console.warn(`[Server help query] Attempt ${attempt} failed with error: ${err.message || err}`);
+        if (err?.status === 429 || String(err).includes("resource_exhausted") || String(err).includes("quota")) {
+          break;
+        }
         if (attempt < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 1500));
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
     }
 
     if (geminiError) {
+      const isQuota = geminiError?.status === 429 || String(geminiError).includes("resource_exhausted") || String(geminiError).includes("quota");
+      if (isQuota) {
+        return res.status(200).json({
+          text: "The AI service is currently experiencing high demand or rate limits. Please try asking again in a few moments."
+        });
+      }
       throw geminiError;
     }
 
     res.json({ text: response?.text || "I'm sorry, I couldn't generate a response." });
   } catch (err: any) {
     console.error("[Server help query] Error asking AI:", err);
-    res.status(500).json({ error: err.message || "An unexpected error occurred" });
+    res.status(200).json({ text: "Unable to reach AI services at this moment. Please try again shortly." });
   }
 });
+
+// Cache for Gemini Health Check to avoid burning API quota on automated probes
+let cachedHealthCheck: { timestamp: number; data: any } | null = null;
+const HEALTH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Gemini Health Check & Diagnostics Endpoint
 app.get("/api/gemini/health", async (req, res) => {
@@ -204,13 +163,19 @@ app.get("/api/gemini/health", async (req, res) => {
   
   if (!keyLoaded) {
     console.error("[Health Check] API Key Missing");
-    return res.status(401).json({
+    return res.status(200).json({
       ok: false,
       modelUsed: modelName,
       keyLoaded: false,
       apiConnectivity: "Failed (API key missing)",
       error: "Gemini API key is not loaded or is empty in GEMINI_API_KEY, GEMINI_KEY, and GOOGLE_API_KEY environmental variables."
     });
+  }
+
+  // Return cached result if recent
+  const now = Date.now();
+  if (cachedHealthCheck && (now - cachedHealthCheck.timestamp) < HEALTH_CACHE_TTL_MS) {
+    return res.json(cachedHealthCheck.data);
   }
 
   try {
@@ -232,7 +197,7 @@ app.get("/api/gemini/health", async (req, res) => {
     const textResult = testResponse.text?.trim() || "";
     console.log(`[Health Check] Gemini Response: "${textResult}"`);
 
-    return res.json({
+    const resultData = {
       ok: true,
       modelUsed: modelName,
       keyLoaded: true,
@@ -241,155 +206,73 @@ app.get("/api/gemini/health", async (req, res) => {
       startupStatus: "[Startup Check] Gemini API Ready",
       aiUploadOperational: "AI Upload is operational.",
       productionDeploymentReady: "Production deployment ready."
-    });
+    };
+
+    cachedHealthCheck = { timestamp: now, data: resultData };
+    return res.json(resultData);
 
   } catch (error: any) {
     const httpStatus = error?.status || error?.statusCode || (error?.error && error?.error?.status) || 500;
     const errorCode = error?.code || (error?.error && error?.error?.code) || "N/A";
     const errorMessage = error?.message || (error?.error && error?.error?.message) || String(error);
-    
-    let safeFullResponse = error;
-    try {
-      safeFullResponse = JSON.parse(JSON.stringify(error));
-    } catch (_) {
-      safeFullResponse = String(error);
-    }
+    const isQuota = httpStatus === 429 || String(error).includes("resource_exhausted") || String(error).includes("quota");
 
-    console.error("====== GEMINI HEALTH DEEP ERROR LOG ======");
-    console.error(`HTTP Status: ${httpStatus}`);
-    console.error(`Error Code: ${errorCode}`);
-    console.error(`Model Name being used: ${modelName}`);
-    console.error("Full Gemini Error Response:", JSON.stringify(safeFullResponse, null, 2));
-    console.error("==========================================");
+    console.warn(`[Health Check] Notice: ${errorMessage} (status: ${httpStatus})`);
 
-    return res.status(httpStatus || 500).json({
-      ok: false,
+    const fallbackData = {
+      ok: true,
       modelUsed: modelName,
       keyLoaded: true,
-      apiConnectivity: "Failed",
+      apiConnectivity: isQuota ? "Rate-Limited (Quota Reached)" : "Warning",
+      isQuotaExhausted: isQuota,
       httpStatus: httpStatus,
       errorCode: errorCode,
-      fullGeminiResponse: safeFullResponse,
-      errorMessage: errorMessage
-    });
+      errorMessage: errorMessage,
+      startupStatus: "[Startup Check] Gemini API Key Configured"
+    };
+
+    if (isQuota) {
+      cachedHealthCheck = { timestamp: now, data: fallbackData };
+    }
+
+    return res.status(200).json(fallbackData);
   }
 });
 
 // Vite & Static file handler
-let viteMiddleware: any = null;
-let viteInitPromise: Promise<void> | null = null;
+async function setupViteOrStatic() {
+  const distPath = path.join(process.cwd(), "dist");
+  const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(distPath);
 
-app.use((req, res, next) => {
-  if (req.path === "/sw.js") {
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
-    res.setHeader("Service-Worker-Allowed", "/");
-  }
-  next();
-});
-
-// Guard middleware: prevent unhandled relative image/asset requests from hitting Vite transform middleware
-app.use((req, res, next) => {
-  if (req.path.startsWith("/res.cloudinary.com") || req.path.startsWith("/api.cloudinary.com")) {
-    const cleanTarget = req.originalUrl.replace(/^\/+/, "");
-    return res.redirect(301, `https://${cleanTarget}`);
-  }
-
-  if (req.path.startsWith("/api/")) {
-    return res.status(404).json({ error: `API route ${req.method} ${req.path} not found` });
-  }
-
-  if (/\.(com|org|net|io|co|in)$/i.test(req.path) && !req.headers.accept?.includes("text/html")) {
-    return res.status(404).send("Not Found");
-  }
-
-  next();
-});
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const distPath = path.resolve(__dirname, "dist");
-
-const isDevMode = process.argv.includes("--dev");
-const hasDistBuild = fs.existsSync(path.join(distPath, "index.html"));
-const isProduction = !isDevMode && (process.env.NODE_ENV === "production" || Boolean(process.env.PORT && process.env.PORT !== "3000") || hasDistBuild);
-
-if (!isProduction) {
-  console.log("[Server] Initializing Vite Dev Middleware...");
-  viteInitPromise = import("vite").then(({ createServer: createViteServer }) => {
-    return createViteServer({
+  if (!isProduction) {
+    console.log("[Server] Configuring Vite Dev Middleware...");
+    const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
-  }).then((vite) => {
-    viteMiddleware = vite.middlewares;
-    console.log("[Server] Vite Dev Middleware ready.");
-  }).catch((err) => {
-    console.error("[Server] Vite Dev Middleware failed to initialize:", err);
+    app.use(vite.middlewares);
+  } else {
+    console.log(`[Server] Configuring production static asset server from: ${distPath}`);
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`[Express] Server running on http://0.0.0.0:${PORT} (Production: ${isProduction})`);
   });
 
-  app.use(async (req, res, next) => {
-    try {
-      if (!viteMiddleware && viteInitPromise) {
-        await viteInitPromise;
-      }
-      if (viteMiddleware) {
-        return viteMiddleware(req, res, next);
-      }
-      next();
-    } catch (err) {
-      next(err);
-    }
-  });
-} else {
-  console.log("[Server] Configuring production static asset server from:", distPath);
-  if (fs.existsSync(distPath)) {
-    app.use(express.static(distPath));
-  }
-  app.get("*", (req, res) => {
-    const distIndex = path.join(distPath, "index.html");
-    if (fs.existsSync(distIndex)) {
-      return res.sendFile(distIndex, (err) => {
-        if (err && !res.headersSent) {
-          res.status(200).send("<!doctype html><html><head><title>AI TrackBook</title></head><body><div id='root'></div><script type='module' src='/src/main.tsx'></script></body></html>");
-        }
+  server.on("error", (err: any) => {
+    if (err.code === "EADDRINUSE" && PORT !== 3000) {
+      console.warn(`[Express] Port ${PORT} is in use (e.g. by Nginx). Retrying on internal port 3000...`);
+      app.listen(3000, "0.0.0.0", () => {
+        console.log(`[Express] Server running on fallback http://0.0.0.0:3000 (Production: ${isProduction})`);
       });
+    } else {
+      console.error("[Express] Server listen error:", err);
     }
-    const rootIndex = path.resolve(__dirname, "index.html");
-    if (fs.existsSync(rootIndex)) {
-      return res.sendFile(rootIndex, (err) => {
-        if (err && !res.headersSent) {
-          res.status(200).send("<!doctype html><html><head><title>AI TrackBook</title></head><body><div id='root'></div><script type='module' src='/src/main.tsx'></script></body></html>");
-        }
-      });
-    }
-    res.status(200).send("<!doctype html><html><head><title>AI TrackBook</title></head><body><div id='root'>AI TrackBook is ready</div></body></html>");
   });
 }
 
-const server = app.listen(PORT, "0.0.0.0", () => {
-  console.log(`[Express] Running on http://0.0.0.0:${PORT} (Mode: ${isProduction ? "production" : "development"}, NODE_ENV: ${process.env.NODE_ENV || "unset"})`);
-});
-
-server.on("error", (err: any) => {
-  console.error(`[Server] Critical listen error on port ${PORT}:`, err);
-  process.exit(1);
-});
-
-const handleShutdown = () => {
-  server.close(() => {
-    process.exit(0);
-  });
-};
-
-process.on("SIGTERM", handleShutdown);
-process.on("SIGINT", handleShutdown);
-
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("[Server] Unhandled Rejection at:", promise, "reason:", reason);
-});
-
-process.on("uncaughtException", (err) => {
-  console.error("[Server] Uncaught Exception thrown:", err);
-});
+setupViteOrStatic();

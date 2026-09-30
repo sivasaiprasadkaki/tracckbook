@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import type React from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 export function useRunawayButton(isValid: boolean) {
   const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -49,7 +50,6 @@ export function useRunawayButton(isValid: boolean) {
     // If pointer coords are available, dodge away from pointer position
     let clientX: number | null = null;
     let clientY: number | null = null;
-
     if (e) {
       if ('touches' in e && (e as any).touches?.[0]) {
         clientX = (e as any).touches[0].clientX;

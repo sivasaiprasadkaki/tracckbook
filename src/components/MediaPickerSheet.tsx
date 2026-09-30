@@ -9,7 +9,6 @@ interface MediaPickerSheetProps {
   onSelectPhoto: () => void;
   onCaptureCamera: (e: React.ChangeEvent<HTMLInputElement>) => void;
   theme: 'light' | 'dark';
-  onOfflineAttempt?: (message: string) => void;
 }
 
 export default function MediaPickerSheet({
@@ -17,50 +16,24 @@ export default function MediaPickerSheet({
   onClose,
   onSelectPhoto,
   onCaptureCamera,
-  theme,
-  onOfflineAttempt
+  theme
 }: MediaPickerSheetProps) {
   const [showPermissionError, setShowPermissionError] = useState(false);
   const [isCheckingPermission, setIsCheckingPermission] = useState(false);
-  const [offlineNotice, setOfflineNotice] = useState<string | null>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-
-  const checkIsOffline = (): boolean => {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) return true;
-    if (typeof window !== 'undefined' && (window as any).TrackBookBridge?.isNetworkAvailable?.() === false) return true;
-    return false;
-  };
-
-  const handleOfflineBlock = () => {
-    const msg = "You are offline. Images can only be added when you are online.";
-    setOfflineNotice(msg);
-    if (onOfflineAttempt) {
-      onOfflineAttempt(msg);
-    }
-    if (typeof window !== 'undefined' && (window as any).TrackBookBridge?.showToast) {
-      (window as any).TrackBookBridge.showToast(msg);
-    }
-  };
 
   // Reset error state when modal opens
   useEffect(() => {
     if (isOpen) {
       setShowPermissionError(false);
       setIsCheckingPermission(false);
-      setOfflineNotice(null);
     }
   }, [isOpen]);
 
   // Request & check camera permission proactively to handle error screens
   const handleCameraTap = async () => {
-    if (checkIsOffline()) {
-      handleOfflineBlock();
-      return;
-    }
-
     setIsCheckingPermission(true);
     setShowPermissionError(false);
-    setOfflineNotice(null);
     
     try {
       // Prompt user for camera permission
@@ -84,18 +57,10 @@ export default function MediaPickerSheet({
   };
 
   const handleRetryPermission = () => {
-    if (checkIsOffline()) {
-      handleOfflineBlock();
-      return;
-    }
     handleCameraTap();
   };
 
   const handleUsePhotosInstead = () => {
-    if (checkIsOffline()) {
-      handleOfflineBlock();
-      return;
-    }
     onClose();
     onSelectPhoto();
   };
@@ -214,13 +179,6 @@ export default function MediaPickerSheet({
                     exit={{ opacity: 0 }}
                     className="space-y-4"
                   >
-                    {offlineNotice && (
-                      <div className="flex items-start gap-3 p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-600 dark:text-amber-400">
-                        <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                        <p className="text-xs font-bold leading-relaxed">{offlineNotice}</p>
-                      </div>
-                    )}
-
                     {/* Camera Action Option */}
                     <button
                       onClick={handleCameraTap}
@@ -266,11 +224,11 @@ export default function MediaPickerSheet({
                           <ImageIcon className="w-6 h-6" />
                         </div>
                         <div>
-                          <p className="font-extrabold text-[15px] tracking-tight">Photos / Documents</p>
+                          <p className="font-extrabold text-[15px] tracking-tight">Photos</p>
                           <p className={cn(
                             "text-xs leading-none mt-1",
                             theme === 'dark' ? "text-slate-400" : "text-slate-500"
-                          )}>Browse existing receipts from photo gallery or PDF files</p>
+                          )}>Browse existing receipts from photo gallery</p>
                         </div>
                       </div>
                       <ChevronUp className="w-5 h-5 text-slate-400 rotate-90" />

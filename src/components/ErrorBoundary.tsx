@@ -22,52 +22,6 @@ class ErrorBoundary extends React.Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error', error, errorInfo);
-    
-    // Auto-reload on dynamic import / chunk loading errors
-    const isChunkError = 
-      error?.message?.includes('Failed to fetch dynamically imported module') ||
-      error?.message?.includes('Importing a module script failed') ||
-      error?.message?.includes('Loading chunk');
-
-    if (isChunkError) {
-      const storageKey = 'last_chunk_error_reload';
-      const lastReload = sessionStorage.getItem(storageKey);
-      const now = Date.now();
-      
-      // Prevent infinite reload loop by checking if we reloaded within 10s
-      if (!lastReload || now - parseInt(lastReload, 10) > 10000) {
-        sessionStorage.setItem(storageKey, now.toString());
-        console.warn('Dynamic import failed. Auto-reloading page to fetch fresh bundle...');
-        window.location.reload();
-      }
-    }
-
-    // Auto-recover from invalid refresh token errors
-    const errMsg = error?.message || '';
-    if (
-      errMsg.includes('Invalid Refresh Token') ||
-      errMsg.includes('Refresh Token Not Found') ||
-      errMsg.includes('invalid_grant')
-    ) {
-      try {
-        const keysToRemove: string[] = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && (k.startsWith('sb-') || k.endsWith('-auth-token') || k === 'trackbook_cached_auth_session')) {
-            keysToRemove.push(k);
-          }
-        }
-        keysToRemove.forEach(k => localStorage.removeItem(k));
-      } catch {}
-
-      const authReloadKey = 'last_auth_error_reload';
-      const lastAuthReload = sessionStorage.getItem(authReloadKey);
-      const now = Date.now();
-      if (!lastAuthReload || now - parseInt(lastAuthReload, 10) > 10000) {
-        sessionStorage.setItem(authReloadKey, now.toString());
-        window.location.href = '/login';
-      }
-    }
   }
 
   render() {

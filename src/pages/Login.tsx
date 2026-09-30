@@ -5,7 +5,7 @@ export default function Login({
   theme = 'light',
   initialMode = 'signin'
 }: { 
-  theme: 'light' | 'dark';
+  theme?: string;
   initialMode?: 'signin' | 'signup' | 'forgot';
 }) {
   return (

@@ -2007,7 +2007,7 @@ export function buildTransactionsWorksheet(transactions: any[], transactionPageM
         ws[cell_address] = { t: 's', v: '' };
       }
 
-      const cell = ws[cell_address];
+      const cell = ws[cell_address] as any;
       cell.s = cell.s || {};
       cell.s.border = borderStyle;
 
