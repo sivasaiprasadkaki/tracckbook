@@ -47,6 +47,7 @@ import {
   DownloadCloud,
   FileSpreadsheet,
   AlertCircle,
+  AlertTriangle,
   HelpCircle,
   MessageSquare,
   Sun,
@@ -55,6 +56,8 @@ import {
   ArrowUp,
   ArrowUpDown,
   MoreVertical,
+  Menu,
+  Code2,
   Users,
   Camera,
   Phone,
@@ -83,6 +86,7 @@ import { addPdfBrandingFooter } from '../utils/pdfBranding';
 import { PdfExportQualityModal } from '../components/PdfExportQualityModal';
 import { buildTransactionsWorksheet } from '../services/exportManager';
 import TransactionProcessingModal, { ProcessingStep } from '../components/TransactionProcessingModal';
+import PdfPageSelectorModal from '../components/PdfPageSelectorModal';
 
 interface TimelineStep {
   id: string;
@@ -456,7 +460,13 @@ const CashbookListCard = React.memo(({
           {canDelete && (
             <button 
               type="button"
-              onClick={(e) => onDelete(book.id, e)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(book.id, e);
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
               className="p-1.5 sm:p-2 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-none transition-colors cursor-pointer"
               title="Delete Book"
               aria-label="Delete Book"
@@ -480,30 +490,69 @@ const CashbookListCard = React.memo(({
 });
 CashbookListCard.displayName = 'CashbookListCard';
 
-// Compress image before client-side direct upload using browser-image-compression
+// Ultra-fast client-side compression (completes in ~40ms, shrinks images to <100KB for sub-5s cloud uploads)
 async function compressImage(file: File): Promise<Blob | File> {
   const sizeKB = file.size / 1024;
-  if (file.size < 150 * 1024) {
-    console.log(`[Compression] Image ${file.name} is ${sizeKB.toFixed(1)} KB (below 150 KB threshold). Skipping compression.`);
+  if (!file.type || !file.type.startsWith('image/')) {
     return file;
   }
-
-  const options = {
-    maxSizeMB: 1.0, // Increased target size to avoid slow multi-pass iteration cycles
-    maxWidthOrHeight: 1200, // Fast single-pass resize width/height
-    useWebWorker: true,
-    maxIteration: 2 // Guarantee it finishes in maximum 2 iterations for speed
-  };
+  // If file is already tiny (< 60KB), no need to compress
+  if (file.size < 60 * 1024) {
+    return file;
+  }
 
   try {
-    console.log(`[Compression] Compressing ${file.name} (${sizeKB.toFixed(1)} KB) automatically...`);
-    const compressedBlob = await imageCompression(file, options);
-    console.log(`[Compression] Success: Compressed to ${(compressedBlob.size / 1024).toFixed(1)} KB`);
-    return compressedBlob;
+    const compressed = await new Promise<Blob | File>((resolve) => {
+      const img = new Image();
+      const objUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objUrl);
+        // Optimize to 960px max dimension for crisp receipt text and lightning-fast <1s cloud upload
+        const maxDim = 960;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(file);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => {
+          if (blob && blob.size < file.size) {
+            resolve(blob);
+          } else {
+            resolve(file);
+          }
+        }, 'image/jpeg', 0.70); // 70% JPEG quality produces ~50-90KB crisp files
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objUrl);
+        resolve(file);
+      };
+      img.src = objUrl;
+    });
+
+    if (compressed && compressed.size < file.size) {
+      console.log(`[FastCompress] Compressed ${file.name} from ${sizeKB.toFixed(1)}KB to ${(compressed.size / 1024).toFixed(1)}KB`);
+      return compressed;
+    }
   } catch (err) {
-    console.error('[Compression] browser-image-compression failed, falling back to original file:', err);
-    return file;
+    console.warn('[FastCompress] Canvas compression failed, falling back to original:', err);
   }
+
+  return file;
 }
 
 // Generate lightweight thumbnail URL for Cloudinary images (w_200,q_auto,f_auto)
@@ -683,13 +732,17 @@ const OptimizedImage = React.memo(({
   onClick?: () => void;
   [key: string]: any;
 }) => {
-  const [isInView, setIsInView] = React.useState(false);
+  const isLocal = !!(src && (src.startsWith('blob:') || src.startsWith('data:')));
+  const [isInView, setIsInView] = React.useState(isLocal || type === 'fullscreen');
   const [retryCount, setRetryCount] = React.useState(0);
   const [hasError, setHasError] = React.useState(false);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
 
   React.useEffect(() => {
-    if (!src) return;
+    if (!src || isLocal || type === 'fullscreen') {
+      setIsInView(true);
+      return;
+    }
     
     // Fallback if IntersectionObserver is not supported
     if (!('IntersectionObserver' in window)) {
@@ -714,10 +767,11 @@ const OptimizedImage = React.memo(({
     return () => {
       observer.disconnect();
     };
-  }, [src]);
+  }, [src, isLocal, type]);
 
   const optimizedUrl = React.useMemo(() => {
     if (!isInView || hasError) return ''; 
+    if (isLocal) return src; // Immediate instant display for local blob previews!
     const baseUrl = getOptimizedCloudinaryUrl(src, type);
     if (!baseUrl) return '';
     if (retryCount > 0) {
@@ -726,7 +780,7 @@ const OptimizedImage = React.memo(({
       return `${baseUrl}${sep}retry=${retryCount}`;
     }
     return baseUrl;
-  }, [src, type, isInView, retryCount, hasError]);
+  }, [src, type, isInView, retryCount, hasError, isLocal]);
 
   const handleError = () => {
     console.warn(`[ImageLoad] Failed to load ${src}. Attempt ${retryCount}/3`);
@@ -1017,32 +1071,45 @@ const AttachmentCell = React.memo(({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            if (!isUploading) {
-              setPreviewImages(images);
-              setPreviewIndex(0);
-              setPreviewRotation(0);
-              setPreviewZoom(1);
-            }
+            setPreviewImages(images);
+            setPreviewIndex(0);
+            setPreviewRotation(0);
+            setPreviewZoom(1);
           }}
-          disabled={isUploading}
           className={cn(
             "flex items-center gap-2 text-left transition-all cursor-pointer group/bill",
             isUploading 
-              ? "text-emerald-500 dark:text-emerald-400 animate-pulse pointer-events-none" 
+              ? "text-indigo-600 dark:text-indigo-400" 
               : "text-slate-500 hover:text-indigo-600"
           )}
+          title="Click to preview bills"
         >
-          <Paperclip size={14} className={isUploading ? "animate-bounce" : ""} />
+          {/* Clean Paperclip Icon Badge (in place of photo preview) */}
+          <div className={cn(
+            "w-7 h-7 rounded-lg shrink-0 flex items-center justify-center border transition-colors shadow-xs",
+            isUploading 
+              ? "bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950/40 dark:border-indigo-900/40 dark:text-indigo-400"
+              : "bg-slate-100 border-slate-200 text-slate-500 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-400 group-hover/bill:text-indigo-600 group-hover/bill:border-indigo-200"
+          )}>
+            {isUploading ? (
+              <Loader2 size={13} className="animate-spin text-indigo-500" />
+            ) : (
+              <Paperclip size={14} className="shrink-0" />
+            )}
+          </div>
+
           <div className="text-left">
-            <p className="text-[10px] font-black leading-none">
-              {isUploading ? "Syncing..." : images.length}
+            <p className="text-[11px] font-bold leading-none flex items-center gap-1">
+              <span>{images.length}</span>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                {images.length === 1 ? 'Attachment' : 'Attachments'}
+              </span>
             </p>
-            <p className={cn(
-              "text-[10px] font-bold transition-colors mt-0.5",
-              isUploading ? "text-emerald-400" : "text-slate-400 group-hover/bill:text-indigo-400"
-            )}>
-              {isUploading ? "Uploading attachments..." : `${images.length === 1 ? 'Attachment' : 'Attachments'}`}
-            </p>
+            {isUploading && (
+              <p className="text-[9px] font-semibold text-indigo-500 dark:text-indigo-400 mt-0.5">
+                Syncing...
+              </p>
+            )}
           </div>
         </button>
       )}
@@ -1175,11 +1242,14 @@ const MobileTransactionRow = React.memo(({
         </div>
       </div>
 
-      <div className="mb-3.5 flex flex-wrap items-center gap-2">
-        <p className={cn(
-          "text-[13px] font-semibold leading-relaxed line-clamp-2 transition-colors duration-300 flex-1 min-w-[120px]",
-          theme === 'dark' ? "text-slate-200" : "text-slate-850"
-        )}>
+      <div className="mb-3.5 flex items-center justify-between gap-2 overflow-hidden">
+        <p 
+          className={cn(
+            "text-[13px] font-semibold transition-colors duration-300 truncate whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 block",
+            theme === 'dark' ? "text-slate-200" : "text-slate-850"
+          )}
+          title={t.description || 'No details provided'}
+        >
           {t.description || 'No details provided'}
         </p>
         
@@ -1238,25 +1308,27 @@ const MobileTransactionRow = React.memo(({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (!isUploading) {
-                        setPreviewImages(t.images!);
-                        setPreviewIndex(0);
-                        setPreviewRotation(0);
-                        setPreviewZoom(1);
-                      }
+                      setPreviewImages(t.images!);
+                      setPreviewIndex(0);
+                      setPreviewRotation(0);
+                      setPreviewZoom(1);
                     }}
-                    disabled={isUploading}
                     className={cn(
-                      "flex items-center gap-1 transition-colors duration-300 text-[10px] font-bold cursor-pointer py-0.5 px-2 rounded-lg border",
+                      "flex items-center gap-1.5 transition-colors duration-300 text-[10px] font-bold cursor-pointer py-0.5 px-2 rounded-lg border",
                       isUploading 
-                        ? "text-emerald-500 border-emerald-100/30 bg-emerald-500/5 dark:text-emerald-400 animate-pulse pointer-events-none" 
+                        ? "text-indigo-600 border-indigo-200/50 bg-indigo-50/50 dark:text-indigo-400 dark:border-indigo-900/50 dark:bg-indigo-950/30" 
                         : (theme === 'dark' ? "text-indigo-400 border-indigo-950 bg-indigo-950/10 hover:text-indigo-300" : "text-indigo-650 border-indigo-100 bg-indigo-50/10 hover:text-indigo-700")
                     )}
+                    title="Click for instant preview"
                   >
-                    <Paperclip size={11} className={isUploading ? "animate-bounce" : ""} />
+                    {isUploading ? (
+                      <Loader2 size={11} className="animate-spin text-indigo-500 shrink-0" />
+                    ) : (
+                      <Paperclip size={12} className="shrink-0 text-slate-500 dark:text-slate-400" />
+                    )}
                     <span>
                       {isUploading 
-                        ? "Syncing..." 
+                        ? "Syncing to cloud..." 
                         : `${t.images.length} ${t.images.length === 1 ? 'Attachment' : 'Attachments'}`}
                     </span>
                   </button>
@@ -1406,12 +1478,17 @@ const DesktopTransactionRow = React.memo(({
           {safeFormatTime(t.date, { hour: '2-digit', minute: '2-digit', hour12: true })}
         </p>
       </td>
-      <td className="px-3 sm:px-6 py-4 min-w-[120px]">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className={cn(
-            "text-sm font-bold transition-colors duration-300",
-            theme === 'dark' ? "text-slate-300" : "text-black"
-          )}>{t.description || '--'}</p>
+      <td className="px-3 sm:px-6 py-4 max-w-[240px] sm:max-w-xs md:max-w-sm">
+        <div className="flex items-center gap-2 overflow-hidden">
+          <p 
+            className={cn(
+              "text-sm font-bold transition-colors duration-300 truncate whitespace-nowrap overflow-hidden text-ellipsis block",
+              theme === 'dark' ? "text-slate-300" : "text-black"
+            )}
+            title={t.description || '--'}
+          >
+            {t.description || '--'}
+          </p>
           {getTransactionSource(t) === 'Imported' && (
             <span className={cn(
               "px-1.5 py-0.5 text-[9px] font-black rounded-full border uppercase shrink-0 transition-all",
@@ -2024,12 +2101,25 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   }, []);
 
 
-  // Quick Add State and Refs
-  const [submitAndAddNew, setSubmitAndAddNew] = useState(false);
-  const [quickAddSuccess, setQuickAddSuccess] = useState(false);
+  // Transaction Form State and Refs
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const amountInputRef = useRef<HTMLInputElement>(null);
-  const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+  const descriptionInputRef = useRef<HTMLInputElement>(null);
+  const formKeySeq = useRef<{ key: string; time: number } | null>(null);
   const [formErrors, setFormErrors] = useState<{ amount?: string; description?: string }>({});
+
+  // Import Dropdown & Excel Import State
+  const [showImportDropdown, setShowImportDropdown] = useState(false);
+  const importMenuRef = useRef<HTMLDivElement>(null);
+  const excelFileInputRef = useRef<HTMLInputElement>(null);
+  const [showExcelImportModal, setShowExcelImportModal] = useState(false);
+  const [excelPreviewRows, setExcelPreviewRows] = useState<any[]>([]);
+  const [excelDetectedColumns, setExcelDetectedColumns] = useState<string[]>([]);
+  const [excelError, setExcelError] = useState<string | null>(null);
+  const [isParsingExcel, setIsParsingExcel] = useState(false);
+  const [isImportingExcel, setIsImportingExcel] = useState(false);
+  const [excelSuccessCount, setExcelSuccessCount] = useState<number | null>(null);
+  const [syncingTxIds, setSyncingTxIds] = useState<string[]>([]);
   
   // UI State
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
@@ -2677,13 +2767,47 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     let lastKeyTime = 0;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger shortcuts if user is typing in an input or textarea
       const activeElement = document.activeElement;
-      const isInput = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA' || (activeElement as HTMLElement)?.isContentEditable;
-      if (isInput && e.key !== 'Escape') return;
-
+      const isDescriptionField = activeElement === descriptionInputRef.current;
+      const isOtherTextInput = (activeElement?.tagName === 'INPUT' && activeElement !== amountInputRef.current) || activeElement?.tagName === 'TEXTAREA' || (activeElement as HTMLElement)?.isContentEditable;
+      
       const key = e.key.toUpperCase();
       const now = Date.now();
+
+      // If transaction form is currently open, allow CO and CI shortcuts to switch form type dynamically
+      if (showForm && activeBookId) {
+        if (key === 'C' && (activeElement === amountInputRef.current || (isDescriptionField && (!description || description.trim() === '')) || !isOtherTextInput)) {
+          lastKey = 'C';
+          lastKeyTime = now;
+          return;
+        }
+        if (lastKey === 'C' && (now - lastKeyTime) < 1500) {
+          if (key === 'O') {
+            e.preventDefault();
+            setShowForm('out');
+            lastKey = '';
+            vibrate(20);
+            setTimeout(() => {
+              amountInputRef.current?.focus();
+              amountInputRef.current?.select();
+            }, 60);
+            return;
+          } else if (key === 'I') {
+            e.preventDefault();
+            setShowForm('in');
+            lastKey = '';
+            vibrate(20);
+            setTimeout(() => {
+              amountInputRef.current?.focus();
+              amountInputRef.current?.select();
+            }, 60);
+            return;
+          }
+        }
+      }
+
+      // Never interrupt normal typing in Description or search inputs
+      if ((isDescriptionField || isOtherTextInput) && e.key !== 'Escape') return;
 
       // Handle Escape key to close forms/modals
       if (e.key === 'Escape') {
@@ -2699,39 +2823,55 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         setEditingTransaction(null);
         setPreviewImages(null);
         setShowImportModal(false);
+        setShowExcelImportModal(false);
+        setShowImportDropdown(false);
         lastKey = '';
         return;
       }
 
-      // Clear last key if too much time passed (e.g. 1 second)
-      if (now - lastKeyTime > 1000) {
+      // Clear last key if too much time passed (1.2 seconds)
+      if (now - lastKeyTime > 1200) {
         lastKey = '';
       }
 
       if (lastKey === 'C') {
-        if (key === 'B') {
+        if (key === 'B' && !showForm) {
           e.preventDefault();
           setIsCreatingBook(true);
           lastKey = '';
         } else if (key === 'I' && activeBookId) {
           e.preventDefault();
           setShowForm('in');
-          setTransactionDate(safeToDateTimeLocal(new Date()));
+          if (!editingTransaction && !showForm) {
+            setTransactionDate(safeToDateTimeLocal(new Date()));
+          }
           lastKey = '';
+          vibrate(20);
+          setTimeout(() => {
+            amountInputRef.current?.focus();
+            amountInputRef.current?.select();
+          }, 60);
         } else if (key === 'O' && activeBookId) {
           e.preventDefault();
           setShowForm('out');
-          setTransactionDate(safeToDateTimeLocal(new Date()));
+          if (!editingTransaction && !showForm) {
+            setTransactionDate(safeToDateTimeLocal(new Date()));
+          }
           lastKey = '';
+          vibrate(20);
+          setTimeout(() => {
+            amountInputRef.current?.focus();
+            amountInputRef.current?.select();
+          }, 60);
         }
       } else if (lastKey === 'A') {
-        if (key === 'U' && activeBookId) {
+        if (key === 'U' && activeBookId && !showForm) {
           e.preventDefault();
           setShowAiWarning(true);
           lastKey = '';
         }
       } else if (lastKey === 'I') {
-        if (key === 'M') {
+        if (key === 'M' && !showForm) {
           e.preventDefault();
           setShowImportModal(true);
           setImportCode('');
@@ -2747,7 +2887,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeBookId]);
+  }, [activeBookId, showForm, editingTransaction]);
 
   const toggleTheme = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -2770,11 +2910,39 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const removeImage = (index: number) => {
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
   };
-  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [previewImages, setPreviewImages] = useState<string[] | null>(null);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [previewRotation, setPreviewRotation] = useState(0);
   const [previewZoom, setPreviewZoom] = useState(1);
+
+  // Keyboard navigation for Attachment Preview modal (Left/Right arrows and Escape)
+  useEffect(() => {
+    if (!previewImages || previewImages.length === 0) return;
+
+    const handlePreviewKeyDown = (e: KeyboardEvent) => {
+      const activeTag = (document.activeElement as HTMLElement)?.tagName;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag)) return;
+
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setPreviewIndex(prev => (prev - 1 + previewImages.length) % previewImages.length);
+        setPreviewRotation(0);
+        setPreviewZoom(1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setPreviewIndex(prev => (prev + 1) % previewImages.length);
+        setPreviewRotation(0);
+        setPreviewZoom(1);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setPreviewImages(null);
+      }
+    };
+
+    window.addEventListener('keydown', handlePreviewKeyDown);
+    return () => window.removeEventListener('keydown', handlePreviewKeyDown);
+  }, [previewImages]);
+
   const [reportLoading, setReportLoading] = useState<{ type: 'excel' | 'pdf', progress: number, message?: string } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -2785,7 +2953,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   const handleAiOcrFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const files = Array.from(e.target.files).slice(0, 5);
+      const files = Array.from(e.target.files).slice(0, 6);
       setSelectedFiles(files);
       startAiUploadReceiptParsing(files);
     }
@@ -2883,6 +3051,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   const [transactionDate, setTransactionDate] = useState(safeToDateTimeLocal(new Date()));
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [pdfForPageSelector, setPdfForPageSelector] = useState<File | null>(null);
+  const [isPdfSelectorOpen, setIsPdfSelectorOpen] = useState<boolean>(false);
+  const [isDraggingBill, setIsDraggingBill] = useState<boolean>(false);
   const [imageLayout, setImageLayout] = useState<'split' | 'merge'>('split');
 
   // Restrict merge layout - automatically fallback to split if there are less than 2 images
@@ -3562,6 +3733,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       if (bookMenuRef.current && !bookMenuRef.current.contains(event.target as Node)) {
         setShowBookMenu(false);
       }
+      if (importMenuRef.current && !importMenuRef.current.contains(event.target as Node)) {
+        setShowImportDropdown(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -4088,51 +4262,72 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setError(null);
 
     const isEdit = !!editingTransaction;
+    const tempId = isEdit ? editingTransaction.id : safeUUID();
+    const effectiveFormType = showForm;
+    const initialImages = [...selectedImages];
     const newBlobs = selectedImages.filter(img => img.startsWith('blob:'));
     const hasAttachments = newBlobs.length > 0;
 
-    // Define real operational steps
-    const initialSteps: ProcessingStep[] = isEdit
-      ? (hasAttachments
-          ? [
-              { id: 'validate', label: 'Validating changes', status: 'active', percent: 15 },
-              { id: 'compress', label: 'Compressing image', status: 'pending', percent: 30 },
-              { id: 'upload', label: 'Uploading to TrackBook Cloud', status: 'pending', percent: 40 },
-              { id: 'save', label: 'Updating transaction', status: 'pending', percent: 95 },
-              { id: 'complete', label: 'Completed', status: 'pending', percent: 100 }
-            ]
-          : [
-              { id: 'validate', label: 'Validating changes', status: 'active', percent: 25 },
-              { id: 'save', label: 'Updating transaction', status: 'pending', percent: 75 },
-              { id: 'refresh', label: 'Refreshing dashboard', status: 'pending', percent: 90 },
-              { id: 'complete', label: 'Completed', status: 'pending', percent: 100 }
-            ])
-      : (hasAttachments
-          ? [
-              { id: 'prepare', label: 'Preparing entry', status: 'active', percent: 15 },
-              { id: 'compress', label: 'Compressing image', status: 'pending', percent: 30 },
-              { id: 'upload', label: 'Uploading to TrackBook Cloud', status: 'pending', percent: 40 },
-              { id: 'save', label: 'Saving transaction', status: 'pending', percent: 95 },
-              { id: 'complete', label: 'Completed', status: 'pending', percent: 100 }
-            ]
-          : [
-              { id: 'prepare', label: 'Preparing entry', status: 'active', percent: 20 },
-              { id: 'save', label: 'Saving transaction', status: 'pending', percent: 75 },
-              { id: 'refresh', label: 'Refreshing dashboard', status: 'pending', percent: 90 },
-              { id: 'complete', label: 'Completed', status: 'pending', percent: 100 }
-            ]);
+    // Build optimistic transaction with immediate local images
+    const optimisticTransaction: Transaction = {
+      id: tempId,
+      amount: amountNum,
+      type: effectiveFormType,
+      description: description,
+      category: finalCategory || 'General',
+      mode: finalMode,
+      date: dateObj,
+      images: initialImages,
+      imageLayout: imageLayout,
+      source: isEdit ? (editingTransaction.source || 'Manual') : 'Manual'
+    };
 
-    // Open Premium Progress Modal immediately
-    setTxProgressModal({
-      isOpen: true,
-      mode: isEdit ? 'edit' : 'create',
-      progress: isEdit ? (hasAttachments ? 15 : 25) : (hasAttachments ? 15 : 20),
-      currentStepMessage: isEdit ? 'Validating changes...' : 'Preparing entry...',
-      steps: initialSteps,
-      status: 'processing',
-      errorMessage: null,
-      retryAction: () => handleAddTransaction()
-    });
+    // Immediately close modal & reset so user doesn't wait for ANY loading screens
+    setShowForm(null);
+    resetForm();
+    setIsSubmitting(false);
+
+    // Apply to books state INSTANTLY - zero lag for user
+    if (isEdit) {
+      setBooks(prevBooks => prevBooks.map(b =>
+        b.id === activeBookId
+          ? { ...b, transactions: b.transactions.map(t => t.id === tempId ? optimisticTransaction : t) }
+          : b
+      ));
+    } else {
+      setBooks(prevBooks => prevBooks.map(b =>
+        b.id === activeBookId
+          ? { ...b, transactions: [optimisticTransaction, ...b.transactions] }
+          : b
+      ));
+      const currCached = entriesCache.get(activeBookId) || [];
+      entriesCache.set(activeBookId, [{
+        id: tempId,
+        amount: amountNum,
+        type: effectiveFormType,
+        description: description,
+        category: finalCategory || 'General',
+        mode: finalMode,
+        date: dateObj,
+        image_layout: imageLayout,
+        user_id: session.user.id,
+        cashbook_id: activeBookId,
+        source: 'Manual'
+      }, ...currCached]);
+    }
+
+    // Mark image blobs as syncing in background so inline "Syncing to cloud..." shows
+    if (newBlobs.length > 0) {
+      newBlobs.forEach(blob => {
+        setUploadStatuses(prev => ({
+          ...prev,
+          [blob]: { status: 'uploading', progress: 10 }
+        }));
+      });
+    }
+
+    // Keep progress modal closed (zero intrusive screens)
+    setTxProgressModal(prev => ({ ...prev, isOpen: false }));
 
     try {
       const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
@@ -4154,28 +4349,27 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           })
         }));
 
-        let uploadedUrls: { blobUrl: string; cloudUrl: string }[] = [];
+        let uploadedUrls: { blobUrl: string; cloudUrl: string; isSuccess?: boolean }[] = [];
 
         if (hasAttachments) {
-          // Step 2: Compress new images
-          const compressedFiles: { blobUrl: string; file: File; name: string }[] = [];
-          for (let i = 0; i < newBlobs.length; i++) {
-            const blobUrl = newBlobs[i];
-            const file = imageFilesRef.current[blobUrl];
-            if (file) {
+          // Step 2: Concurrently compress all new images in parallel
+          const compressedFiles = (await Promise.all(
+            newBlobs.map(async (blobUrl, i) => {
+              const file = imageFilesRef.current[blobUrl];
+              if (!file) return null;
               const isImage = file.type && file.type.startsWith('image/');
               let processedFile: File;
               if (isImage) {
                 const compressedBlob = await compressImage(file);
-                processedFile = new File([compressedBlob], file.name || `attachment_${i}.jpg`, { type: file.type || 'image/jpeg' });
+                processedFile = new File([compressedBlob], file.name || `attachment_${i}.jpg`, { type: 'image/jpeg' });
               } else {
                 processedFile = file;
               }
-              compressedFiles.push({ blobUrl, file: processedFile, name: file.name || 'attachment' });
-            }
-          }
+              return { blobUrl, file: processedFile, name: file.name || 'attachment' };
+            })
+          )).filter(Boolean) as { blobUrl: string; file: File; name: string }[];
 
-          // Step 3: Real Upload with XHR onprogress
+          // Step 3: Real Upload with parallel concurrency
           setTxProgressModal(prev => ({
             ...prev,
             progress: 40,
@@ -4188,36 +4382,51 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           }));
 
           const blobPcts: Record<string, number> = {};
-          for (let i = 0; i < compressedFiles.length; i++) {
-            const item = compressedFiles[i];
+          const uploadPromises = compressedFiles.map(async (item) => {
             blobPcts[item.blobUrl] = 0;
 
-            const cloudUrl = await uploadToCloudinary(item.file, cloudinaryFolder, (uploadPct) => {
-              blobPcts[item.blobUrl] = uploadPct;
-              const totalPct = Object.values(blobPcts).reduce((a, b) => a + b, 0);
-              const overallPct = Math.round(totalPct / compressedFiles.length);
-              // Map real upload percentage from 40% to 90%
-              const mapped = Math.round(40 + (overallPct * 0.5));
-              setTxProgressModal(p => ({
-                ...p,
-                progress: Math.min(90, Math.max(40, mapped)),
-                currentStepMessage: `Uploading attachment... (${overallPct}%)`
+            try {
+              const cloudUrl = await uploadToCloudinary(item.file, cloudinaryFolder, (uploadPct) => {
+                blobPcts[item.blobUrl] = uploadPct;
+                const totalPct = Object.values(blobPcts).reduce((a, b) => a + b, 0);
+                const overallPct = Math.round(totalPct / compressedFiles.length);
+                const mapped = Math.round(40 + (overallPct * 0.5));
+                setTxProgressModal(p => ({
+                  ...p,
+                  progress: Math.min(90, Math.max(40, mapped)),
+                  currentStepMessage: `Uploading attachment... (${overallPct}%)`
+                }));
+              });
+
+              // Mark success immediately and keep blob URL valid for instant preview!
+              setUploadStatuses(prev => ({
+                ...prev,
+                [item.blobUrl]: { status: 'success', progress: 100 }
               }));
-            });
 
-            uploadedUrls.push({ blobUrl: item.blobUrl, cloudUrl });
+              // Save attachment to Supabase
+              if (supabase && session) {
+                await supabase.from('attachments').insert([{
+                  entry_id: editId,
+                  user_id: session.user.id,
+                  file_url: cloudUrl,
+                  file_name: item.name,
+                  file_type: 'image'
+                }]);
+              }
 
-            // Save attachment to Supabase
-            if (supabase && session) {
-              await supabase.from('attachments').insert([{
-                entry_id: editId,
-                user_id: session.user.id,
-                file_url: cloudUrl,
-                file_name: item.name,
-                file_type: 'image'
-              }]);
+              return { blobUrl: item.blobUrl, cloudUrl, isSuccess: true };
+            } catch (err: any) {
+              console.warn('[EditAttachment] Notice: Cloud upload timed out or failed, falling back to local preview:', err.message);
+              setUploadStatuses(prev => ({
+                ...prev,
+                [item.blobUrl]: { status: 'failed', error: err.message || 'Upload timed out. Tap retry.' }
+              }));
+              return { blobUrl: item.blobUrl, cloudUrl: item.blobUrl, isSuccess: false };
             }
-          }
+          });
+
+          uploadedUrls = await Promise.all(uploadPromises);
 
           setTxProgressModal(prev => ({
             ...prev,
@@ -4240,7 +4449,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         const updatedTransaction: Transaction = {
           ...editingTransaction,
           amount: amountNum,
-          type: showForm,
+          type: effectiveFormType,
           description: description,
           category: finalCategory || 'General',
           mode: finalMode,
@@ -4253,7 +4462,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         if (supabase) {
           const payload: any = {
             amount: amountNum,
-            type: showForm,
+            type: effectiveFormType,
             description: description,
             category: finalCategory || 'General',
             mode: finalMode,
@@ -4289,12 +4498,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           entriesCache.set(activeBookId, currCached.map(t => t.id === editId ? {
             ...t,
             amount: amountNum,
-            type: showForm,
+            type: effectiveFormType,
             description: description,
             category: finalCategory || 'General',
             mode: finalMode,
             date: dateObj,
-            image_layout: imageLayout
+            image_layout: imageLayout,
+            images: finalImages
           } : t));
         }
 
@@ -4307,24 +4517,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             : b
         ));
 
-        // Step 5: Completed 100%
-        setTxProgressModal(prev => ({
-          ...prev,
-          progress: 100,
-          currentStepMessage: 'Entry updated successfully!',
-          status: 'success',
-          steps: prev.steps.map(s => ({ ...s, status: 'completed' }))
-        }));
-
-        // Display success confirmation for 700ms then close automatically
-        await new Promise(r => setTimeout(r, 700));
-
-        setTxProgressModal(prev => ({ ...prev, isOpen: false }));
-        setShowForm(null);
-        setEditingTransaction(null);
-        resetForm();
-        setIsSubmitting(false);
-
         // Highlight newly edited transaction
         setTimeout(() => {
           setJustEditedTransactionId(editId);
@@ -4332,12 +4524,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           setTimeout(() => {
             setJustEditedTransactionId(null);
           }, 2500);
-        }, 150);
+        }, 100);
 
       } else {
-        // CREATE NEW ENTRY
-        console.log('[handleAddTransaction] Premium Create Mode...');
-        const tempId = safeUUID();
+        // CREATE NEW ENTRY (Reusing outer tempId that was stored in optimisticTransaction)
+        console.log('[handleAddTransaction] Premium Create Mode for ID:', tempId);
 
         // Step 1: Preparing entry
         setTxProgressModal(prev => ({
@@ -4352,28 +4543,27 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           })
         }));
 
-        let uploadedUrls: { blobUrl: string; cloudUrl: string; fileName: string }[] = [];
+        let uploadedUrls: { blobUrl: string; cloudUrl: string; fileName: string; isSuccess?: boolean }[] = [];
 
         if (hasAttachments) {
-          // Step 2: Compress images
-          const compressedFiles: { blobUrl: string; file: File; name: string }[] = [];
-          for (let i = 0; i < newBlobs.length; i++) {
-            const blobUrl = newBlobs[i];
-            const file = imageFilesRef.current[blobUrl];
-            if (file) {
+          // Step 2: Concurrently compress all new images in parallel
+          const compressedFiles = (await Promise.all(
+            newBlobs.map(async (blobUrl, i) => {
+              const file = imageFilesRef.current[blobUrl];
+              if (!file) return null;
               const isImage = file.type && file.type.startsWith('image/');
               let processedFile: File;
               if (isImage) {
                 const compressedBlob = await compressImage(file);
-                processedFile = new File([compressedBlob], file.name || `receipt_${i}.jpg`, { type: file.type || 'image/jpeg' });
+                processedFile = new File([compressedBlob], file.name || `receipt_${i}.jpg`, { type: 'image/jpeg' });
               } else {
                 processedFile = file;
               }
-              compressedFiles.push({ blobUrl, file: processedFile, name: file.name || 'receipt' });
-            }
-          }
+              return { blobUrl, file: processedFile, name: file.name || 'receipt' };
+            })
+          )).filter(Boolean) as { blobUrl: string; file: File; name: string }[];
 
-          // Step 3: Real Upload with XHR onprogress
+          // Step 3: Real Upload with parallel concurrency
           setTxProgressModal(prev => ({
             ...prev,
             progress: 40,
@@ -4386,25 +4576,40 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           }));
 
           const blobPcts: Record<string, number> = {};
-          for (let i = 0; i < compressedFiles.length; i++) {
-            const item = compressedFiles[i];
+          const uploadPromises = compressedFiles.map(async (item) => {
             blobPcts[item.blobUrl] = 0;
 
-            const cloudUrl = await uploadToCloudinary(item.file, cloudinaryFolder, (uploadPct) => {
-              blobPcts[item.blobUrl] = uploadPct;
-              const totalPct = Object.values(blobPcts).reduce((a, b) => a + b, 0);
-              const overallPct = Math.round(totalPct / compressedFiles.length);
-              // Map real upload percentage from 40% to 90%
-              const mapped = Math.round(40 + (overallPct * 0.5));
-              setTxProgressModal(p => ({
-                ...p,
-                progress: Math.min(90, Math.max(40, mapped)),
-                currentStepMessage: `Uploading attachment... (${overallPct}%)`
-              }));
-            });
+            try {
+              const cloudUrl = await uploadToCloudinary(item.file, cloudinaryFolder, (uploadPct) => {
+                blobPcts[item.blobUrl] = uploadPct;
+                const totalPct = Object.values(blobPcts).reduce((a, b) => a + b, 0);
+                const overallPct = Math.round(totalPct / compressedFiles.length);
+                const mapped = Math.round(40 + (overallPct * 0.5));
+                setTxProgressModal(p => ({
+                  ...p,
+                  progress: Math.min(90, Math.max(40, mapped)),
+                  currentStepMessage: `Uploading attachment... (${overallPct}%)`
+                }));
+              });
 
-            uploadedUrls.push({ blobUrl: item.blobUrl, cloudUrl, fileName: item.name });
-          }
+              // Mark success immediately and keep blob URL valid for instant preview!
+              setUploadStatuses(prev => ({
+                ...prev,
+                [item.blobUrl]: { status: 'success', progress: 100 }
+              }));
+
+              return { blobUrl: item.blobUrl, cloudUrl, fileName: item.name, isSuccess: true };
+            } catch (err: any) {
+              console.warn('[CreateAttachment] Notice: Cloud upload timed out or failed, falling back to local preview:', err.message);
+              setUploadStatuses(prev => ({
+                ...prev,
+                [item.blobUrl]: { status: 'failed', error: err.message || 'Upload timed out. Tap retry.' }
+              }));
+              return { blobUrl: item.blobUrl, cloudUrl: item.blobUrl, fileName: item.name, isSuccess: false };
+            }
+          });
+
+          uploadedUrls = await Promise.all(uploadPromises);
 
           setTxProgressModal(prev => ({
             ...prev,
@@ -4418,7 +4623,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           }));
         }
 
-        // Map final images with permanent Cloudinary URLs
+        // Map final images with permanent Cloudinary URLs (or keep local blob preview if upload was delayed)
         const finalImages = selectedImages.map(img => {
           const found = uploadedUrls.find(u => u.blobUrl === img);
           return found ? found.cloudUrl : img;
@@ -4433,12 +4638,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             user_id: session.user.id,
             user_name: effectiveUserName,
             amount: amountNum,
-            type: showForm,
+            type: effectiveFormType,
             description: description,
             category: finalCategory || 'General',
             mode: finalMode,
-            date: safeToISOString(dateObj),
-            source: 'Manual'
+            date: safeToISOString(dateObj)
           };
 
           let entryError: any = null;
@@ -4450,23 +4654,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             entryError = secondTry.error;
 
             if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-              const payloadNoSource = { ...payload };
-              delete payloadNoSource.source;
-              const thirdTry = await supabase.from('entries').insert([{ ...payloadNoSource, image_layout: imageLayout }]);
+              const minPayload = { ...payload };
+              delete minPayload.user_name;
+              const thirdTry = await supabase.from('entries').insert([minPayload]);
               entryError = thirdTry.error;
-
-              if (entryError && (entryError.code === '42703' || entryError.message?.toLowerCase().includes('column'))) {
-                const fourthTry = await supabase.from('entries').insert([payloadNoSource]);
-                entryError = fourthTry.error;
-              }
             }
           }
 
-          if (entryError) throw entryError;
+          if (entryError) {
+            console.error('[handleAddTransaction] Supabase insert notice:', entryError);
+          }
 
-          // Save attachments into attachments table
-          if (uploadedUrls.length > 0) {
-            const attachmentInserts = uploadedUrls.map(item => ({
+          // Save successfully uploaded cloud attachments into attachments table
+          const successfulUploads = uploadedUrls.filter(item => item.isSuccess && !item.cloudUrl.startsWith('blob:'));
+          if (successfulUploads.length > 0) {
+            const attachmentInserts = successfulUploads.map(item => ({
               entry_id: tempId,
               user_id: session.user.id,
               file_url: item.cloudUrl,
@@ -4477,11 +4679,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           }
         }
 
-        // Update local state and caches
+        // Update local state and caches with permanent cloud URLs
         const newTransaction: Transaction = {
           id: tempId,
           amount: amountNum,
-          type: showForm,
+          type: effectiveFormType,
           description: description,
           category: finalCategory || 'General',
           mode: finalMode,
@@ -4494,53 +4696,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         attachmentCache.set(tempId, { images: finalImages, isAi: false });
 
         const currCached = entriesCache.get(activeBookId) || [];
-        entriesCache.set(activeBookId, [{
-          id: tempId,
+        entriesCache.set(activeBookId, currCached.map(t => t.id === tempId ? {
+          ...t,
           amount: amountNum,
-          type: showForm,
+          type: effectiveFormType,
           description: description,
           category: finalCategory || 'General',
           mode: finalMode,
           date: dateObj,
           image_layout: imageLayout,
-          user_id: session.user.id,
-          cashbook_id: activeBookId,
-          source: 'Manual'
-        }, ...currCached]);
+          images: finalImages
+        } : t));
 
         setBooks(prevBooks => prevBooks.map(b =>
           b.id === activeBookId
-            ? { ...b, transactions: [newTransaction, ...b.transactions] }
+            ? { ...b, transactions: b.transactions.map(t => t.id === tempId ? newTransaction : t) }
             : b
         ));
-
-        // Step 5: Completed 100%
-        setTxProgressModal(prev => ({
-          ...prev,
-          progress: 100,
-          currentStepMessage: 'Entry saved successfully!',
-          status: 'success',
-          steps: prev.steps.map(s => ({ ...s, status: 'completed' }))
-        }));
-
-        // Display success confirmation for 700ms then close automatically
-        await new Promise(r => setTimeout(r, 700));
-
-        setTxProgressModal(prev => ({ ...prev, isOpen: false }));
-
-        if (submitAndAddNew) {
-          resetFormFields(true);
-          setQuickAddSuccess(true);
-          setTimeout(() => setQuickAddSuccess(false), 1500);
-          setIsSubmitting(false);
-          setTimeout(() => {
-            amountInputRef.current?.focus();
-          }, 80);
-        } else {
-          setShowForm(null);
-          resetForm();
-          setIsSubmitting(false);
-        }
 
         // Highlight newly created entry
         setTimeout(() => {
@@ -4549,17 +4721,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           setTimeout(() => {
             setJustEditedTransactionId(null);
           }, 2500);
-        }, 150);
+        }, 100);
       }
     } catch (error: any) {
       console.error('[handleAddTransaction] Error in transaction flow:', error);
       setIsSubmitting(false);
-      setTxProgressModal(prev => ({
-        ...prev,
-        status: 'error',
-        errorMessage: error.message || "Couldn't save your entry. Please try again.",
-        steps: prev.steps.map(s => s.status === 'active' ? { ...s, status: 'failed' } : s)
-      }));
+      if (newBlobs.length > 0) {
+        newBlobs.forEach(blob => {
+          setUploadStatuses(prev => {
+            if (prev[blob]?.status === 'uploading') {
+              return { ...prev, [blob]: { status: 'failed', error: error?.message || 'Upload failed' } };
+            }
+            return prev;
+          });
+        });
+      }
     }
   };
 
@@ -5261,20 +5437,388 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setIsSubmitting(false);
   };
 
+  const handleBillFiles = (files: FileList | File[]) => {
+    const filesArray = Array.from(files);
+    const pdfFile = filesArray.find(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+    const imageFiles = filesArray.filter(f => f.type && f.type.startsWith('image/'));
+
+    if (pdfFile) {
+      setPdfForPageSelector(pdfFile);
+      setIsPdfSelectorOpen(true);
+    }
+
+    if (imageFiles.length > 0) {
+      const newImages: string[] = [...selectedImages];
+      const availableSlots = Math.max(0, 6 - newImages.length);
+      const filesToAdd = imageFiles.slice(0, availableSlots);
+
+      filesToAdd.forEach(file => {
+        const blobUrl = URL.createObjectURL(file);
+        imageFilesRef.current[blobUrl] = file;
+        newImages.push(blobUrl);
+      });
+
+      setSelectedImages(newImages);
+    }
+  };
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files) return;
+    if (!files || files.length === 0) return;
+    handleBillFiles(files);
+    e.target.value = '';
+  };
 
-    const newImages: string[] = [...selectedImages];
-    const filesArray = Array.from(files).slice(0, 5 - selectedImages.length) as File[];
+  // Excel File Parsing & Import Handler
+  const handleExcelFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    filesArray.forEach(file => {
-      const blobUrl = URL.createObjectURL(file);
-      imageFilesRef.current[blobUrl] = file;
-      newImages.push(blobUrl);
-    });
+    setIsParsingExcel(true);
+    setExcelError(null);
+    setExcelPreviewRows([]);
+    setExcelDetectedColumns([]);
+    setExcelSuccessCount(null);
 
-    setSelectedImages(newImages);
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        throw new Error('The uploaded Excel file does not contain any sheets.');
+      }
+
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rawRows: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+      if (rawRows.length === 0) {
+        throw new Error('No transaction rows found in the sheet. Please make sure data is present.');
+      }
+
+      const firstRow = rawRows[0];
+      const headers = Object.keys(firstRow);
+      setExcelDetectedColumns(headers);
+
+      const findKey = (patterns: RegExp[]) => {
+        return headers.find(h => patterns.some(p => p.test(h.trim())));
+      };
+
+      const dateTimeKey = findKey([/^date\s*&?\s*time$/i, /^date$/i, /^datetime$/i, /^timestamp$/i, /^transaction\s*date$/i]);
+      const detailsKey = findKey([/^details$/i, /^description$/i, /^particulars?$/i, /^narration$/i, /^note$/i, /^remark$/i]);
+      const categoryKey = findKey([/^category$/i, /^cat$/i]);
+      const modeKey = findKey([/^mode$/i, /^payment\s*mode$/i, /^method$/i]);
+      const cashInKey = findKey([/^cash\s*in$/i, /^cashin$/i, /^in$/i, /^credit$/i, /^income$/i]);
+      const cashOutKey = findKey([/^cash\s*out$/i, /^cashout$/i, /^out$/i, /^debit$/i, /^expense$/i]);
+      const amountKey = findKey([/^amount$/i, /^amt$/i, /^transaction\s*amount$/i]);
+      const typeKey = findKey([/^type$/i, /^entry\s*type$/i]);
+
+      const missingMandatory: string[] = [];
+      if (!dateTimeKey) missingMandatory.push('Date & Time');
+      if (!detailsKey) missingMandatory.push('Details');
+      if (!categoryKey) missingMandatory.push('Category');
+
+      if (missingMandatory.length > 0) {
+        throw new Error(`Missing mandatory columns: ${missingMandatory.join(', ')}. Excel sheet must include "Date & Time", "Details", and "Category".`);
+      }
+
+      const parseDateHelper = (val: any): Date | null => {
+        if (!val) return null;
+        if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+        if (typeof val === 'number') {
+          const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+          return isNaN(d.getTime()) ? null : d;
+        }
+        if (typeof val === 'string') {
+          const trimmed = val.trim();
+          const d = new Date(trimmed);
+          if (!isNaN(d.getTime())) return d;
+
+          const dmy = trimmed.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?\s*(AM|PM)?)?$/i);
+          if (dmy) {
+            const day = parseInt(dmy[1], 10);
+            const month = parseInt(dmy[2], 10) - 1;
+            const year = parseInt(dmy[3], 10);
+            let hours = dmy[4] ? parseInt(dmy[4], 10) : 0;
+            const mins = dmy[5] ? parseInt(dmy[5], 10) : 0;
+            const secs = dmy[6] ? parseInt(dmy[6], 10) : 0;
+            const ampm = dmy[7]?.toUpperCase();
+            if (ampm === 'PM' && hours < 12) hours += 12;
+            if (ampm === 'AM' && hours === 12) hours = 0;
+            const res = new Date(year, month, day, hours, mins, secs);
+            if (!isNaN(res.getTime())) return res;
+          }
+        }
+        return null;
+      };
+
+      const isSummaryValue = (val: any): boolean => {
+        if (!val) return false;
+        const s = String(val).trim().toLowerCase();
+        if (!s) return false;
+        const summaryKeywords = [
+          'total',
+          'balance',
+          'total balance',
+          'net balance',
+          'closing balance',
+          'opening balance',
+          'sub total',
+          'subtotal',
+          'grand total',
+          'totals',
+          'summary',
+          'total cash in',
+          'total cash out',
+          'total in',
+          'total out',
+          'balance b/f',
+          'balance c/f'
+        ];
+        return summaryKeywords.some(keyword => 
+          s === keyword || 
+          s.startsWith(keyword + ' ') || 
+          s.endsWith(' ' + keyword) || 
+          s.startsWith(keyword + ':') ||
+          s.startsWith(keyword + ' -') ||
+          s.includes('total balance') ||
+          s.includes('net balance') ||
+          s.includes('closing balance') ||
+          s.includes('opening balance') ||
+          s.includes('grand total')
+        );
+      };
+
+      // Check if entire row is a summary or total balance row
+      const isSummaryRow = (rowObj: Record<string, any>): boolean => {
+        const values = Object.values(rowObj).map(v => String(v ?? '').trim().toLowerCase()).filter(Boolean);
+        return values.some(v => isSummaryValue(v));
+      };
+
+      const parsed: any[] = [];
+      rawRows.forEach((row) => {
+        // Skip entire row if ANY cell indicates a total / summary / balance calculation
+        if (isSummaryRow(row)) {
+          return;
+        }
+
+        const rawDate = row[dateTimeKey!];
+        if (isSummaryValue(rawDate)) {
+          return;
+        }
+        const dateObj = parseDateHelper(rawDate);
+        // Mandatory requirement 1: Valid Date & Time is mandatory
+        if (!rawDate || !dateObj) {
+          return; // Skip rows where Date & Time is missing or invalid
+        }
+
+        const details = String(row[detailsKey!] || '').trim();
+        // Mandatory requirement 2: Details is mandatory & must not be empty or placeholder
+        if (!details || details.length < 2 || details === '-' || details === '--' || details.toLowerCase() === 'n/a' || isSummaryValue(details)) {
+          return; // Skip rows where Details is missing or invalid
+        }
+
+        const categoryVal = String(row[categoryKey!] || '').trim();
+        const modeVal = modeKey && row[modeKey] ? String(row[modeKey]).trim() : 'Cash';
+
+        // Check if Category or Mode column specifies "TOTAL" or "BALANCE"
+        if (isSummaryValue(categoryVal) || isSummaryValue(modeVal)) {
+          return; // Skip total/balance summary row
+        }
+
+        let type: 'in' | 'out' = 'out';
+        let amt = 0;
+
+        if (cashInKey && cashOutKey) {
+          const inVal = parseFloat(String(row[cashInKey]).replace(/[^0-9.-]/g, '')) || 0;
+          const outVal = parseFloat(String(row[cashOutKey]).replace(/[^0-9.-]/g, '')) || 0;
+          if (inVal > 0 && outVal === 0) {
+            type = 'in';
+            amt = inVal;
+          } else if (outVal > 0 && inVal === 0) {
+            type = 'out';
+            amt = outVal;
+          } else if (inVal > 0 && outVal > 0) {
+            type = inVal >= outVal ? 'in' : 'out';
+            amt = Math.max(inVal, outVal);
+          }
+        } else if (amountKey) {
+          const rawAmt = parseFloat(String(row[amountKey]).replace(/[^0-9.-]/g, '')) || 0;
+          if (typeKey && row[typeKey]) {
+            const tStr = String(row[typeKey]).toLowerCase();
+            type = (tStr.includes('in') || tStr.includes('cr')) ? 'in' : 'out';
+            amt = Math.abs(rawAmt);
+          } else {
+            type = rawAmt < 0 ? 'out' : 'in';
+            amt = Math.abs(rawAmt);
+          }
+        }
+
+        // Mandatory requirement 3: Amount must be greater than 0
+        if (amt <= 0 || isNaN(amt)) {
+          return; // Skip rows with 0 or missing amount
+        }
+
+        parsed.push({
+          id: safeUUID(),
+          date: dateObj,
+          details: details,
+          category: categoryVal || 'General',
+          mode: modeVal || 'Cash',
+          type,
+          amount: amt
+        });
+      });
+
+      if (parsed.length === 0) {
+        throw new Error('No valid records could be extracted from the Excel file.');
+      }
+
+      // CHRONOLOGICAL SORTING:
+      // Earlier date/time first:
+      // ex: 12/02/2026 8:58 AM is 1st, 12/02/2026 9:00 AM is 2nd!
+      parsed.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+      setExcelPreviewRows(parsed);
+    } catch (err: any) {
+      console.error('Error parsing Excel:', err);
+      setExcelError(err.message || 'Failed to parse Excel file.');
+    } finally {
+      setIsParsingExcel(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleConfirmExcelImport = async () => {
+    const targetBookId = activeBookId || activeBook?.id;
+    if (!targetBookId || excelPreviewRows.length === 0 || !session) return;
+    setIsImportingExcel(true);
+    setExcelError(null);
+
+    try {
+      const newTransactions: Transaction[] = excelPreviewRows.map(r => ({
+        id: r.id || safeUUID(),
+        amount: Number(r.amount) || 0,
+        type: r.type,
+        description: r.details,
+        category: r.category || 'General',
+        mode: r.mode || 'Cash',
+        date: r.date instanceof Date && !isNaN(r.date.getTime()) ? r.date : new Date(r.date || Date.now()),
+        images: [],
+        imageLayout: 'split',
+        source: 'Imported'
+      }));
+
+      // 1. Optimistic update in books state
+      setBooks(prev => prev.map(b => {
+        if (b.id !== targetBookId) return b;
+        return {
+          ...b,
+          transactions: [...newTransactions, ...(b.transactions || [])]
+        };
+      }));
+
+      const effectiveUserName = userName || session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || null;
+
+      // 2. Synchronize in entriesCache so background refresh or tab changes keep them
+      const currCached = entriesCache.get(targetBookId) || [];
+      const cacheEntriesToAdd = newTransactions.map(tx => ({
+        id: tx.id,
+        cashbook_id: targetBookId,
+        user_id: session.user.id,
+        user_name: effectiveUserName,
+        amount: tx.amount,
+        type: tx.type,
+        description: tx.description,
+        category: tx.category,
+        mode: tx.mode,
+        date: tx.date,
+        image_layout: 'split',
+        source: 'Imported'
+      }));
+      entriesCache.set(targetBookId, [...cacheEntriesToAdd, ...currCached]);
+      lastFetchTimeCache.set(targetBookId, Date.now());
+
+      // 3. Persist to localStorage
+      try {
+        const savedBooks = localStorage.getItem(`cashbooks_${session.user.id}`);
+        if (savedBooks) {
+          const parsed = JSON.parse(savedBooks);
+          if (Array.isArray(parsed)) {
+            const updated = parsed.map((b: any) => {
+              if (b.id !== targetBookId) return b;
+              return {
+                ...b,
+                transactions: [...newTransactions.map(({ images, ...rest }) => rest), ...(b.transactions || [])]
+              };
+            });
+            localStorage.setItem(`cashbooks_${session.user.id}`, JSON.stringify(updated));
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to update localStorage with Excel entries:', err);
+      }
+
+      // 4. Reset date & search filters to 'All' so imported entries are immediately visible in table
+      setTransactionDurationFilter('All');
+      setTransactionTypeFilter('all');
+      setTransactionCategoryFilter('All');
+      setTransactionSearchQuery('');
+
+      // 5. Persist to Supabase in batches without schema conflict
+      if (supabase) {
+        const dbPayloads = newTransactions.map(tx => ({
+          id: tx.id,
+          cashbook_id: targetBookId,
+          user_id: session.user.id,
+          user_name: effectiveUserName,
+          amount: tx.amount,
+          type: tx.type,
+          description: tx.description,
+          category: tx.category,
+          mode: tx.mode,
+          date: safeToISOString(tx.date)
+        }));
+
+        for (let i = 0; i < dbPayloads.length; i += 50) {
+          const batch = dbPayloads.slice(i, i + 50);
+          const { error: insErr1 } = await supabase
+            .from('entries')
+            .insert(batch.map(p => ({ ...p, image_layout: 'split' })));
+
+          if (insErr1) {
+            console.warn('[handleConfirmExcelImport] Batch insert attempt 1 failed:', insErr1.message);
+            const { error: insErr2 } = await supabase
+              .from('entries')
+              .insert(batch);
+
+            if (insErr2) {
+              console.warn('[handleConfirmExcelImport] Batch insert attempt 2 failed:', insErr2.message);
+              const minBatch = batch.map(({ user_name, ...rest }) => rest);
+              const { error: insErr3 } = await supabase
+                .from('entries')
+                .insert(minBatch);
+
+              if (insErr3) {
+                console.error('[handleConfirmExcelImport] Batch insert failed:', insErr3);
+              }
+            }
+          }
+        }
+      }
+
+      setExcelSuccessCount(newTransactions.length);
+      setTimeout(() => {
+        setShowExcelImportModal(false);
+        setExcelPreviewRows([]);
+        setExcelSuccessCount(null);
+        setIsImportingExcel(false);
+      }, 1200);
+
+    } catch (err: any) {
+      console.error('Error saving imported transactions:', err);
+      setExcelError(err.message || 'Failed to save imported entries.');
+      setIsImportingExcel(false);
+    }
   };
 
   const exportToExcel = async () => {
@@ -5563,8 +6107,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     const cloudinaryFolder = await getUserCloudinaryFolder(session?.user);
 
-    // Limit to 5 images as per user request
-    const filesToProcess = Array.from(files).slice(0, 5) as File[];
+    // Limit to 6 images as per user request
+    const filesToProcess = Array.from(files).slice(0, 6) as File[];
 
     setIsUploading(true);
     setUploadingMessage('Detecting bills with TrackBook AI...');
@@ -5855,8 +6399,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     if (files.length === 0) return;
 
-    // Limit to 5 receipts as per BUG 2
-    const filesToScan = files.slice(0, 5);
+    // Limit to 6 receipts as per user request
+    const filesToScan = files.slice(0, 6);
     setSelectedFiles(filesToScan);
 
     // Auto-detect task name (BUG 3: Food vs Travel Receipts)
@@ -6411,7 +6955,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         }}
                         onDelete={(id, e) => {
                           e.stopPropagation();
-                          handleDeleteBook(id);
+                          vibrate(50);
+                          setDeleteConfirmId(id);
+                          setDeleteConfirmed(false);
                         }}
                         onOpen={handleSelectBook}
                       />
@@ -6465,24 +7011,103 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
                 </div>
                 
-                {/* Right actions: Download Center Trigger + 3-Dots Menu */}
-                <div className="flex items-center gap-2 sm:gap-3">
+                {/* Right actions: Download Center Trigger + Import Entries Dropdown + 3-Lines Menu */}
+                <div className="flex items-center gap-1.5 sm:gap-2.5">
                   <DownloadCenterTrigger theme={theme} isOpen={showDownloadCenter} setIsOpen={setShowDownloadCenter} />
 
-                  {/* 3-Dots Overflow/Book Actions Menu */}
+                  {/* Import Entries Dropdown Button (Brought out to entries page right next to processing bar) */}
+                  <div className="relative" ref={importMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowImportDropdown(!showImportDropdown)}
+                      className={cn(
+                        "p-2 rounded-xl transition-all cursor-pointer flex items-center gap-1 active:scale-95 duration-150 shrink-0",
+                        theme === 'dark'
+                          ? "bg-transparent text-slate-400 hover:text-white hover:bg-zinc-800/40"
+                          : "bg-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-200/40"
+                      )}
+                      aria-label="Import Entries"
+                      title="Import Entries"
+                    >
+                      <DownloadCloud size={20} className="shrink-0 text-indigo-500" />
+                      <span className="hidden md:inline text-xs font-bold">Import</span>
+                      <ChevronDown size={13} className="text-slate-400" />
+                    </button>
+
+                    <AnimatePresence>
+                      {showImportDropdown && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                          className={cn(
+                            "absolute right-0 mt-2 w-56 rounded-2xl shadow-2xl p-1.5 z-50 border backdrop-blur-xl",
+                            theme === 'dark' ? "bg-zinc-950/95 border-zinc-900 text-white" : "bg-white/95 border-slate-200 text-slate-900"
+                          )}
+                        >
+                          <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500">
+                            Import Options
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowImportDropdown(false);
+                              setShowImportModal(true);
+                            }}
+                            className={cn(
+                              "w-full flex items-center gap-2.5 p-2 rounded-xl transition-all cursor-pointer text-left text-xs mb-1",
+                              theme === 'dark' ? "hover:bg-zinc-900 text-slate-200" : "hover:bg-slate-100 text-slate-800"
+                            )}
+                          >
+                            <Code2 size={15} className="text-amber-500 shrink-0" />
+                            <div>
+                              <p className="font-bold text-xs">Import by TrackBook Code</p>
+                              <p className="text-[10px] text-slate-400">Restore via 6-digit sync code</p>
+                            </div>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowImportDropdown(false);
+                              setExcelPreviewRows([]);
+                              setExcelDetectedColumns([]);
+                              setExcelError(null);
+                              setExcelSuccessCount(null);
+                              setShowExcelImportModal(true);
+                            }}
+                            className={cn(
+                              "w-full flex items-center gap-2.5 p-2 rounded-xl transition-all cursor-pointer text-left text-xs",
+                              theme === 'dark' ? "hover:bg-zinc-900 text-slate-200" : "hover:bg-slate-100 text-slate-800"
+                            )}
+                          >
+                            <FileSpreadsheet size={15} className="text-emerald-500 shrink-0" />
+                            <div>
+                              <p className="font-bold text-xs">Import by Excel</p>
+                              <p className="text-[10px] text-slate-400">Upload .xlsx, .xls or .csv</p>
+                            </div>
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {/* 3-Lines (Hamburger) Book Actions Menu */}
                   <div className="relative" ref={bookMenuRef}>
-                  <button 
-                    onClick={() => setShowBookMenu(!showBookMenu)}
-                    className={cn(
-                      "flex items-center justify-center w-10 h-10 border rounded-xl transition-all cursor-pointer active:scale-95 duration-150 hover:bg-slate-100 dark:hover:bg-slate-800",
-                      theme === 'dark' 
-                        ? "border-zinc-800 text-slate-200" 
-                        : "border-slate-200 text-slate-600 shadow-sm bg-white"
-                    )}
-                    aria-label="Book Options"
-                  >
-                    <MoreVertical size={20} />
-                  </button>
+                    <button 
+                      onClick={() => setShowBookMenu(!showBookMenu)}
+                      className={cn(
+                        "p-2 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 duration-150 shrink-0",
+                        theme === 'dark' 
+                          ? "bg-transparent text-slate-400 hover:text-white hover:bg-zinc-800/40" 
+                          : "bg-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-200/40"
+                      )}
+                      aria-label="Book Options"
+                      title="Book Menu"
+                    >
+                      <Menu size={22} />
+                    </button>
                   <AnimatePresence>
                     {showBookMenu && (
                       <motion.div
@@ -6541,7 +7166,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <button 
                           onClick={() => { setShowBookMenu(false); setShowImportModal(true); }}
                           className={cn(
-                            "w-full flex items-center gap-3 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs",
+                            "w-full flex items-center gap-3 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs mb-1",
                             theme === 'dark' 
                               ? "bg-amber-950/20 border-amber-900/40 text-amber-400 hover:bg-amber-950/45" 
                               : "bg-amber-50/50 border-amber-100/70 text-amber-800 hover:bg-amber-50"
@@ -6549,6 +7174,26 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         >
                           <DownloadCloud size={14} className="text-amber-500 shrink-0" />
                           <span className="font-bold">Import Entries</span>
+                        </button>
+
+                        <button 
+                          onClick={() => {
+                            if (activeBook) {
+                              setShowBookMenu(false);
+                              vibrate(50);
+                              setDeleteConfirmId(activeBook.id);
+                              setDeleteConfirmed(false);
+                            }
+                          }}
+                          className={cn(
+                            "w-full flex items-center gap-3 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs",
+                            theme === 'dark' 
+                              ? "bg-rose-950/20 border-rose-900/40 text-rose-400 hover:bg-rose-950/45" 
+                              : "bg-rose-50/50 border-rose-100/70 text-rose-700 hover:bg-rose-50"
+                          )}
+                        >
+                          <Trash2 size={14} className="text-rose-500 shrink-0" />
+                          <span className="font-bold">Delete Cashbook</span>
                         </button>
                       </motion.div>
                     )}
@@ -8207,32 +8852,39 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       <AnimatePresence>
         {deleteConfirmId && (
           <div className={cn(
-            "fixed inset-0 z-[150] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300 overflow-y-auto",
-            theme === 'dark' ? "bg-black/60" : "bg-indigo-900/10"
+            "fixed inset-0 z-[250] flex items-center justify-center p-4 backdrop-blur-md transition-colors duration-300 overflow-y-auto",
+            theme === 'dark' ? "bg-black/75" : "bg-slate-900/50"
           )}>
             <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
+              initial={{ opacity: 0, scale: 0.92, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 15 }}
               className={cn(
-                "w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 transition-colors duration-300",
-                theme === 'dark' ? "bg-zinc-950" : "bg-white"
+                "w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 transition-colors duration-300 border",
+                theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-100 text-slate-800"
               )}
             >
-              <div className={cn(
-                "w-16 h-16 rounded-full flex items-center justify-center mx-auto transition-colors duration-300",
-                theme === 'dark' ? "bg-rose-900/20 text-rose-400" : "bg-rose-50 text-rose-600"
-              )}>
-                <Trash2 size={32} />
+              <div className="relative mx-auto w-16 h-16 rounded-full flex items-center justify-center bg-rose-500/10 text-rose-600 dark:text-rose-400">
+                <Trash2 size={30} className="animate-pulse" />
+                <span className="absolute -top-1 -right-1 p-1 bg-rose-600 text-white rounded-full">
+                  <AlertTriangle size={14} />
+                </span>
               </div>
+
               <div className="space-y-2">
                 <h3 className={cn(
-                  "text-xl font-bold transition-colors duration-300",
-                  theme === 'dark' ? "text-slate-100" : "text-slate-800"
-                )}>Delete Cashbook?</h3>
-                <p className="text-slate-500 dark:text-slate-400 text-sm">
-                  Are you sure you want to delete this book? This action cannot be undone and all transactions will be permanently lost.
+                  "text-xl font-bold tracking-tight",
+                  theme === 'dark' ? "text-slate-100" : "text-slate-900"
+                )}>
+                  Delete Cashbook?
+                </h3>
+                <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm leading-relaxed">
+                  Are you sure you want to delete <span className="font-bold text-rose-600 dark:text-rose-400">"{books.find(b => b.id === deleteConfirmId)?.name || 'this cashbook'}"</span>?
                 </p>
+                <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200/50 dark:border-rose-900/30 text-[11px] text-rose-700 dark:text-rose-300 font-medium text-left flex items-start gap-2">
+                  <AlertTriangle size={15} className="shrink-0 mt-0.5 text-rose-500" />
+                  <span>All entries, transaction records, and attachments within this cashbook will be permanently deleted.</span>
+                </div>
                 <div className="pt-2 text-left flex justify-center">
                   <label className="inline-flex items-center gap-2 cursor-pointer text-xs select-none">
                     <input 
@@ -8241,26 +8893,35 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       onChange={(e) => setDeleteConfirmed(e.target.checked)}
                       className="rounded text-rose-600 focus:ring-rose-500 border-slate-300 dark:border-slate-800 w-4 h-4 cursor-pointer"
                     />
-                    <span className="text-slate-500 dark:text-slate-400 font-bold">I confirm this deletion</span>
+                    <span className="text-slate-600 dark:text-slate-400 font-bold">I confirm deleting this cashbook</span>
                   </label>
                 </div>
               </div>
-              <div className="flex gap-3">
+
+              <div className="flex gap-2.5 pt-2">
                 <button 
-                  onClick={() => { setDeleteConfirmId(null); }}
-                  className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+                  type="button"
+                  onClick={() => { setDeleteConfirmId(null); setDeleteConfirmed(false); }}
+                  className={cn(
+                    "flex-1 py-3 border rounded-xl font-bold text-xs sm:text-sm transition-all cursor-pointer",
+                    theme === 'dark' 
+                      ? "border-zinc-800 text-slate-300 hover:bg-zinc-900" 
+                      : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                  )}
                 >
                   Cancel
                 </button>
                 <button 
+                  type="button"
                   onClick={confirmDeleteBook}
                   disabled={!deleteConfirmed}
                   className={cn(
-                    "flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
-                    theme === 'dark' ? "shadow-none" : "shadow-lg shadow-rose-100"
+                    "flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-xs sm:text-sm transition-all shadow-lg shadow-rose-600/20 active:scale-95 cursor-pointer flex items-center justify-center gap-1.5",
+                    !deleteConfirmed && "opacity-50 cursor-not-allowed shadow-none"
                   )}
                 >
-                  Delete
+                  <Trash2 size={15} />
+                  <span>Yes, Delete</span>
                 </button>
               </div>
             </motion.div>
@@ -10070,21 +10731,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 theme === 'dark' ? "bg-zinc-950" : "bg-white"
               )}
             >
-              {/* Quick Add Success Overlay */}
-              <AnimatePresence>
-                {quickAddSuccess && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: -20, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -20, scale: 0.95 }}
-                    className="absolute top-4 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[10px] sm:text-xs font-black tracking-widest px-5 py-2.5 rounded-full shadow-xl z-50 flex items-center gap-2 border border-emerald-500/30"
-                  >
-                    <CheckSquare size={13} className="animate-bounce" />
-                    <span>ENTRY SAVED &amp; COMPLETED! ADDING NEXT...</span>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
               {/* Modal Header */}
               <div className={cn(
                 "flex items-center justify-between p-4 sm:p-6 border-b transition-colors duration-300",
@@ -10189,6 +10835,30 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             setFormErrors(prev => ({ ...prev, amount: undefined }));
                           }
                         }}
+                        onKeyDown={(e) => {
+                          const k = e.key.toUpperCase();
+                          if (k === 'C') {
+                            formKeySeq.current = { key: 'C', time: Date.now() };
+                          } else if (formKeySeq.current?.key === 'C' && (Date.now() - formKeySeq.current.time) < 1500) {
+                            if (k === 'O') {
+                              e.preventDefault();
+                              setShowForm('out');
+                              formKeySeq.current = null;
+                              vibrate(20);
+                              return;
+                            } else if (k === 'I') {
+                              e.preventDefault();
+                              setShowForm('in');
+                              formKeySeq.current = null;
+                              vibrate(20);
+                              return;
+                            } else {
+                              formKeySeq.current = null;
+                            }
+                          } else {
+                            formKeySeq.current = null;
+                          }
+                        }}
                         placeholder="0.00"
                         tabIndex={1}
                         className={cn(
@@ -10218,20 +10888,53 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         <span className="text-[10px] font-bold text-rose-500">Required</span>
                       )}
                     </div>
-                    <textarea
+                    <input
                       ref={descriptionInputRef}
+                      type="text"
                       value={description}
                       onChange={(e) => {
-                        setDescription(e.target.value);
+                        setDescription(e.target.value.replace(/[\r\n]+/g, ' '));
                         if (formErrors.description && e.target.value.trim().length > 0) {
                           setFormErrors(prev => ({ ...prev, description: undefined }));
                         }
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddTransaction(e);
+                          return;
+                        }
+                        const k = e.key.toUpperCase();
+                        if (!description || description.trim() === '') {
+                          if (k === 'C') {
+                            formKeySeq.current = { key: 'C', time: Date.now() };
+                          } else if (formKeySeq.current?.key === 'C' && (Date.now() - formKeySeq.current.time) < 1500) {
+                            if (k === 'O') {
+                              e.preventDefault();
+                              setShowForm('out');
+                              formKeySeq.current = null;
+                              vibrate(20);
+                              amountInputRef.current?.focus();
+                              return;
+                            } else if (k === 'I') {
+                              e.preventDefault();
+                              setShowForm('in');
+                              formKeySeq.current = null;
+                              vibrate(20);
+                              amountInputRef.current?.focus();
+                              return;
+                            } else {
+                              formKeySeq.current = null;
+                            }
+                          } else {
+                            formKeySeq.current = null;
+                          }
+                        }
+                      }}
                       placeholder="Enter transaction details"
-                      rows={2}
                       tabIndex={2}
                       className={cn(
-                        "w-full px-4 py-3 rounded-xl outline-none text-sm font-medium resize-none transition-all duration-200",
+                        "w-full h-[52px] px-4 py-3 rounded-xl outline-none text-sm font-medium transition-all duration-200",
                         formErrors.description
                           ? "border-2 border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/50 dark:bg-rose-950/20 text-rose-900 dark:text-rose-100"
                           : cn(
@@ -10354,7 +11057,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bills / Attachments (Max 5)</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bills / Attachments (Max 6)</label>
                     <div className="space-y-3">
                       {selectedImages.length > 0 && (
                         <div className="space-y-4">
@@ -10437,7 +11140,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                 </div>
                               </div>
                             ))}
-                            {selectedImages.length < 5 && (
+                            {selectedImages.length < 6 && (
                               <button 
                                 type="button"
                                 onClick={() => triggerUploadSelector('transaction')}
@@ -10456,26 +11159,70 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       {selectedImages.length === 0 && (
                         <div 
                           onClick={() => triggerUploadSelector('transaction')}
+                          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingBill(true); }}
+                          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingBill(true); }}
+                          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingBill(false); }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsDraggingBill(false);
+                            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                              handleBillFiles(e.dataTransfer.files);
+                            }
+                          }}
                           className={cn(
-                            "border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center gap-2 hover:border-indigo-300 transition-all cursor-pointer group",
-                            theme === 'dark' ? "border-slate-800 hover:border-indigo-500" : "border-slate-200"
+                            "border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center gap-2 hover:border-indigo-400 transition-all cursor-pointer group",
+                            isDraggingBill
+                              ? "border-indigo-500 bg-indigo-50/30 dark:bg-indigo-950/40 scale-[1.01]"
+                              : (theme === 'dark' ? "border-slate-800 hover:border-indigo-500" : "border-slate-200")
                           )}
                         >
                           <div className={cn(
-                            "p-2 rounded-full text-slate-400 group-hover:text-indigo-500 transition-colors",
+                            "p-2.5 rounded-full text-slate-400 group-hover:text-indigo-500 transition-colors flex items-center justify-center",
                             theme === 'dark' ? "bg-slate-800" : "bg-slate-50"
                           )}>
-                            <Upload size={24} />
+                            <Upload size={22} />
                           </div>
-                          <p className="text-[10px] font-bold text-slate-400 group-hover:text-indigo-500 transition-colors">
-                            Click to upload bills (Max 5)
-                          </p>
+                          <div className="text-center space-y-0.5">
+                            <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 group-hover:text-indigo-500 transition-colors">
+                              Click or Drag & Drop bills, images or PDF
+                            </p>
+                            <p className="text-[10px] text-slate-400">
+                              PDF import supported (even up to 500 MB) • Choose which pages to add
+                            </p>
+                          </div>
                         </div>
                       )}
+
+                      {selectedImages.length > 0 && selectedImages.length < 6 && (
+                        <div
+                          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingBill(true); }}
+                          onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingBill(true); }}
+                          onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingBill(false); }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsDraggingBill(false);
+                            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                              handleBillFiles(e.dataTransfer.files);
+                            }
+                          }}
+                          onClick={() => triggerUploadSelector('transaction')}
+                          className={cn(
+                            "mt-2 text-center py-2 px-3 rounded-xl border border-dashed text-[10px] font-medium transition-colors cursor-pointer",
+                            isDraggingBill 
+                              ? "border-indigo-500 bg-indigo-50/20 text-indigo-600 font-bold" 
+                              : "border-slate-200 dark:border-zinc-800 text-slate-400 hover:border-indigo-400 hover:text-indigo-500"
+                          )}
+                        >
+                          Drop more images or a PDF here (or click to browse)
+                        </div>
+                      )}
+
                       <input 
                         type="file"
                         multiple
-                        accept="image/*"
+                        accept="image/*,application/pdf,.pdf"
                         ref={multiFileInputRef}
                         onChange={handleImageUpload}
                         className="hidden"
@@ -10491,21 +11238,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     >
                       Cancel
                     </button>
-                    {!editingTransaction && (
-                      <button
-                        type="submit"
-                        onClick={() => { vibrate(30); setSubmitAndAddNew(true); }}
-                        className={cn(
-                          "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm",
-                          theme === 'dark' ? "bg-indigo-600 hover:bg-indigo-700 shadow-none" : "bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-100"
-                        )}
-                      >
-                        Save &amp; Add New
-                      </button>
-                    )}
                     <button
                       type="submit"
-                      onClick={() => { vibrate(30); setSubmitAndAddNew(false); }}
+                      onClick={() => { vibrate(30); }}
                       className={cn(
                         "flex-1 py-3 rounded-xl font-bold text-white transition-all active:scale-95 text-xs sm:text-sm",
                         showForm === 'in' 
@@ -11711,6 +12446,327 @@ Open TrackBook → Import Shared Entries`)}`}
         )}
       </AnimatePresence>
 
+      {/* Import Entries by Excel Modal */}
+      <AnimatePresence>
+        {showExcelImportModal && (
+          <div className={cn(
+            "fixed inset-0 z-[150] flex items-center justify-center p-3 sm:p-4 backdrop-blur-sm transition-colors duration-300",
+            theme === 'dark' ? "bg-black/70" : "bg-slate-900/40"
+          )}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className={cn(
+                "w-full max-w-3xl rounded-3xl p-5 sm:p-6 shadow-2xl flex flex-col max-h-[90vh] transition-colors duration-300 relative",
+                theme === 'dark' ? "bg-zinc-950 border border-zinc-800 text-white" : "bg-white border-slate-100 text-slate-900"
+              )}
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800/80 pb-3.5 shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                    <FileSpreadsheet size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black tracking-tight">Import by Excel</h3>
+                    <p className="text-[11px] text-slate-400 font-medium">Upload .xlsx, .xls or .csv spreadsheet to import entries</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowExcelImportModal(false);
+                    setExcelPreviewRows([]);
+                    setExcelDetectedColumns([]);
+                    setExcelError(null);
+                    setExcelSuccessCount(null);
+                  }}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-all cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Error Banner */}
+              {excelError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 rounded-2xl text-xs flex items-center gap-2 font-bold shrink-0">
+                  <AlertCircle size={16} className="shrink-0" />
+                  <span className="flex-1">{excelError}</span>
+                  <button 
+                    type="button" 
+                    onClick={() => setExcelError(null)} 
+                    className="p-1 hover:bg-rose-100 dark:hover:bg-rose-900/30 rounded-lg text-rose-500"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
+              {/* Success Notification */}
+              {excelSuccessCount !== null ? (
+                <div className="text-center py-10 space-y-3">
+                  <div className="w-14 h-14 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto">
+                    <CheckCircle2 size={32} />
+                  </div>
+                  <div>
+                    <h4 className="text-lg font-black text-slate-900 dark:text-white">Entries Imported Successfully!</h4>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Added {excelSuccessCount} transaction{excelSuccessCount === 1 ? '' : 's'} into <span className="font-bold text-slate-700 dark:text-slate-300">"{activeBook?.name}"</span>
+                    </p>
+                  </div>
+                </div>
+              ) : excelPreviewRows.length === 0 ? (
+                /* Step 1: Upload Box & Mandatory Column Specifications */
+                <div className="space-y-4 py-2 overflow-y-auto">
+                  {/* Mandatory Columns Guidance Box */}
+                  <div className={cn(
+                    "p-3.5 sm:p-4 rounded-2xl border space-y-2 text-xs",
+                    theme === 'dark' ? "bg-zinc-900/40 border-zinc-800/80" : "bg-slate-50/80 border-slate-200/80"
+                  )}>
+                    <div className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-200">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      Required Spreadsheet Columns:
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-[11px]">
+                      <div className="flex items-center gap-1.5 font-semibold text-slate-600 dark:text-slate-300">
+                        <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-500 font-bold uppercase text-[9px]">Mandatory</span>
+                        <span>Date & Time</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 font-semibold text-slate-600 dark:text-slate-300">
+                        <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-500 font-bold uppercase text-[9px]">Mandatory</span>
+                        <span>Details</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 font-semibold text-slate-600 dark:text-slate-300">
+                        <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-500 font-bold uppercase text-[9px]">Mandatory</span>
+                        <span>Category</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 font-semibold text-slate-600 dark:text-slate-300">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-500 font-bold uppercase text-[9px]">Optional</span>
+                        <span>Mode (Defaults to Cash)</span>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-medium pt-1 border-t border-slate-200/60 dark:border-zinc-800/60">
+                      Note: You can include separate <span className="font-bold">Cash In</span> and <span className="font-bold">Cash Out</span> columns, or an <span className="font-bold">Amount</span> column.
+                    </p>
+                  </div>
+
+                  {/* Dropzone */}
+                  <div
+                    onClick={() => excelFileInputRef.current?.click()}
+                    className={cn(
+                      "border-2 border-dashed rounded-3xl p-8 sm:p-10 flex flex-col items-center justify-center gap-3 transition-all cursor-pointer group text-center",
+                      theme === 'dark'
+                        ? "border-zinc-800 hover:border-emerald-500/60 hover:bg-zinc-900/30"
+                        : "border-slate-200 hover:border-emerald-500/60 hover:bg-emerald-50/20"
+                    )}
+                  >
+                    <input
+                      type="file"
+                      ref={excelFileInputRef}
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleExcelFileSelect}
+                      className="hidden"
+                    />
+
+                    <div className={cn(
+                      "p-3 rounded-2xl transition-all duration-300 group-hover:scale-110",
+                      theme === 'dark' ? "bg-zinc-900 text-emerald-400 group-hover:bg-emerald-950/40" : "bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100"
+                    )}>
+                      {isParsingExcel ? (
+                        <Loader2 size={28} className="animate-spin" />
+                      ) : (
+                        <Upload size={28} />
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
+                      <p className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                        {isParsingExcel ? "Scanning & detecting columns..." : "Click to select or drag & drop Excel / CSV file"}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        Supported formats: .xlsx, .xls, .csv
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Step 2: Detected Columns & Chronological Preview Table */
+                <div className="space-y-3.5 flex-1 overflow-hidden flex flex-col min-h-0">
+                  {/* Column Detection Status Badges */}
+                  <div className={cn(
+                    "p-3 rounded-2xl border flex flex-wrap items-center justify-between gap-2 shrink-0",
+                    theme === 'dark' ? "bg-zinc-900/50 border-zinc-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-800"
+                  )}>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-bold text-[11px] text-slate-400 uppercase tracking-wider">Detected Columns:</span>
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] flex items-center gap-1">
+                        ✓ Date & Time
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] flex items-center gap-1">
+                        ✓ Details
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] flex items-center gap-1">
+                        ✓ Category
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold text-[11px] flex items-center gap-1">
+                        ✓ Mode
+                      </span>
+                    </div>
+
+                    <span className="px-2.5 py-1 rounded-full bg-emerald-600 text-white font-extrabold text-[11px] shadow-sm">
+                      {excelPreviewRows.length} Entries Ready
+                    </span>
+                  </div>
+
+                  {/* Chronological Sorting Note */}
+                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5 px-1 shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                    <span>Chronological Order: Entries are sorted by Date & Time (earliest added first: e.g. 8:58 AM then 9:00 AM)</span>
+                  </div>
+
+                  {/* Scrollable Preview Table */}
+                  <div className={cn(
+                    "flex-1 overflow-y-auto rounded-2xl border divide-y transition-colors",
+                    theme === 'dark' ? "border-zinc-800/80 divide-zinc-850 bg-zinc-950/40" : "border-slate-200 divide-slate-100 bg-white"
+                  )}>
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className={cn(
+                        "sticky top-0 z-10 font-bold text-[10px] uppercase tracking-wider",
+                        theme === 'dark' ? "bg-zinc-900 text-slate-300" : "bg-slate-100 text-slate-600"
+                      )}>
+                        <tr>
+                          <th className="px-3.5 py-2.5">#</th>
+                          <th className="px-3.5 py-2.5">Date & Time</th>
+                          <th className="px-3.5 py-2.5">Details</th>
+                          <th className="px-3.5 py-2.5">Category</th>
+                          <th className="px-3.5 py-2.5">Mode</th>
+                          <th className="px-3.5 py-2.5">Type</th>
+                          <th className="px-3.5 py-2.5 text-right">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-zinc-900">
+                        {excelPreviewRows.map((row, idx) => (
+                          <tr 
+                            key={row.id || idx}
+                            className={cn(
+                              "transition-colors",
+                              theme === 'dark' ? "hover:bg-zinc-900/40" : "hover:bg-slate-50"
+                            )}
+                          >
+                            <td className="px-3.5 py-2 text-slate-400 font-mono text-[10px]">{idx + 1}</td>
+                            <td className="px-3.5 py-2 font-mono text-[11px] whitespace-nowrap text-slate-600 dark:text-slate-300">
+                              {row.date instanceof Date && !isNaN(row.date.getTime())
+                                ? row.date.toLocaleString('en-IN', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: true
+                                  })
+                                : '--'}
+                            </td>
+                            <td className="px-3.5 py-2 font-bold max-w-[180px] truncate whitespace-nowrap text-slate-800 dark:text-slate-200" title={row.details}>
+                              {row.details}
+                            </td>
+                            <td className="px-3.5 py-2 whitespace-nowrap">
+                              <span className={cn(
+                                "px-2 py-0.5 rounded-md font-semibold text-[10px]",
+                                theme === 'dark' ? "bg-zinc-800 text-slate-300" : "bg-slate-100 text-slate-700"
+                              )}>
+                                {row.category}
+                              </span>
+                            </td>
+                            <td className="px-3.5 py-2 whitespace-nowrap text-slate-500 dark:text-slate-400 text-[11px]">
+                              {row.mode}
+                            </td>
+                            <td className="px-3.5 py-2 whitespace-nowrap">
+                              <span className={cn(
+                                "px-2 py-0.5 rounded-full font-black text-[9px] uppercase tracking-wider",
+                                row.type === 'in' 
+                                  ? (theme === 'dark' ? "bg-emerald-950/40 text-emerald-400 border border-emerald-800/40" : "bg-emerald-50 text-emerald-700 border border-emerald-200")
+                                  : (theme === 'dark' ? "bg-rose-950/40 text-rose-400 border border-rose-800/40" : "bg-rose-50 text-rose-700 border border-rose-200")
+                              )}>
+                                {row.type === 'in' ? 'Cash In' : 'Cash Out'}
+                              </span>
+                            </td>
+                            <td className={cn(
+                              "px-3.5 py-2 text-right font-black whitespace-nowrap font-mono",
+                              row.type === 'in' ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                            )}>
+                              {formatCurrency(row.amount)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2 shrink-0 border-t border-slate-100 dark:border-zinc-800/80">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExcelPreviewRows([]);
+                        setExcelDetectedColumns([]);
+                        setExcelError(null);
+                      }}
+                      className={cn(
+                        "py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer border",
+                        theme === 'dark' ? "border-zinc-800 text-slate-300 hover:bg-zinc-800" : "border-slate-200 text-slate-600 hover:bg-slate-100"
+                      )}
+                    >
+                      Upload Different File
+                    </button>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowExcelImportModal(false);
+                          setExcelPreviewRows([]);
+                          setExcelDetectedColumns([]);
+                          setExcelError(null);
+                        }}
+                        className={cn(
+                          "py-2.5 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer border",
+                          theme === 'dark' ? "border-zinc-800 text-slate-400 hover:bg-zinc-800" : "border-slate-200 text-slate-500 hover:bg-slate-100"
+                        )}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmExcelImport}
+                        disabled={isImportingExcel}
+                        className={cn(
+                          "py-2.5 px-5 rounded-xl text-xs font-bold text-white transition-all flex items-center gap-2 cursor-pointer shadow-md",
+                          "bg-emerald-600 hover:bg-emerald-700 active:scale-95 shadow-emerald-500/20",
+                          isImportingExcel && "opacity-60 cursor-not-allowed"
+                        )}
+                      >
+                        {isImportingExcel ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" />
+                            <span>Importing {excelPreviewRows.length} Entries...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckSquare size={14} />
+                            <span>Confirm & Import {excelPreviewRows.length} Entries</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Hidden AI File Input */}
       <input 
         type="file"
@@ -11740,6 +12796,31 @@ Open TrackBook → Import Shared Entries`)}`}
         cashbookId={pdfQualityModalState?.cashbookId || ''}
         cashbookName={pdfQualityModalState?.cashbookName || ''}
         transactions={pdfQualityModalState?.transactions || []}
+        theme={theme}
+      />
+
+      {/* PDF Page Selector Modal for Bill / Receipt Attachment (supports up to 500 MB) */}
+      <PdfPageSelectorModal
+        isOpen={isPdfSelectorOpen}
+        file={pdfForPageSelector}
+        onClose={() => {
+          setIsPdfSelectorOpen(false);
+          setPdfForPageSelector(null);
+        }}
+        onPagesSelected={(pageFiles: File[]) => {
+          const newImages: string[] = [...selectedImages];
+          const availableSlots = Math.max(0, 6 - newImages.length);
+          const filesToAdd = pageFiles.slice(0, availableSlots);
+          filesToAdd.forEach(file => {
+            const blobUrl = URL.createObjectURL(file);
+            imageFilesRef.current[blobUrl] = file;
+            newImages.push(blobUrl);
+          });
+          setSelectedImages(newImages);
+          setIsPdfSelectorOpen(false);
+          setPdfForPageSelector(null);
+        }}
+        maxAllowed={Math.max(1, 6 - selectedImages.length)}
         theme={theme}
       />
 

@@ -51,6 +51,8 @@ export async function uploadToCloudinary(
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', url);
+      // Generous timeout for processing large files or slower connections (60s)
+      xhr.timeout = 60000;
 
       if (xhr.upload && onProgress) {
         xhr.upload.onprogress = (event) => {

@@ -75,15 +75,31 @@ export default function ResetPassword() {
 
       if (error) throw error;
 
-      setSuccess('Password updated successfully! Redirecting to login...');
+      setLoading(false);
+      setSuccess('Your password is updated and redirecting to login page...');
+
+      // 1. Clear hash tokens from URL so App NavigationHandler does not re-route back to resetpassword
+      try {
+        if (window.location.hash) {
+          window.history.replaceState(null, '', window.location.pathname);
+        }
+      } catch (_) {}
+
+      // 2. Clear recovery session so login page opens cleanly
+      try {
+        await supabase.auth.signOut();
+      } catch (signOutErr) {
+        console.warn('Signout after password reset warning:', signOutErr);
+      }
+
+      // 3. Redirect to login page
       setTimeout(() => {
-        navigate('/login');
-      }, 3000);
+        window.location.href = '/login';
+      }, 1500);
     } catch (err: any) {
       console.error('Reset password error:', err);
-      setError(err.message || 'An error occurred while updating your password.');
-    } finally {
       setLoading(false);
+      setError(err.message || 'An error occurred while updating your password.');
     }
   };
 
@@ -172,20 +188,43 @@ export default function ResetPassword() {
           <button
             type="submit"
             disabled={loading || !!success}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-3.5 font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed mt-4 shadow-lg shadow-indigo-200 dark:shadow-none"
+            className={cn(
+              "w-full rounded-xl py-3.5 font-bold transition-all flex items-center justify-center gap-2 mt-4 text-white cursor-pointer",
+              success 
+                ? "bg-emerald-600 shadow-lg shadow-emerald-200 dark:shadow-none" 
+                : "bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 dark:shadow-none",
+              (loading || !!success) && "opacity-90 cursor-not-allowed"
+            )}
           >
             {loading ? (
-              <Loader2 className="animate-spin" size={20} />
+              <>
+                <Loader2 className="animate-spin" size={18} />
+                <span>Updating Password...</span>
+              </>
+            ) : success ? (
+              <>
+                <CheckCircle2 size={18} />
+                <span>Password Updated! Redirecting...</span>
+              </>
             ) : (
-              'Update Password'
+              'Reset Password'
             )}
           </button>
         </form>
 
         <div className="mt-8 text-center">
           <button 
-            onClick={() => navigate('/login')}
-            className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline text-sm"
+            type="button"
+            onClick={async () => {
+              try {
+                if (window.location.hash) {
+                  window.history.replaceState(null, '', window.location.pathname);
+                }
+                await supabase?.auth.signOut();
+              } catch (_) {}
+              window.location.href = '/login';
+            }}
+            className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline text-sm cursor-pointer"
           >
             Back to Login
           </button>

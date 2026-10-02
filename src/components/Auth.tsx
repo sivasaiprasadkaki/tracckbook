@@ -129,28 +129,6 @@ export default function Auth({
           throw error;
         }
 
-        let isExistingUser = false;
-        if (data?.user) {
-          const identities = data.user.identities || [];
-          if (identities.length === 0) {
-            isExistingUser = true;
-          } else {
-            const createdAt = data.user.created_at ? new Date(data.user.created_at).getTime() : 0;
-            const now = Date.now();
-            const timeDiffSec = Math.abs(now - createdAt) / 1000;
-            if (timeDiffSec > 12) {
-              isExistingUser = true;
-            }
-          }
-        } else {
-          isExistingUser = true;
-        }
-
-        if (isExistingUser) {
-          setError('This email is already registered. Please sign in or use Forgot Password.');
-          return;
-        }
-
         // Create initial profile if possible (without overwriting if already exists)
         if (data?.user && trimmedName) {
           try {
@@ -162,7 +140,8 @@ export default function Auth({
           } catch (_) {}
         }
 
-        setSuccess('Account created! Please check your email for verification.');
+        setError(null);
+        setSuccess('Check your inbox! Verification email has been sent. Please check your inbox (and spam folder) to activate your account.');
 
         // Attempt login immediately
         try {

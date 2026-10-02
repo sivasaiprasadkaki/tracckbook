@@ -343,10 +343,15 @@ export default function DesktopSignUp({
                 initial={{ opacity: 0, height: 0, y: -6 }}
                 animate={{ opacity: 1, height: 'auto', y: 0 }}
                 exit={{ opacity: 0, height: 0, y: -6 }}
-                className="mb-5 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm flex items-start gap-3 font-['Inter',sans-serif] overflow-hidden"
+                className="mb-5 p-4 rounded-2xl bg-emerald-50 border-2 border-emerald-300 text-emerald-900 text-sm flex items-start gap-3.5 font-['Inter',sans-serif] overflow-hidden shadow-sm"
               >
-                <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-600 mt-0.5" />
-                <div className="flex-1 whitespace-pre-line">{success}</div>
+                <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-emerald-900 text-sm leading-tight">Check your inbox!</p>
+                  <p className="text-xs text-emerald-700 mt-1 leading-relaxed">{success}</p>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
