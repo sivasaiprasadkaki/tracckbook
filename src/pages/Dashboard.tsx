@@ -619,11 +619,11 @@ async function fetchEntriesFromSupabase(
       if (cashbookId) {
         query = query.eq('cashbook_id', cashbookId);
       } else if (cashbookIds && cashbookIds.length > 0) {
-        query = query.in('cashbook_id', cashbookIds);
+        query = query.in('cashbook_id', cashbookIds).limit(300);
       } else if (candidateUserIds.length > 1) {
-        query = query.in('user_id', candidateUserIds);
+        query = query.in('user_id', candidateUserIds).limit(300);
       } else {
-        query = query.eq('user_id', userId);
+        query = query.eq('user_id', userId).limit(300);
       }
 
       let { data, error } = await query;
@@ -1776,7 +1776,8 @@ const normalizeDate = (dateVal: any): string => {
 const getEntrySignature = (t: any): string => {
   const amt = (parseFloat(t.amount) || 0).toFixed(2);
   const type = normalizeString(t.type || 'out');
-  const desc = normalizeString(t.description || '');
+  const rawDesc = String(t.description || '').replace(/\s*\([^)]+\)$/, '');
+  const desc = normalizeString(rawDesc);
   const cat = normalizeString(t.category || 'Food');
   const mode = normalizeString(t.mode || 'Cash');
   const dateStr = normalizeDate(t.date);
@@ -2339,6 +2340,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   // Highlights and Undo manager states
   const [justEditedTransactionId, setJustEditedTransactionId] = useState<string | null>(null);
+  const [entrySuccessToast, setEntrySuccessToast] = useState<{ message: string; type: 'in' | 'out'; amount?: number } | null>(null);
   const [justEditedBookId, setJustEditedBookId] = useState<string | null>(null);
   const [undoAction, setUndoAction] = useState<{
     type: 'book' | 'transaction' | 'bulk_books' | 'bulk_transactions';
@@ -3280,38 +3282,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
       console.log(`[fetchData] ${shouldOnlyFetchEntries ? 'Fetching entries only for active book...' : 'Refreshing cashbooks and entries from Supabase in parallel...'}`);
 
-      // Build candidate user IDs strictly and demonstrably associated with the authenticated user
-      const candidateUserIds = new Set<string>();
-      if (session?.user?.id) candidateUserIds.add(session.user.id);
-
-      if (session?.user?.email) {
-        try {
-          const { data: altUsers } = await supabase
-            .from('users')
-            .select('id')
-            .eq('email', session.user.email.toLowerCase().trim());
-          if (altUsers) {
-            altUsers.forEach(u => { if (u.id) candidateUserIds.add(u.id); });
-          }
-        } catch (_) {}
-      }
-
-      const candidateUserIdsArray = Array.from(candidateUserIds);
+      // Fast authenticated user IDs - zero sequential blocking network delays
+      const candidateUserIdsArray = [session.user.id];
 
       // Query cashbooks strictly by authenticated user IDs - never broad display-name matching
       const cashbooksPromise = shouldOnlyFetchEntries
         ? Promise.resolve({ data: cachedCashbooks || books, error: null })
-        : (candidateUserIdsArray.length > 1
-            ? supabase
-                .from('cashbooks')
-                .select('id, name, created_at, user_id, user_name')
-                .in('user_id', candidateUserIdsArray)
-                .order('created_at', { ascending: false })
-            : supabase
-                .from('cashbooks')
-                .select('id, name, created_at, user_id, user_name')
-                .eq('user_id', session.user.id)
-                .order('created_at', { ascending: false }));
+        : supabase
+            .from('cashbooks')
+            .select('id, name, created_at, user_id, user_name')
+            .eq('user_id', session.user.id)
+            .order('created_at', { ascending: false });
 
       const knownCashbookIds = (cachedCashbooks || books).map((b: any) => b.id).filter(Boolean);
       // Fast, verified query directly using ENTRY_COLUMNS with in-flight deduplication
@@ -3333,15 +3314,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       if (cashbooks) {
         cachedCashbooks = cashbooks;
         
-        // Ensure cashbook ownership in Supabase is updated ONLY after ownership is verified via candidateUserIds
-        cashbooks.forEach((cb: any) => {
-          if (cb.id && cb.user_id !== session.user.id && candidateUserIds.has(cb.user_id)) {
-            supabase.from('cashbooks').update({ 
-              user_id: session.user.id, 
-              user_name: cb.user_name || userName || session.user.email?.split('@')[0] || null 
-            }).eq('id', cb.id).then(() => {});
-          }
-        });
         let activeBookEntries: any[] = [];
         
         if (activeBookId) {
@@ -3388,7 +3360,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             const isCurrentActive = cb.id === activeBookId;
             let entriesToUse: any[] = [];
             if (isCurrentActive) {
-              entriesToUse = activeBookEntries.length > 0 ? activeBookEntries : (entriesCache.get(cb.id) || []);
+              const prevActiveBook = prevBooks.find(pb => pb.id === cb.id);
+              const prevTxs = prevActiveBook ? (prevActiveBook.transactions || []) : [];
+              const fetchedIds = new Set(activeBookEntries.map((e: any) => e.id));
+              // CRITICAL: Preserve any pending optimistic transactions so remote fetch never wipes freshly added entries!
+              const pendingOptimistic = prevTxs.filter((t: any) => !fetchedIds.has(t.id));
+              entriesToUse = [...pendingOptimistic, ...(activeBookEntries.length > 0 ? activeBookEntries : (entriesCache.get(cb.id) || []))];
             } else if (entriesCache.has(cb.id)) {
               entriesToUse = entriesCache.get(cb.id) || [];
             } else {
@@ -3421,6 +3398,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             };
           });
         });
+
+        // Fast persistence to localStorage so reload/reopen is instant (<15ms)
+        try {
+          const booksToPersist = cashbooks.map((cb: any) => ({
+            ...cb,
+            transactions: (cb.id === activeBookId ? activeBookEntries : (entriesCache.get(cb.id) || [])).map((t: any) => {
+              const { images, ...rest } = t;
+              return rest;
+            })
+          }));
+          localStorage.setItem(`cashbooks_${session.user.id}`, JSON.stringify(booksToPersist));
+        } catch (_) {}
 
         if (activeBookId) {
           setIsEntriesLoading(false);
@@ -4287,6 +4276,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     resetForm();
     setIsSubmitting(false);
 
+    // If active filters would hide the newly added transaction, automatically reset them so the user sees it immediately
+    if (transactionTypeFilter !== 'all' && transactionTypeFilter !== effectiveFormType) {
+      setTransactionTypeFilter('all');
+    }
+    if (transactionCategoryFilter !== 'All' && transactionCategoryFilter !== (finalCategory || 'General')) {
+      setTransactionCategoryFilter('All');
+    }
+    if (transactionDurationFilter !== 'All') {
+      setTransactionDurationFilter('All');
+    }
+    if (transactionSearchQuery) {
+      setTransactionSearchQuery('');
+      setTransactionSearchQueryInput('');
+    }
+
     // Apply to books state INSTANTLY - zero lag for user
     if (isEdit) {
       setBooks(prevBooks => prevBooks.map(b =>
@@ -4315,6 +4319,24 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         source: 'Manual'
       }, ...currCached]);
     }
+
+    // Trigger instant visual feedback and toast confirmation so user knows entry is added
+    setEntrySuccessToast({
+      message: isEdit ? 'Entry updated successfully!' : 'Entry added successfully!',
+      type: effectiveFormType,
+      amount: amountNum
+    });
+    setTimeout(() => {
+      setEntrySuccessToast(null);
+    }, 3500);
+
+    setJustEditedTransactionId(tempId);
+    setTimeout(() => {
+      document.getElementById(`entry-${tempId}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+    setTimeout(() => {
+      setJustEditedTransactionId(null);
+    }, 3000);
 
     // Mark image blobs as syncing in background so inline "Syncing to cloud..." shows
     if (newBlobs.length > 0) {
@@ -4980,9 +5002,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const expiryTime = Date.now() + 5 * 60 * 1000;
       const createdAt = new Date().toISOString();
       
+      const authorName = (userName || session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || '').trim();
+
       const payload: any = {
         share_code: code,
         created_by: session.user.id,
+        user_name: authorName,
         entries_count: selectedList.length,
         expires_at: expiresAt,
         created_at: createdAt,
@@ -4997,7 +5022,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           mode: t.mode,
           date: t.date,
           image_layout: t.imageLayout || 'split',
-          images: t.images || []
+          images: t.images || [],
+          author_name: authorName,
+          user_name: authorName
         }))
       };
 
@@ -5008,7 +5035,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       if (insertErr) {
         console.warn('[ShareCode] Insert with signature failed, falling back...', insertErr.message);
         if (insertErr.code === '42703' || insertErr.message?.includes('column') || insertErr.message?.includes('does not exist')) {
-          const { entries_signature, cashbook_id, ...fallbackPayload } = payload;
+          const { entries_signature, cashbook_id, user_name, ...fallbackPayload } = payload;
           const { error: retryErr } = await supabase
             .from('shared_entries')
             .insert([fallbackPayload]);
@@ -5055,15 +5082,27 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const nowIso = new Date().toISOString();
 
       // 1. Supabase query layer validation for existence
-      const { data: sharedRow, error: fetchError } = await supabase
+      let sharedRow: any = null;
+      const { data: rowWithAll, error: fetchError } = await supabase
         .from('shared_entries')
-        .select('entries_json, expires_at')
+        .select('*')
         .eq('share_code', cleanedCode)
         .maybeSingle();
 
       if (fetchError) {
-        throw new Error('Failed to import entries due to dynamic fetch error.');
+        const { data: fallbackRow, error: fallbackErr } = await supabase
+          .from('shared_entries')
+          .select('entries_json, expires_at, created_by')
+          .eq('share_code', cleanedCode)
+          .maybeSingle();
+        if (fallbackErr || !fallbackRow) {
+          throw new Error('Failed to import entries due to dynamic fetch error.');
+        }
+        sharedRow = fallbackRow;
+      } else {
+        sharedRow = rowWithAll;
       }
+
       if (!sharedRow || !sharedRow.entries_json) {
         setImportError('Invalid share code. Please double-check and try again.');
         setIsImporting(false);
@@ -5092,6 +5131,43 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         setImportError('No entries found in this shared code.');
         setIsImporting(false);
         return;
+      }
+
+      // Resolve original author's name (User A)
+      let authorName = (
+        sharedRow.user_name || 
+        sharedRow.author_name || 
+        (Array.isArray(entriesToImport) && (entriesToImport[0]?.author_name || entriesToImport[0]?.user_name)) || 
+        ''
+      ).trim();
+
+      // Fallback: look up author name from profiles or cashbooks if missing on legacy share records
+      if (!authorName && sharedRow.created_by) {
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('full_name, username')
+            .eq('id', sharedRow.created_by)
+            .maybeSingle();
+          if (profile) {
+            authorName = (profile.full_name || profile.username || '').trim();
+          }
+        } catch (_) {}
+      }
+
+      if (!authorName && sharedRow.created_by) {
+        try {
+          const { data: cb } = await supabase
+            .from('cashbooks')
+            .select('user_name')
+            .eq('user_id', sharedRow.created_by)
+            .not('user_name', 'is', null)
+            .limit(1)
+            .maybeSingle();
+          if (cb?.user_name) {
+            authorName = cb.user_name.trim();
+          }
+        } catch (_) {}
       }
 
       const effectiveUserName = userName || session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || null;
@@ -5189,11 +5265,23 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           // Rule 4: Skip duplicates entirely
           skippedDuplicatesCount++;
         } else {
+          const entryAuthor = (t.author_name || t.user_name || authorName || '').trim();
+          const originalDesc = (t.description || '').trim();
+          let finalDesc = originalDesc;
+          if (entryAuthor) {
+            const authorTag = `(${entryAuthor})`;
+            if (!originalDesc) {
+              finalDesc = authorTag;
+            } else if (!originalDesc.includes(authorTag)) {
+              finalDesc = `${originalDesc} ${authorTag}`;
+            }
+          }
+
           finalInserts.push({
             id: safeUUID(),
             amount: parseFloat(t.amount) || 0,
             type: t.type || 'out',
-            description: t.description || '',
+            description: finalDesc,
             category: t.category || 'Food',
             mode: t.mode || 'Cash',
             date: t.date || new Date().toISOString(),
@@ -7011,9 +7099,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
                 </div>
                 
-                {/* Right actions: Download Center Trigger + Import Entries Dropdown + 3-Lines Menu */}
+                {/* Right actions: Import Entries Dropdown + 3-Lines Menu */}
                 <div className="flex items-center gap-1.5 sm:gap-2.5">
-                  <DownloadCenterTrigger theme={theme} isOpen={showDownloadCenter} setIsOpen={setShowDownloadCenter} />
 
                   {/* Import Entries Dropdown Button (Brought out to entries page right next to processing bar) */}
                   <div className="relative" ref={importMenuRef}>
@@ -13108,6 +13195,58 @@ Open TrackBook → Import Shared Entries`)}`}
               </div>
               <button
                 onClick={() => setBackgroundScanResult(null)}
+                className={cn(
+                  "p-1.5 rounded-lg transition-colors duration-200 shrink-0 cursor-pointer",
+                  theme === 'dark' ? "hover:bg-slate-800 text-slate-400" : "hover:bg-slate-100 text-slate-500"
+                )}
+              >
+                <X size={15} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Entry Addition / Edit Success Toast */}
+      <AnimatePresence>
+        {entrySuccessToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-6 right-6 z-[200] w-[calc(100%-2rem)] max-w-sm"
+          >
+            <div className={cn(
+              "rounded-2xl border p-4 shadow-2xl flex items-center justify-between gap-3 relative overflow-hidden transition-all duration-300",
+              theme === 'dark' 
+                ? "bg-zinc-950/95 border-emerald-800/50 text-white backdrop-blur-md shadow-emerald-950/20" 
+                : "bg-white/95 border-emerald-200 text-slate-800 backdrop-blur-md shadow-emerald-100/50"
+            )}>
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "p-2.5 rounded-xl shrink-0 flex items-center justify-center",
+                  entrySuccessToast.type === 'in'
+                    ? (theme === 'dark' ? "bg-emerald-950/60 text-emerald-400" : "bg-emerald-50 text-emerald-600")
+                    : (theme === 'dark' ? "bg-rose-950/60 text-rose-400" : "bg-rose-50 text-rose-600")
+                )}>
+                  <CheckCircle2 size={18} />
+                </div>
+                <div className="space-y-0.5 text-left">
+                  <p className="text-xs font-black tracking-wider uppercase text-emerald-600 dark:text-emerald-400">
+                    {entrySuccessToast.message}
+                  </p>
+                  {entrySuccessToast.amount !== undefined && (
+                    <p className={cn(
+                      "text-sm font-black",
+                      entrySuccessToast.type === 'in' ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-450"
+                    )}>
+                      {entrySuccessToast.type === 'in' ? '+' : '-'}{formatCurrency(entrySuccessToast.amount)}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => setEntrySuccessToast(null)}
                 className={cn(
                   "p-1.5 rounded-lg transition-colors duration-200 shrink-0 cursor-pointer",
                   theme === 'dark' ? "hover:bg-slate-800 text-slate-400" : "hover:bg-slate-100 text-slate-500"

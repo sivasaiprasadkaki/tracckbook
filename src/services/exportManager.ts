@@ -1,5 +1,4 @@
 import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { addPdfBrandingFooter } from '../utils/pdfBranding';
 import XLSX from 'xlsx-js-style';
 import { uploadToCloudinary, getUserCloudinaryFolder, getExportOptimizedCloudinaryUrl } from './cloudinary';
@@ -1284,170 +1283,7 @@ export class BackgroundExportManager {
       return dateA - dateB;
     });
 
-    const totalIn = sortedTxs.filter(t => t.type === 'in').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-    const totalOut = sortedTxs.filter(t => t.type === 'out').reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-    const netBalance = totalIn - totalOut;
-
-    const dates = sortedTxs
-      .map(t => new Date(t.date || t.created_at || 0).getTime())
-      .filter(ts => !isNaN(ts) && ts > 0);
-    const dateRangeStr = dates.length > 0
-      ? `${new Date(Math.min(...dates)).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} – ${new Date(Math.max(...dates)).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
-      : 'All Transactions';
-
-    const nowFormatted = new Date().toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-
-    // 1. Top Indigo Accent Line
-    doc.setFillColor(79, 70, 229);
-    doc.rect(14, 10, pageWidth - 28, 2, 'F');
-
-    // 2. TrackBook Brand & Title
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.setTextColor(79, 70, 229);
-    doc.text('TrackBook', 14, 20);
-
-    doc.setFontSize(12);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`CASHBOOK STATEMENT — ${task.cashbookName.toUpperCase()}`, 14, 27);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`Statement Period: ${dateRangeStr}  |  Generated: ${nowFormatted}  |  Entries: ${sortedTxs.length}`, 14, 33);
-
-    // 3. Three Financial Summary Cards
-    const margin = 14;
-    const cardGap = 4;
-    const cardWidth = (pageWidth - (margin * 2) - (cardGap * 2)) / 3;
-    const cardY = 37;
-    const cardHeight = 15;
-
-    // Total Cash In Card
-    doc.setFillColor(236, 253, 245);
-    doc.setDrawColor(167, 243, 208);
-    doc.roundedRect(margin, cardY, cardWidth, cardHeight, 2, 2, 'FD');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
-    doc.setTextColor(5, 150, 105);
-    doc.text('TOTAL CASH IN', margin + 3.5, cardY + 5);
-    doc.setFontSize(10);
-    doc.text(`Rs. ${totalIn.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, margin + 3.5, cardY + 11.5);
-
-    // Total Cash Out Card
-    const card2X = margin + cardWidth + cardGap;
-    doc.setFillColor(255, 241, 242);
-    doc.setDrawColor(254, 205, 211);
-    doc.roundedRect(card2X, cardY, cardWidth, cardHeight, 2, 2, 'FD');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
-    doc.setTextColor(225, 29, 72);
-    doc.text('TOTAL CASH OUT', card2X + 3.5, cardY + 5);
-    doc.setFontSize(10);
-    doc.text(`Rs. ${totalOut.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, card2X + 3.5, cardY + 11.5);
-
-    // Net Balance Card
-    const card3X = margin + (cardWidth + cardGap) * 2;
-    doc.setFillColor(238, 242, 255);
-    doc.setDrawColor(199, 210, 254);
-    doc.roundedRect(card3X, cardY, cardWidth, cardHeight, 2, 2, 'FD');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
-    doc.setTextColor(67, 56, 202);
-    doc.text('NET BALANCE', card3X + 3.5, cardY + 5);
-    doc.setFontSize(10);
-    const balancePrefix = netBalance >= 0 ? '+' : '';
-    doc.text(`${balancePrefix}Rs. ${netBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, card3X + 3.5, cardY + 11.5);
-
-    // 4. Build Transactions Table with Running Balance
-    let runningBalance = 0;
-    const tableBody = sortedTxs.map((t, idx) => {
-      const isIn = t.type === 'in';
-      const amt = Number(t.amount) || 0;
-      if (isIn) {
-        runningBalance += amt;
-      } else {
-        runningBalance -= amt;
-      }
-
-      const formattedIn = isIn ? `Rs. ${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-';
-      const formattedOut = !isIn ? `Rs. ${amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-';
-      const formattedBal = `${runningBalance >= 0 ? '' : '-'}Rs. ${Math.abs(runningBalance).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      const hasReceipt = t.images && t.images.length > 0 ? `Yes (${t.images.length})` : '-';
-
-      return [
-        idx + 1,
-        safeFormatDate(t.date || t.created_at),
-        t.description || 'Entry',
-        t.category || 'General',
-        t.mode || 'Cash',
-        formattedIn,
-        formattedOut,
-        formattedBal,
-        hasReceipt
-      ];
-    });
-
-    autoTable(doc, {
-      startY: 56,
-      margin: { left: 14, right: 14, bottom: 20 },
-      head: [['#', 'Date', 'Details / Description', 'Category', 'Mode', 'Cash In', 'Cash Out', 'Balance', 'Bill']],
-      body: tableBody,
-      theme: 'striped',
-      headStyles: {
-        fillColor: [30, 41, 59],
-        textColor: [255, 255, 255],
-        fontStyle: 'bold',
-        fontSize: 7.5,
-        halign: 'left'
-      },
-      styles: {
-        fontSize: 7.5,
-        cellPadding: 2,
-        textColor: [30, 41, 59],
-        overflow: 'linebreak'
-      },
-      alternateRowStyles: {
-        fillColor: [248, 250, 252]
-      },
-      columnStyles: {
-        0: { halign: 'center', cellWidth: 8 },
-        1: { cellWidth: 20 },
-        2: { cellWidth: 'auto' },
-        3: { cellWidth: 20 },
-        4: { cellWidth: 16 },
-        5: { halign: 'right', fontStyle: 'bold', textColor: [5, 150, 105], cellWidth: 22 },
-        6: { halign: 'right', fontStyle: 'bold', textColor: [225, 29, 72], cellWidth: 22 },
-        7: { halign: 'right', fontStyle: 'bold', cellWidth: 22 },
-        8: { halign: 'center', cellWidth: 14 }
-      },
-      foot: [[
-        '',
-        '',
-        'TOTAL / BALANCE',
-        '',
-        '',
-        `Rs. ${totalIn.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        `Rs. ${totalOut.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        `${balancePrefix}Rs. ${Math.abs(netBalance).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        ''
-      ]],
-      footStyles: {
-        fillColor: [241, 245, 249],
-        textColor: [15, 23, 42],
-        fontStyle: 'bold',
-        fontSize: 8,
-        halign: 'right'
-      }
-    });
-
-    // 5. Helpers for image attachments
+    // 1. Helpers for image attachments (PDF contains direct receipt images without statement tables)
     const parseUrlMetadata = (url: string) => {
       if (!url || typeof url !== 'string') return { rotate: 0, fit: 'original' as const };
       const hashIdx = url.indexOf('#');
@@ -1559,17 +1395,21 @@ export class BackgroundExportManager {
       }
     };
 
-    // 6. Attachment Pages (if any transactions have receipt images)
+    // 6. Attachment Pages (Directly start with images - no statement tables)
     const transactionsWithImages = sortedTxs.filter(t => t.images && t.images.length > 0);
     if (transactionsWithImages.length > 0) {
       let receiptNumber = 0;
+      let isFirstPage = true;
       for (const t of transactionsWithImages) {
         if (!t.images || t.images.length === 0) continue;
         const layout = t.imageLayout || 'split';
 
         if (layout === 'merge') {
           for (let i = 0; i < t.images.length; i += 2) {
-            doc.addPage();
+            if (!isFirstPage) {
+              doc.addPage();
+            }
+            isFirstPage = false;
             receiptNumber++;
 
             doc.setFillColor(79, 70, 229);
@@ -1620,7 +1460,10 @@ export class BackgroundExportManager {
         } else {
           // Split layout: 1 image per page
           for (const img of t.images) {
-            doc.addPage();
+            if (!isFirstPage) {
+              doc.addPage();
+            }
+            isFirstPage = false;
             receiptNumber++;
 
             doc.setFillColor(79, 70, 229);
@@ -1658,6 +1501,14 @@ export class BackgroundExportManager {
           }
         }
       }
+    } else {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(79, 70, 229);
+      doc.text('TrackBook', 14, 20);
+      doc.setFontSize(11);
+      doc.setTextColor(100, 116, 139);
+      doc.text('No image attachments found in this cashbook.', 14, 30);
     }
 
     // 7. Add professional TrackBook Branding Footer on every page
