@@ -242,7 +242,7 @@ app.get("/api/gemini/health", async (req, res) => {
 // Vite & Static file handler
 async function setupViteOrStatic() {
   const distPath = path.join(process.cwd(), "dist");
-  const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(distPath);
+  const isProduction = process.env.NODE_ENV === "production";
 
   if (!isProduction) {
     console.log("[Server] Configuring Vite Dev Middleware...");

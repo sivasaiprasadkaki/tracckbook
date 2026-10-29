@@ -329,18 +329,49 @@ const workerBlobCode = `
             return;
           }
 
-          const controller = new AbortController();
-          const timerId = setTimeout(() => {
-            try { controller.abort(); } catch (_) {}
-          }, 4500);
+          let response;
+          try {
+            const controller = new AbortController();
+            const timerId = setTimeout(() => {
+              try { controller.abort(); } catch (_) {}
+            }, 12000);
 
-          const response = await fetch(targetUrl, { signal: controller.signal });
-          clearTimeout(timerId);
+            response = await fetch(targetUrl, { signal: controller.signal });
+            clearTimeout(timerId);
+          } catch (firstErr) {
+            // If optimized URL fails or times out, fallback to raw URL immediately
+            if (targetUrl !== url) {
+              try {
+                const controller2 = new AbortController();
+                const timerId2 = setTimeout(() => {
+                  try { controller2.abort(); } catch (_) {}
+                }, 12000);
+                response = await fetch(url, { signal: controller2.signal });
+                clearTimeout(timerId2);
+              } catch (_) {
+                throw firstErr;
+              }
+            } else {
+              throw firstErr;
+            }
+          }
 
-          if (!response.ok) throw new Error('HTTP ' + response.status);
+          if (!response || !response.ok) {
+            // Try raw url if targetUrl returned 404/non-200
+            if (targetUrl !== url) {
+              const controller3 = new AbortController();
+              const timerId3 = setTimeout(() => {
+                try { controller3.abort(); } catch (_) {}
+              }, 12000);
+              response = await fetch(url, { signal: controller3.signal });
+              clearTimeout(timerId3);
+            }
+          }
+
+          if (!response || !response.ok) throw new Error('HTTP ' + (response ? response.status : 'no response'));
           const blob = await response.blob();
           const buffer = await blob.arrayBuffer();
-          results[url] = { buffer, type: blob.type };
+          results[url] = { buffer, type: blob.type || 'image/jpeg' };
         } catch (err) {
           console.warn('[Worker debug] Fetch failed or timed out:', url, err);
           results[url] = { error: err.message || 'Error downloading image' };
@@ -1310,7 +1341,63 @@ export class BackgroundExportManager {
         };
         const tId = setTimeout(() => {
           finish({ src, width: 300, height: 400, isDataUrl: src.startsWith('data:') });
-        }, 3000);
+        }, 15000);
+
+        const tryFetchFallback = async () => {
+          try {
+            const res = await fetch(src, { mode: 'cors' });
+            if (!res.ok) throw new Error('Fetch status ' + res.status);
+            const blob = await res.blob();
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              if (typeof reader.result === 'string') {
+                const img2 = new Image();
+                img2.onload = () => {
+                  try {
+                    const origWidth = img2.naturalWidth || img2.width || 300;
+                    const origHeight = img2.naturalHeight || img2.height || 400;
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) {
+                      finish({ src: reader.result as string, width: origWidth, height: origHeight, isDataUrl: true });
+                      return;
+                    }
+                    const angleRad = ((rotate || 0) * Math.PI) / 180;
+                    const is90or270 = rotate === 90 || rotate === 270;
+                    const targetWidth = is90or270 ? origHeight : origWidth;
+                    const targetHeight = is90or270 ? origWidth : origHeight;
+                    canvas.width = targetWidth;
+                    canvas.height = targetHeight;
+                    if (rotate !== 0) {
+                      ctx.translate(targetWidth / 2, targetHeight / 2);
+                      ctx.rotate(angleRad);
+                      ctx.drawImage(img2, -origWidth / 2, -origHeight / 2, origWidth, origHeight);
+                    } else {
+                      ctx.drawImage(img2, 0, 0, targetWidth, targetHeight);
+                    }
+                    const quality = isOriginalQuality ? 0.95 : 0.8;
+                    const rotatedSrc = canvas.toDataURL('image/jpeg', quality);
+                    finish({ src: rotatedSrc, width: targetWidth, height: targetHeight, isDataUrl: true });
+                  } catch (_) {
+                    finish({ src: reader.result as string, width: 300, height: 400, isDataUrl: true });
+                  }
+                };
+                img2.onerror = () => {
+                  finish({ src: reader.result as string, width: 300, height: 400, isDataUrl: true });
+                };
+                img2.src = reader.result as string;
+              } else {
+                finish({ src, width: 300, height: 400, isDataUrl: src.startsWith('data:') });
+              }
+            };
+            reader.onerror = () => {
+              finish({ src, width: 300, height: 400, isDataUrl: src.startsWith('data:') });
+            };
+            reader.readAsDataURL(blob);
+          } catch (e) {
+            finish({ src, width: 300, height: 400, isDataUrl: src.startsWith('data:') });
+          }
+        };
 
         const img = new Image();
         img.crossOrigin = 'anonymous';
@@ -1346,11 +1433,19 @@ export class BackgroundExportManager {
             const rotatedSrc = canvas.toDataURL('image/jpeg', quality);
             finish({ src: rotatedSrc, width: targetWidth, height: targetHeight, isDataUrl: true });
           } catch (_) {
-            finish({ src, width: 300, height: 400, isDataUrl: src.startsWith('data:') });
+            if (src.startsWith('http')) {
+              tryFetchFallback();
+            } else {
+              finish({ src, width: 300, height: 400, isDataUrl: src.startsWith('data:') });
+            }
           }
         };
         img.onerror = () => {
-          finish({ src, width: 300, height: 400, isDataUrl: src.startsWith('data:') });
+          if (src.startsWith('http')) {
+            tryFetchFallback();
+          } else {
+            finish({ src, width: 300, height: 400, isDataUrl: src.startsWith('data:') });
+          }
         };
         img.src = src;
       });

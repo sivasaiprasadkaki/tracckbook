@@ -2443,12 +2443,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         }
       } else if (action.type === 'transaction') {
         console.log('[DelayedDelete] Committing transaction deletion to database:', action.data.id);
-        const { error } = await supabase
-          .from('entries')
-          .delete()
-          .eq('id', action.data.id);
-        if (error) {
-          console.error('[DelayedDelete] Failure committing transaction deletion:', error);
+        const [entryRes] = await Promise.all([
+          supabase.from('entries').delete().eq('id', action.data.id),
+          supabase.from('attachments').delete().eq('entry_id', action.data.id),
+          supabase.from('ai_attachments').delete().eq('entry_id', action.data.id)
+        ]);
+        attachmentCache.delete(action.data.id);
+        persistAttachmentCacheToStorage();
+        if (entryRes.error) {
+          console.error('[DelayedDelete] Failure committing transaction deletion:', entryRes.error);
           setBooks(prevBooks => prevBooks.map(b => {
             if (b.id === action.parentBookId) {
               const nextTx = [...b.transactions];
@@ -2458,18 +2461,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             }
             return b;
           }));
-          setError(`Failed to delete transaction: ${error.message || 'Database error'}. Transaction restored.`);
+          setError(`Failed to delete transaction: ${entryRes.error.message || 'Database error'}. Transaction restored.`);
         }
       } else if (action.type === 'bulk_transactions') {
         const ids = action.data.map((t: any) => t.id);
         console.log('[DelayedDelete] Committing bulk transaction deletion to database:', ids);
-        const { error } = await supabase
-          .from('entries')
-          .delete()
-          .in('id', ids);
-        if (error) {
-          console.error('[DelayedDelete] Failure committing bulk transaction deletion:', error);
-          setError(`Failed to delete transactions: ${error.message || 'Database error'}. Transactions restored.`);
+        const [bulkRes] = await Promise.all([
+          supabase.from('entries').delete().in('id', ids),
+          supabase.from('attachments').delete().in('entry_id', ids),
+          supabase.from('ai_attachments').delete().in('entry_id', ids)
+        ]);
+        ids.forEach((id: string) => attachmentCache.delete(id));
+        persistAttachmentCacheToStorage();
+        if (bulkRes.error) {
+          console.error('[DelayedDelete] Failure committing bulk transaction deletion:', bulkRes.error);
+          setError(`Failed to delete transactions: ${bulkRes.error.message || 'Database error'}. Transactions restored.`);
         }
       }
     } catch (err: any) {
@@ -4504,17 +4510,27 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             }
           }
 
-          // Clean up removed attachments
+          // Clean up removed attachments from BOTH attachments and ai_attachments tables
+          // Note: Only removes database records from backend; leaves cloud files intact
           const keptImages = finalImages.filter(img => !img.startsWith('blob:') && !img.startsWith('data:'));
-          let deleteQuery = supabase.from('attachments').delete().eq('entry_id', editId);
+          let deleteAttachmentsQuery = supabase.from('attachments').delete().eq('entry_id', editId);
+          let deleteAiQuery = supabase.from('ai_attachments').delete().eq('entry_id', editId);
+
           if (keptImages.length > 0) {
-            deleteQuery = deleteQuery.not('file_url', 'in', `(${keptImages.map(x => `"${x}"`).join(',')})`);
+            const inFilter = `(${keptImages.map(x => `"${x}"`).join(',')})`;
+            deleteAttachmentsQuery = deleteAttachmentsQuery.not('file_url', 'in', inFilter);
+            deleteAiQuery = deleteAiQuery.not('file_url', 'in', inFilter);
           }
-          await deleteQuery;
+
+          await Promise.allSettled([
+            deleteAttachmentsQuery,
+            deleteAiQuery
+          ]);
         }
 
-        // Update local caches
+        // Update local caches and immediately persist to localStorage
         attachmentCache.set(editId, { images: finalImages, isAi: false });
+        persistAttachmentCacheToStorage();
         const currCached = entriesCache.get(activeBookId);
         if (currCached) {
           entriesCache.set(activeBookId, currCached.map(t => t.id === editId ? {
@@ -7243,45 +7259,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             </button>
                           );
                         })}
-
-                        <div className="border-t border-slate-100 dark:border-zinc-900/60 my-1.5" />
-
-                        {/* Actions Section */}
-                        <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-zinc-500 mb-1">
-                          Book Actions
-                        </div>
-                        <button 
-                          onClick={() => { setShowBookMenu(false); setShowImportModal(true); }}
-                          className={cn(
-                            "w-full flex items-center gap-3 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs mb-1",
-                            theme === 'dark' 
-                              ? "bg-amber-950/20 border-amber-900/40 text-amber-400 hover:bg-amber-950/45" 
-                              : "bg-amber-50/50 border-amber-100/70 text-amber-800 hover:bg-amber-50"
-                          )}
-                        >
-                          <DownloadCloud size={14} className="text-amber-500 shrink-0" />
-                          <span className="font-bold">Import Entries</span>
-                        </button>
-
-                        <button 
-                          onClick={() => {
-                            if (activeBook) {
-                              setShowBookMenu(false);
-                              vibrate(50);
-                              setDeleteConfirmId(activeBook.id);
-                              setDeleteConfirmed(false);
-                            }
-                          }}
-                          className={cn(
-                            "w-full flex items-center gap-3 p-2 rounded-xl transition-all cursor-pointer text-left border shadow-sm text-xs",
-                            theme === 'dark' 
-                              ? "bg-rose-950/20 border-rose-900/40 text-rose-400 hover:bg-rose-950/45" 
-                              : "bg-rose-50/50 border-rose-100/70 text-rose-700 hover:bg-rose-50"
-                          )}
-                        >
-                          <Trash2 size={14} className="text-rose-500 shrink-0" />
-                          <span className="font-bold">Delete Cashbook</span>
-                        </button>
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -8739,13 +8716,21 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     onClick={() => {
                       if (activeBook) {
                         vibrate(15);
-                        const txs = (filteredTransactions && filteredTransactions.length > 0)
+                        const rawTxs = (filteredTransactions && filteredTransactions.length > 0)
                           ? filteredTransactions
                           : (activeBook.transactions || []);
-                        if (!txs || txs.length === 0) {
+                        if (!rawTxs || rawTxs.length === 0) {
                           alert('No transactions found to export in this cashbook.');
                           return;
                         }
+                        const txs = rawTxs.map((t: any) => {
+                          const cached = attachmentCache.get(t.id);
+                          const images = (cached?.images && cached.images.length > 0) ? cached.images : (t.images || []);
+                          return {
+                            ...t,
+                            images
+                          };
+                        });
                         setPdfQualityModalState({
                           isOpen: true,
                           cashbookId: activeBook.id,
@@ -9081,97 +9066,73 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         )}
       </AnimatePresence>
 
-      {/* AI Upload Warning Modal */}
+      {/* AI Upload Status Popup Modal */}
       <AnimatePresence>
         {showAiWarning && (
-          <div className={cn(
-            "fixed inset-0 z-[120] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
-            theme === 'dark' ? "bg-black/60" : "bg-indigo-900/10"
-          )}>
+          <div 
+            onClick={() => setShowAiWarning(false)}
+            className={cn(
+              "fixed inset-0 z-[120] flex items-center justify-center p-4 backdrop-blur-md transition-colors duration-300",
+              theme === 'dark' ? "bg-black/70" : "bg-slate-900/40"
+            )}
+          >
             <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
+              initial={{ opacity: 0, scale: 0.92, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 12 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+              onClick={(e) => e.stopPropagation()}
               className={cn(
-                "w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 text-left transition-colors duration-300",
-                theme === 'dark' ? "bg-zinc-950 border border-zinc-900 text-white" : "bg-white border border-slate-100 text-slate-800"
+                "w-full max-w-md rounded-3xl p-6 sm:p-7 shadow-2xl text-center space-y-5 transition-colors duration-300 border relative overflow-hidden",
+                theme === 'dark' 
+                  ? "bg-zinc-950 border-zinc-800 text-white" 
+                  : "bg-white border-slate-200 text-slate-800"
               )}
             >
-              <div className="flex items-center gap-3 border-b border-slate-100 dark:border-zinc-900 pb-3">
-                <span className="text-xl">⚠️</span>
-                <h3 className="text-sm font-black tracking-tight font-sans uppercase">
-                  TrackBook AI (Testing Phase)
+              {/* Decorative background glow */}
+              <div className="absolute -top-16 -left-16 w-36 h-36 bg-indigo-500/15 rounded-full blur-2xl pointer-events-none" />
+              <div className="absolute -bottom-16 -right-16 w-36 h-36 bg-purple-500/15 rounded-full blur-2xl pointer-events-none" />
+
+              {/* Icon badge */}
+              <div className="flex justify-center">
+                <div className={cn(
+                  "w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg transition-transform",
+                  theme === 'dark'
+                    ? "bg-indigo-950/80 border border-indigo-800/60 text-indigo-400 shadow-indigo-950/50"
+                    : "bg-indigo-50 border border-indigo-100 text-indigo-600 shadow-indigo-100/50"
+                )}>
+                  <Sparkles size={32} className="animate-pulse" />
+                </div>
+              </div>
+
+              {/* Headline */}
+              <div className="space-y-2">
+                <span className="inline-block px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider rounded-full bg-indigo-100/80 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800/40">
+                  Coming Soon
+                </span>
+                <h3 className="text-base sm:text-lg font-black tracking-tight text-slate-900 dark:text-white uppercase leading-snug">
+                  WE ARE WORKING AS SOON AS POSSIBLE IT WILL BE LIVE
                 </h3>
-              </div>
-
-              <div className="space-y-3 font-sans text-xs">
-                <p className="font-semibold text-slate-500 dark:text-zinc-400 leading-relaxed">
-                  TrackBook AI is currently under active testing.
-                </p>
-                <p className="font-semibold text-slate-500 dark:text-zinc-400 leading-relaxed">
-                  While most receipts are processed correctly, some receipts may occasionally produce incorrect:
-                </p>
-                <ul className="list-disc list-inside space-y-1 pl-1 font-bold text-slate-700 dark:text-zinc-300">
-                  <li>Amounts</li>
-                  <li>Dates</li>
-                  <li>Merchant Names</li>
-                  <li>Categories</li>
-                  <li>Food / Travel Classification</li>
-                </ul>
-                <p className="font-bold text-slate-600 dark:text-zinc-300 leading-relaxed">
-                  Please verify extracted information before saving.
+                <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed font-medium max-w-xs mx-auto">
+                  Our team is actively upgrading the AI bill scanning model for maximum speed and accuracy. This feature will be live shortly!
                 </p>
               </div>
 
-              {/* Checkbox block */}
-              <div 
-                className="p-3 rounded-xl bg-slate-50 dark:bg-zinc-900/40 border border-slate-100 dark:border-zinc-900 flex items-start gap-2.5 cursor-pointer select-none"
-                onClick={() => setAiWarningChecked(!aiWarningChecked)}
-              >
-                <input
-                  type="checkbox"
-                  id="chk-ai-agreement"
-                  checked={aiWarningChecked}
-                  onChange={(e) => setAiWarningChecked(e.target.checked)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-4.5 w-4.5 cursor-pointer"
-                />
-                <label 
-                  htmlFor="chk-ai-agreement" 
-                  className="text-[11px] font-black text-slate-500 dark:text-zinc-400 leading-normal cursor-pointer"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  I understand that AI extraction may occasionally be inaccurate and I will review detected information before saving.
-                </label>
-              </div>
-
-              {/* Cancel / Continue Buttons */}
-              <div className="flex gap-3 pt-2">
-                <button 
-                  onClick={() => { setShowAiWarning(false); setAiWarningChecked(false); }}
-                  className="flex-1 py-3 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button 
-                  disabled={!aiWarningChecked}
-                  onClick={() => { 
-                    setShowAiWarning(false); 
-                    setAiWarningChecked(false); // Reset for next time
-                    // Start the real AI upload setup
-                    vibrate(); 
-                    setAiWorkflowStep('group'); 
-                    setAiGroupSize(1);
-                    setAiFile(null);
-                    setAiFilePreviewUrl('');
-                    setAiConstructionModal('upload'); 
+              {/* Dismiss Button */}
+              <div className="pt-2">
+                <button
+                  onClick={() => {
+                    vibrate(30);
+                    setShowAiWarning(false);
                   }}
                   className={cn(
-                    "flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer",
-                    theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
+                    "w-full py-3.5 px-6 rounded-2xl font-black text-xs uppercase tracking-wider transition-all active:scale-[0.98] cursor-pointer shadow-md",
+                    theme === 'dark'
+                      ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-950"
+                      : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200"
                   )}
                 >
-                  Continue
+                  Got It
                 </button>
               </div>
             </motion.div>
