@@ -92,7 +92,10 @@ export default function DesktopSignIn({
           <div className="w-10 h-10 rounded-xl bg-[#4648d4] flex items-center justify-center text-white shadow-md shadow-[#4648d4]/20 hover:opacity-90 transition-opacity">
             <span className="material-symbols-outlined text-2xl">menu_book</span>
           </div>
-          <span className="text-xl font-bold tracking-tight text-[#4648d4] font-['Hanken_Grotesk',sans-serif]">
+          <span 
+            className="text-xl tracking-normal text-[#4648d4]"
+            style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 400 }}
+          >
             TrackBook
           </span>
         </motion.div>

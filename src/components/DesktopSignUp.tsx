@@ -296,7 +296,8 @@ export default function DesktopSignUp({
           </motion.div>
           <span 
             onClick={() => navigate('/')} 
-            className="text-xl font-bold tracking-tight text-[#4648d4] cursor-pointer font-['Hanken_Grotesk',sans-serif]"
+            className="text-xl tracking-normal text-[#4648d4] cursor-pointer"
+            style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 400 }}
           >
             TrackBook
           </span>

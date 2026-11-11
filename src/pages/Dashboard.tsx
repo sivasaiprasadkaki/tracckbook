@@ -591,6 +591,22 @@ const revalidatedEntries = new Set<string>();
 const inFlightAttachmentQueries = new Map<string, Promise<{ attachments: any[], aiAttachments: any[] }>>();
 const inFlightEntriesQueries = new Map<string, Promise<{ data: any[] | null; error: any }>>();
 const pendingDeletedBookIds = new Set<string>();
+const inFlightOptimisticEntryIds = new Set<string>();
+
+// Cross-device and cross-view instant synchronization helper
+function notifyCrossViewSync(bookId?: string | null) {
+  try {
+    if (typeof window !== 'undefined') {
+      const payload = JSON.stringify({ time: Date.now(), bookId });
+      localStorage.setItem('trackbook_sync_ping', payload);
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('trackbook_device_sync');
+        bc.postMessage(payload);
+        bc.close();
+      }
+    }
+  } catch (_) {}
+}
 
 // Fast, stable verified column selection for entries to eliminate sequential failed queries
 const ENTRY_COLUMNS = 'id, amount, type, description, category, mode, date, image_layout, cashbook_id, user_id, user_name';
@@ -2450,6 +2466,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         ]);
         attachmentCache.delete(action.data.id);
         persistAttachmentCacheToStorage();
+        notifyCrossViewSync(action.parentBookId);
         if (entryRes.error) {
           console.error('[DelayedDelete] Failure committing transaction deletion:', entryRes.error);
           setBooks(prevBooks => prevBooks.map(b => {
@@ -2473,6 +2490,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         ]);
         ids.forEach((id: string) => attachmentCache.delete(id));
         persistAttachmentCacheToStorage();
+        notifyCrossViewSync();
         if (bulkRes.error) {
           console.error('[DelayedDelete] Failure committing bulk transaction deletion:', bulkRes.error);
           setError(`Failed to delete transactions: ${bulkRes.error.message || 'Database error'}. Transactions restored.`);
@@ -2678,6 +2696,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [animatingDeleteId, setAnimatingDeleteId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(20);
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    isOpen: boolean;
+    existingTransaction: Transaction;
+    newTransactionData: {
+      amount: number;
+      type: 'in' | 'out';
+      description: string;
+      category: string;
+      mode: string;
+      date: Date;
+    };
+  } | null>(null);
   const [uploadStatuses, setUploadStatuses] = useState<Record<string, {
     status: 'uploading' | 'success' | 'failed';
     error?: string;
@@ -3260,10 +3290,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       }
     }
 
-    // 2. CACHE FRESHNESS CHECK: Skip remote call completely if book was loaded < 15 seconds ago
+    // 2. CACHE FRESHNESS CHECK: Skip remote call completely if book was loaded < 3 seconds ago
     if (activeBookId && !force) {
       const lastFetch = lastFetchTimeCache.get(activeBookId) || 0;
-      const isCacheFresh = (now - lastFetch) < 15000; // 15 seconds threshold
+      const isCacheFresh = (now - lastFetch) < 3000; // 3 seconds threshold
       if (isCacheFresh && entriesCache.has(activeBookId)) {
         console.log('[fetchData] Skipping remote fetch because cache is fresh for active book:', activeBookId);
         setIsEntriesLoading(false);
@@ -3369,8 +3399,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               const prevActiveBook = prevBooks.find(pb => pb.id === cb.id);
               const prevTxs = prevActiveBook ? (prevActiveBook.transactions || []) : [];
               const fetchedIds = new Set(activeBookEntries.map((e: any) => e.id));
-              // CRITICAL: Preserve any pending optimistic transactions so remote fetch never wipes freshly added entries!
-              const pendingOptimistic = prevTxs.filter((t: any) => !fetchedIds.has(t.id));
+              // CRITICAL: Preserve only genuinely in-flight optimistic transactions so deleted entries aren't resurrected
+              const pendingOptimistic = prevTxs.filter((t: any) => !fetchedIds.has(t.id) && inFlightOptimisticEntryIds.has(t.id));
               entriesToUse = [...pendingOptimistic, ...(activeBookEntries.length > 0 ? activeBookEntries : (entriesCache.get(cb.id) || []))];
             } else if (entriesCache.has(cb.id)) {
               entriesToUse = entriesCache.get(cb.id) || [];
@@ -3552,6 +3582,123 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   useEffect(() => {
     fetchData();
   }, [session, fetchData]);
+
+  // 1. Live Supabase Realtime WebSocket Channels: Cross-device instant sync (Mobile <-> Desktop)
+  useEffect(() => {
+    if (!supabase || !session?.user?.id) return;
+
+    console.log('[Realtime] Setting up instant cross-device realtime subscription...');
+    const channelName = `realtime_sync_${session.user.id}_${Date.now()}`;
+    const channel = supabase.channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'entries',
+          filter: `user_id=eq.${session.user.id}`
+        },
+        (payload) => {
+          console.log('[Realtime] Live change on entries table from another device:', payload.eventType);
+          if (activeBookId) {
+            lastFetchTimeCache.delete(activeBookId);
+          }
+          fetchData(true);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'cashbooks',
+          filter: `user_id=eq.${session.user.id}`
+        },
+        (payload) => {
+          console.log('[Realtime] Live change on cashbooks table from another device:', payload.eventType);
+          cachedCashbooks = null;
+          fetchData(true);
+        }
+      )
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Realtime] Successfully connected to live cross-device sync channel.');
+        } else if (err) {
+          console.warn('[Realtime] Realtime subscription notice:', err);
+        }
+      });
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+      } catch (_) {}
+    };
+  }, [session?.user?.id, activeBookId, fetchData]);
+
+  // 2. Cross-View / Cross-Tab Instant Sync (BroadcastChannel & Storage Event)
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const handleSyncSignal = () => {
+      console.log('[CrossViewSync] Immediate sync signal received across views/tabs.');
+      if (activeBookId) {
+        lastFetchTimeCache.delete(activeBookId);
+      }
+      fetchData(true);
+    };
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        bc = new BroadcastChannel('trackbook_device_sync');
+        bc.onmessage = handleSyncSignal;
+      } catch (_) {}
+    }
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'trackbook_sync_ping') {
+        handleSyncSignal();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      if (bc) {
+        try { bc.close(); } catch (_) {}
+      }
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [session?.user?.id, activeBookId, fetchData]);
+
+  // 3. Instant Screen Focus / Visibility Change & Heartbeat Sync (Mobile wake-up & app switch)
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        if (activeBookId) {
+          lastFetchTimeCache.delete(activeBookId);
+        }
+        fetchData(true);
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    // Fast periodic heartbeat: recheck every 4 seconds when tab is active
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchData(true);
+      }
+    }, 4000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+      clearInterval(intervalId);
+    };
+  }, [session?.user?.id, activeBookId, fetchData]);
 
   // Automatic migration utility for legacy base64 images in database tables
   useEffect(() => {
@@ -3966,6 +4113,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             user_name: effectiveUserName
           }]);
         if (error) throw error;
+        notifyCrossViewSync();
       } catch (error) {
         console.error('Error creating book in Supabase:', error);
         // If it fails, we might want to revert local state, but usually it's fine
@@ -3986,6 +4134,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           .update({ name: editBookName })
           .eq('id', isEditingBook);
         if (error) throw error;
+        notifyCrossViewSync();
       } catch (error) {
         console.error('Error updating book in Supabase:', error);
       }
@@ -4221,7 +4370,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     uploadSingleImageInBackground(blobUrl, transactionId, cloudinaryFolder);
   };
 
-  const handleAddTransaction = async (e?: React.FormEvent) => {
+  const handleAddTransaction = async (e?: React.FormEvent, bypassDuplicateCheck: boolean = false) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!activeBookId || !showForm || !session) return;
 
@@ -4252,6 +4401,56 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     const finalCategory = category === 'Custom' ? customCategory : category;
     const finalMode = mode === 'Custom' ? customMode : mode;
     const dateObj = new Date(transactionDate);
+
+    // Duplicate Entry Detection:
+    // When date (same calendar day), amount, and details match an existing transaction in the active cashbook
+    if (!bypassDuplicateCheck && activeBook) {
+      const isEdit = !!editingTransaction;
+      const cleanDesc = description.trim().toLowerCase();
+      const targetY = dateObj.getFullYear();
+      const targetM = dateObj.getMonth();
+      const targetD = dateObj.getDate();
+
+      const matchingEntry = (activeBook.transactions || []).find(t => {
+        // Exclude self if editing
+        if (isEdit && editingTransaction && t.id === editingTransaction.id) {
+          return false;
+        }
+
+        // Amount matching (numeric equality)
+        const amountMatches = Math.abs(Number(t.amount) - amountNum) < 0.001;
+        if (!amountMatches) return false;
+
+        // Details / Description matching (case-insensitive & trimmed)
+        const descMatches = (t.description || '').trim().toLowerCase() === cleanDesc;
+        if (!descMatches) return false;
+
+        // Date matching (same calendar day: YYYY-MM-DD)
+        const tDate = t.date instanceof Date ? t.date : new Date(t.date);
+        if (isNaN(tDate.getTime())) return false;
+        const isSameDay = tDate.getFullYear() === targetY && 
+                          tDate.getMonth() === targetM && 
+                          tDate.getDate() === targetD;
+        return isSameDay;
+      });
+
+      if (matchingEntry) {
+        vibrate([40, 60, 40]);
+        setDuplicateWarning({
+          isOpen: true,
+          existingTransaction: matchingEntry,
+          newTransactionData: {
+            amount: amountNum,
+            type: showForm,
+            description: description.trim(),
+            category: finalCategory || 'General',
+            mode: finalMode,
+            date: dateObj
+          }
+        });
+        return;
+      }
+    }
 
     setIsSubmitting(true);
     setError(null);
@@ -4305,6 +4504,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           : b
       ));
     } else {
+      inFlightOptimisticEntryIds.add(tempId);
       setBooks(prevBooks => prevBooks.map(b =>
         b.id === activeBookId
           ? { ...b, transactions: [optimisticTransaction, ...b.transactions] }
@@ -4325,6 +4525,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         source: 'Manual'
       }, ...currCached]);
     }
+
+    notifyCrossViewSync(activeBookId);
 
     // Trigger instant visual feedback and toast confirmation so user knows entry is added
     setEntrySuccessToast({
@@ -4774,6 +4976,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           });
         });
       }
+    } finally {
+      inFlightOptimisticEntryIds.delete(tempId);
+      notifyCrossViewSync(activeBookId);
     }
   };
 
@@ -6769,11 +6974,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           <div className="max-w-[98%] mx-auto h-full flex items-center justify-between gap-2 sm:gap-4">
             
             {/* Left: Logo */}
-            <div className="flex items-center gap-2 shrink-0 font-outfit">
-              <div className="flex items-center gap-1 leading-none">
-                <span className="font-black text-indigo-600 dark:text-indigo-400 text-sm sm:text-base tracking-tight">Track</span>
+            <div 
+              onClick={() => { vibrate(); setActiveBookId(null); }}
+              className="flex items-center shrink-0 cursor-pointer select-none"
+            >
+              <div 
+                className="flex items-center leading-none text-base sm:text-lg tracking-normal"
+                style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 400 }}
+              >
+                <span className="text-indigo-600 dark:text-indigo-400">Track</span>
                 <span className={cn(
-                  "font-black text-sm sm:text-base tracking-tight transition-colors duration-300",
+                  "transition-colors duration-300",
                   theme === 'dark' ? "text-slate-100" : "text-slate-800"
                 )}>Book</span>
               </div>
@@ -11300,6 +11511,152 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </button>
                   </div>
                 </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Duplicate Entry Warning Modal */}
+      <AnimatePresence>
+        {duplicateWarning && duplicateWarning.isOpen && duplicateWarning.existingTransaction && duplicateWarning.newTransactionData && (
+          <div 
+            onClick={() => setDuplicateWarning(null)}
+            className={cn(
+              "fixed inset-0 z-[150] flex items-center justify-center p-4 backdrop-blur-md transition-colors duration-300",
+              theme === 'dark' ? "bg-black/75" : "bg-slate-900/40"
+            )}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 14 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 14 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "w-full max-w-md rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 transition-colors duration-300 border relative overflow-hidden",
+                theme === 'dark' 
+                  ? "bg-zinc-950 border-zinc-800 text-white" 
+                  : "bg-white border-slate-200 text-slate-800"
+              )}
+            >
+              {/* Header Badge & Title */}
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/15 text-amber-500 flex items-center justify-center shrink-0 border border-amber-500/30">
+                  <AlertTriangle size={22} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                      Possible Duplicate
+                    </span>
+                    <button 
+                      onClick={() => setDuplicateWarning(null)}
+                      className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <h3 className="text-base font-black tracking-tight mt-1 text-slate-900 dark:text-white">
+                    Duplicate Entry Detected
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5 leading-relaxed">
+                    An entry with the same Date, Amount, and Details already exists in this cashbook.
+                  </p>
+                </div>
+              </div>
+
+              {/* Comparison Cards */}
+              <div className="space-y-2.5">
+                {/* Existing Entry */}
+                <div className={cn(
+                  "p-3.5 rounded-2xl border text-xs space-y-1.5 transition-colors",
+                  theme === 'dark' 
+                    ? "bg-zinc-900/60 border-zinc-800" 
+                    : "bg-slate-50 border-slate-200/80"
+                )}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                      Existing Record in Cashbook
+                    </span>
+                    <span className={cn(
+                      "font-black text-xs px-2 py-0.5 rounded-md",
+                      duplicateWarning.existingTransaction.type === 'in' 
+                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
+                        : "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                    )}>
+                      {duplicateWarning.existingTransaction.type === 'in' ? '+₹' : '-₹'}
+                      {Number(duplicateWarning.existingTransaction.amount).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                  <div className="font-bold text-slate-800 dark:text-slate-100 text-sm truncate">
+                    {duplicateWarning.existingTransaction.description}
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400">
+                    <span>{formatDateTime12h(duplicateWarning.existingTransaction.date)}</span>
+                    <span className="font-medium">{duplicateWarning.existingTransaction.category} • {duplicateWarning.existingTransaction.mode}</span>
+                  </div>
+                </div>
+
+                {/* New Entry */}
+                <div className={cn(
+                  "p-3.5 rounded-2xl border text-xs space-y-1.5 transition-colors",
+                  theme === 'dark' 
+                    ? "bg-indigo-950/20 border-indigo-900/40" 
+                    : "bg-indigo-50/40 border-indigo-200/60"
+                )}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-500">
+                      New Entry You Are Adding
+                    </span>
+                    <span className={cn(
+                      "font-black text-xs px-2 py-0.5 rounded-md",
+                      duplicateWarning.newTransactionData.type === 'in' 
+                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
+                        : "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                    )}>
+                      {duplicateWarning.newTransactionData.type === 'in' ? '+₹' : '-₹'}
+                      {Number(duplicateWarning.newTransactionData.amount).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                  <div className="font-bold text-slate-800 dark:text-slate-100 text-sm truncate">
+                    {duplicateWarning.newTransactionData.description}
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400">
+                    <span>{formatDateTime12h(duplicateWarning.newTransactionData.date)}</span>
+                    <span className="font-medium">{duplicateWarning.newTransactionData.category} • {duplicateWarning.newTransactionData.mode}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    vibrate(20);
+                    setDuplicateWarning(null);
+                  }}
+                  className={cn(
+                    "flex-1 py-3 px-4 rounded-xl border font-bold text-xs sm:text-sm transition-all cursor-pointer text-center",
+                    theme === 'dark'
+                      ? "border-zinc-800 text-slate-300 hover:bg-zinc-900"
+                      : "border-slate-200 text-slate-600 hover:bg-slate-100"
+                  )}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    vibrate(40);
+                    setDuplicateWarning(null);
+                    handleAddTransaction(undefined, true);
+                  }}
+                  className="flex-1 py-3 px-4 rounded-xl font-black text-xs sm:text-sm text-white bg-indigo-600 hover:bg-indigo-700 transition-all active:scale-95 cursor-pointer text-center shadow-lg shadow-indigo-500/20"
+                >
+                  Add Anyway
+                </button>
               </div>
             </motion.div>
           </div>

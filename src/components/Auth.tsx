@@ -99,12 +99,13 @@ export default function Auth({
     setSuccess(null);
 
     const redirectTo = window.location.origin;
+    const cleanEmail = email.trim().toLowerCase();
 
     try {
       if (mode === 'signup') {
         const trimmedName = fullName.trim();
         const { data, error } = await supabase.auth.signUp({
-          email: email.trim(),
+          email: cleanEmail,
           password,
           options: {
             emailRedirectTo: redirectTo,
@@ -126,7 +127,8 @@ export default function Auth({
             setError('This email is already registered. Please sign in or use Forgot Password.');
             return;
           }
-          throw error;
+          setError(error.message || 'Failed to create account.');
+          return;
         }
 
         // Create initial profile if possible (without overwriting if already exists)
@@ -134,7 +136,7 @@ export default function Auth({
           try {
             await supabase.from('profiles').upsert({
               id: data.user.id,
-              email: email.trim(),
+              email: cleanEmail,
               full_name: trimmedName,
             }, { onConflict: 'id' });
           } catch (_) {}
@@ -146,22 +148,35 @@ export default function Auth({
         // Attempt login immediately
         try {
           const { error: autoSignInError } = await supabase.auth.signInWithPassword({
-            email: email.trim(),
+            email: cleanEmail,
             password,
           });
           if (!autoSignInError) {
             navigate('/cashbooks');
+            return;
           }
         } catch (_) {}
 
       } else if (mode === 'signin') {
-        const { error, data } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
+        const { error: signInError, data } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
           password,
         });
 
-        if (error) {
-          throw error;
+        if (signInError) {
+          const errMsg = signInError.message || '';
+          const isCredsError = errMsg.toLowerCase().includes('invalid login credentials') || 
+                               errMsg.toLowerCase().includes('invalid credential') || 
+                               errMsg.toLowerCase().includes('invalid_creds') ||
+                               (signInError as any).status === 400;
+          if (errMsg.toLowerCase().includes('email not confirmed')) {
+            setError('Email not confirmed. Please check your inbox or spam folder for the verification link.');
+          } else if (isCredsError) {
+            setError('Incorrect email or password. Please try again or use Forgot Password.');
+          } else {
+            setError(errMsg || 'An error occurred during authentication.');
+          }
+          return;
         }
 
         // Sync profile only if user exists and we have valid data (never overwrite valid existing name with empty/null)
@@ -171,7 +186,7 @@ export default function Auth({
             const metaName = meta.full_name || meta.name || meta.username || meta.user_name || meta.preferred_username;
             const profilePayload: any = {
               id: data.user.id,
-              email: data.user.email || email.trim(),
+              email: data.user.email || cleanEmail,
             };
             if (metaName && String(metaName).trim()) {
               profilePayload.full_name = String(metaName).trim();
@@ -184,7 +199,7 @@ export default function Auth({
         navigate('/cashbooks');
 
       } else if (mode === 'forgot') {
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
           redirectTo: `${window.location.origin}/resetpassword`
         });
 
@@ -196,18 +211,18 @@ export default function Auth({
         setSuccess('Password reset link sent successfully. Check your email.');
       }
     } catch (err: any) {
-      console.error('Auth error:', err);
-      const isCredsError = err.message?.toLowerCase().includes('invalid login credentials') || 
-                           err.message?.toLowerCase().includes('invalid credential') || 
-                           err.message?.toLowerCase().includes('invalid_creds');
+      console.warn('Auth notice:', err?.message || err);
+      const isCredsError = err?.message?.toLowerCase().includes('invalid login credentials') || 
+                           err?.message?.toLowerCase().includes('invalid credential') || 
+                           err?.message?.toLowerCase().includes('invalid_creds');
       if (mode === 'forgot') {
-        setError(err.message || 'An error occurred while sending the recovery email.');
-      } else if (err.message?.includes('Email not confirmed')) {
+        setError(err?.message || 'An error occurred while sending the recovery email.');
+      } else if (err?.message?.includes('Email not confirmed')) {
         setError('Email not confirmed. Please check your inbox or spam folder for the verification link.');
       } else if (isCredsError) {
-        setError('Incorrect email or password. Please try again.');
+        setError('Incorrect email or password. Please try again or use Forgot Password.');
       } else {
-        setError(err.message || 'An error occurred during authentication.');
+        setError(err?.message || 'An error occurred during authentication.');
       }
     } finally {
       setLoading(false);
