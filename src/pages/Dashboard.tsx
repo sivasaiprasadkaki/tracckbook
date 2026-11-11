@@ -718,8 +718,8 @@ function persistAttachmentCacheToStorage() {
     const obj: { [key: string]: { images: string[], isAi: boolean } } = {};
     let count = 0;
     attachmentCache.forEach((val, key) => {
-      // Limit to 400 keys to avoid hitting localStorage limit of ~5MB
-      if (count < 400) {
+      // Limit to 1000 keys to avoid hitting localStorage limit of ~5MB
+      if (count < 1000) {
         obj[key] = val;
         count++;
       }
@@ -1764,6 +1764,56 @@ async function fetchAttachmentsDeduplicated(entryIds: string[]): Promise<{ attac
   return queryPromise;
 }
 
+// Global flag to avoid repeated full prefetch runs per app session
+let hasPrefetchedUserAttachments = false;
+async function prefetchAllUserAttachments(userId: string) {
+  if (hasPrefetchedUserAttachments || !userId || !supabase) return;
+  hasPrefetchedUserAttachments = true;
+  try {
+    const startTime = performance.now();
+    const [manualRes, aiRes] = await Promise.all([
+      supabase.from('attachments').select('entry_id, file_url').eq('user_id', userId),
+      supabase.from('ai_attachments').select('entry_id, file_url').eq('user_id', userId)
+    ]);
+    const duration = performance.now() - startTime;
+    console.log(`[Performance] Global user attachments prefetch completed in ${duration.toFixed(2)}ms`);
+
+    const manualMap = new Map<string, string[]>();
+    (manualRes.data || []).forEach((a: any) => {
+      const list = manualMap.get(a.entry_id) || [];
+      list.push(a.file_url);
+      manualMap.set(a.entry_id, list);
+    });
+
+    const aiMap = new Map<string, string[]>();
+    (aiRes.data || []).forEach((a: any) => {
+      const list = aiMap.get(a.entry_id) || [];
+      list.push(a.file_url);
+      aiMap.set(a.entry_id, list);
+    });
+
+    let cacheChanged = false;
+    const allEntryIds = new Set([...manualMap.keys(), ...aiMap.keys()]);
+    allEntryIds.forEach(id => {
+      const manualImgs = (manualMap.get(id) || []).slice(0, 20);
+      const aiImgs = (aiMap.get(id) || []).slice(0, 20);
+      const combined = [...manualImgs, ...aiImgs];
+      const isAi = aiImgs.length > 0;
+      const cached = attachmentCache.get(id);
+      if (!cached || cached.images.length !== combined.length || cached.images[0] !== combined[0]) {
+        attachmentCache.set(id, { images: combined, isAi });
+        cacheChanged = true;
+      }
+    });
+
+    if (cacheChanged) {
+      persistAttachmentCacheToStorage();
+    }
+  } catch (err) {
+    console.warn('[Performance] Background prefetchAllUserAttachments error:', err);
+  }
+}
+
 // Helper to normalize strings for comparison (lower-case, trim, remove double-spaces)
 const normalizeString = (str: any): string => {
   if (!str) return '';
@@ -1991,9 +2041,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     setActiveBookIdState(id);
     if (id) {
       const cached = entriesCache.get(id);
-      const hasFetched = lastFetchTimeCache.has(id);
-      if (!cached || cached.length === 0 || !hasFetched) {
+      if (!cached || cached.length === 0) {
         setIsEntriesLoading(true);
+      } else {
+        setIsEntriesLoading(false);
       }
     } else {
       setIsEntriesLoading(false);
@@ -2733,6 +2784,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       const cached = entriesCache.get(activeBookId);
       if (!cached || cached.length === 0) {
         setIsEntriesLoading(true);
+      } else {
+        setIsEntriesLoading(false);
       }
     }
   }, [activeBookId]);
@@ -3202,26 +3255,45 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   // Pre-load from localStorage cache on mount/session ready to render UI instantly!
   useEffect(() => {
     if (session) {
+      // Eagerly prefetch all user attachments across books in background
+      prefetchAllUserAttachments(session.user.id);
+
       const savedBooks = localStorage.getItem(`cashbooks_${session.user.id}`);
       if (savedBooks) {
         try {
           const parsed = JSON.parse(savedBooks);
           // Set cachedCashbooks immediately to synchronize cache checks
           cachedCashbooks = parsed;
-          // Pre-populate entriesCache so we don't flash empty states on hard-refresh
+          // Pre-populate entriesCache with resolved attachments so we don't flash empty states on hard-refresh
           parsed.forEach((b: any) => {
             if (b.id && Array.isArray(b.transactions)) {
-              entriesCache.set(b.id, b.transactions);
+              const mappedTxs = b.transactions.map((t: any) => {
+                const cachedImg = attachmentCache.get(t.id);
+                const resolvedImgs = (t.images && t.images.length > 0) ? t.images : (cachedImg ? cachedImg.images : []);
+                return {
+                  ...t,
+                  date: new Date(t.date),
+                  images: resolvedImgs,
+                  isAi: cachedImg ? cachedImg.isAi : (t.isAi || false),
+                  source: t.source || (cachedImg?.isAi ? 'AI' : (t.isAi ? 'AI' : ((t.is_imported || t.imported_from_share_code) ? 'Imported' : 'Manual')))
+                };
+              });
+              entriesCache.set(b.id, mappedTxs);
             }
           });
           const mappedBooks = parsed.map((b: any) => ({
             ...b,
-            transactions: (b.transactions || []).map((t: any) => ({
-              ...t,
-              date: new Date(t.date),
-              images: t.images || [],
-              source: t.source || (t.isAi ? 'AI' : ((t.is_imported || t.imported_from_share_code) ? 'Imported' : 'Manual'))
-            })),
+            transactions: (b.transactions || []).map((t: any) => {
+              const cachedImg = attachmentCache.get(t.id);
+              const resolvedImgs = (t.images && t.images.length > 0) ? t.images : (cachedImg ? cachedImg.images : []);
+              return {
+                ...t,
+                date: new Date(t.date),
+                images: resolvedImgs,
+                isAi: cachedImg ? cachedImg.isAi : (t.isAi || false),
+                source: t.source || (cachedImg?.isAi ? 'AI' : (t.isAi ? 'AI' : ((t.is_imported || t.imported_from_share_code) ? 'Imported' : 'Manual')))
+              };
+            }),
             createdAt: new Date(b.created_at || b.createdAt)
           }));
           setBooks(mappedBooks);
@@ -3234,6 +3306,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               const cached = entriesCache.get(foundBook.id);
               if (!cached || cached.length === 0) {
                 setIsEntriesLoading(true);
+              } else {
+                setIsEntriesLoading(false);
               }
             }
           }
@@ -3418,12 +3492,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   attachmentCache.set(t.id, existing);
                 }
                 const importedCode = t.imported_from_share_code || t.importedFromShareCode;
+                const resolvedImages = (t.images && t.images.length > 0) ? t.images : (existing ? existing.images : (cached ? cached.images : []));
                 return {
                   ...t,
                   date: t.date ? new Date(t.date) : new Date(),
-                  images: existing ? existing.images : [],
+                  images: resolvedImages,
                   imageLayout: t.image_layout || 'split',
-                  isAi: existing ? existing.isAi : false,
+                  isAi: existing ? existing.isAi : (cached ? cached.isAi : false),
                   imported_from_share_code: importedCode,
                   is_imported: t.is_imported || !!importedCode,
                   import_batch_id: t.import_batch_id || importedCode,
@@ -3440,8 +3515,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
           const booksToPersist = cashbooks.map((cb: any) => ({
             ...cb,
             transactions: (cb.id === activeBookId ? activeBookEntries : (entriesCache.get(cb.id) || [])).map((t: any) => {
-              const { images, ...rest } = t;
-              return rest;
+              const cached = attachmentCache.get(t.id);
+              const resolvedImgs = (t.images && t.images.length > 0) ? t.images : (cached ? cached.images : []);
+              return {
+                ...t,
+                images: resolvedImgs,
+                isAi: cached ? cached.isAi : (t.isAi || false)
+              };
             })
           }));
           localStorage.setItem(`cashbooks_${session.user.id}`, JSON.stringify(booksToPersist));
@@ -3449,6 +3529,24 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
         if (activeBookId) {
           setIsEntriesLoading(false);
+
+          // Pre-warm browser image cache for top attachments so bill thumbnails render in 0ms
+          try {
+            const topUrls = (activeBookEntries || [])
+              .slice(0, 15)
+              .flatMap((e: any) => {
+                const att = attachmentCache.get(e.id);
+                return att ? att.images : (e.images || []);
+              })
+              .filter(Boolean);
+
+            topUrls.slice(0, 12).forEach((url: string) => {
+              if (url && typeof window !== 'undefined' && !url.startsWith('data:') && !url.startsWith('blob:')) {
+                const img = new Image();
+                img.src = getOptimizedCloudinaryUrl(url, 'preview');
+              }
+            });
+          } catch (_) {}
         }
 
         // Progressive, asynchronous lazy-loading of attachments to keep page responsive
