@@ -293,6 +293,46 @@ function formatDateTime12h(dateVal: any): string {
   return 'N/A';
 }
 
+function formatDisplayDateTime(val: string): string {
+  if (!val) {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    let hours = now.getHours();
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const formattedHours = String(hours).padStart(2, '0');
+    return `${day}/${month}/${year}, ${formattedHours}:${minutes} ${ampm}`;
+  }
+  try {
+    const [datePart, timePart] = val.split('T');
+    if (!datePart) return val;
+    const parts = datePart.split('-');
+    if (parts.length < 3) return val;
+    const [year, month, day] = parts;
+
+    let timeStr = '';
+    if (timePart) {
+      const [hStr, mStr] = timePart.split(':');
+      let h = parseInt(hStr, 10);
+      const m = mStr ? mStr.slice(0, 2) : '00';
+      if (!isNaN(h)) {
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        h = h % 12;
+        h = h ? h : 12;
+        const formattedHours = String(h).padStart(2, '0');
+        timeStr = `, ${formattedHours}:${m} ${ampm}`;
+      }
+    }
+    return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}${timeStr}`;
+  } catch (e) {
+    return val;
+  }
+}
+
 export interface BookNetBalanceInfo {
   text: string;
   isNegative: boolean;
@@ -11159,16 +11199,25 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Date & Time</label>
-                      <input
-                        type="datetime-local"
-                        value={transactionDate}
-                        onChange={(e) => setTransactionDate(e.target.value)}
-                        tabIndex={5}
-                        className={cn(
-                          "w-full h-[52px] px-4 py-3 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-medium transition-colors duration-300",
-                          theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
-                        )}
-                      />
+                      <div className="relative group">
+                        <div
+                          className={cn(
+                            "w-full h-[52px] px-4 py-3 rounded-xl border-none text-sm font-medium transition-colors duration-300 flex items-center justify-between select-none pointer-events-none group-focus-within:ring-2 group-focus-within:ring-indigo-500",
+                            theme === 'dark' ? "bg-slate-800 text-white" : "bg-slate-50 text-black"
+                          )}
+                        >
+                          <span className="font-semibold">{formatDisplayDateTime(transactionDate)}</span>
+                          <ChevronDown size={16} className="text-slate-400 group-hover:text-indigo-500 transition-colors shrink-0" />
+                        </div>
+                        <input
+                          type="datetime-local"
+                          value={transactionDate}
+                          onChange={(e) => setTransactionDate(e.target.value)}
+                          tabIndex={5}
+                          aria-label="Date & Time"
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                        />
+                      </div>
                     </div>
 
                     <div className="space-y-1.5">
