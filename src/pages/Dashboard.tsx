@@ -2786,7 +2786,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
   const [animatingDeleteId, setAnimatingDeleteId] = useState<string | null>(null);
-  const [visibleCount, setVisibleCount] = useState(20);
+  const [visibleCount, setVisibleCount] = useState(50);
   const [duplicateWarning, setDuplicateWarning] = useState<{
     isOpen: boolean;
     existingTransaction: Transaction;
@@ -4121,7 +4121,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   // Reset visibleCount whenever the selected book or filters change to keep viewport neat and clean
   useEffect(() => {
-    setVisibleCount(20);
+    setVisibleCount(50);
   }, [activeBookId, transactionSearchQuery, transactionTypeFilter, transactionCategoryFilter, transactionDurationFilter, customFilterDate]);
 
   // Pre-calculate running balances for transaction list items with smart cached incremental logic
@@ -4172,16 +4172,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     return { in: cashIn, out: cashOut };
   }, [selectedList]);
 
-  const {
-    startIndex: desktopStart,
-    endIndex: desktopEnd,
-    paddingTop: desktopPaddingTop,
-    paddingBottom: desktopPaddingBottom,
-  } = useVirtualWindow({
-    itemsCount: pagedTransactions.length,
-    itemHeight: 64,
-    containerRef: desktopTableRef,
-  });
 
   const {
     startIndex: mobileStart,
@@ -7426,11 +7416,11 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="w-full space-y-4 sm:space-y-6 pb-[180px] lg:pb-0"
+              className="w-full space-y-4 sm:space-y-6 pb-[180px] lg:pb-16"
             >
-              {/* STICKY TOP CONTROLS SECTION */}
+              {/* TOP CONTROLS SECTION */}
               <div className={cn(
-                "lg:sticky lg:top-0 z-30 transition-colors duration-300 border-b",
+                "transition-colors duration-300 border-b",
                 "-mt-2 pt-2 -mx-2 px-2 pb-3 mb-2",
                 "sm:-mt-4 sm:pt-4 sm:-mx-4 sm:px-4 sm:pb-4 sm:mb-4",
                 "lg:-mt-6 lg:pt-6 lg:-mx-6 lg:px-6 lg:pb-5 lg:mb-5",
@@ -8142,12 +8132,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             </tr>
                           ) : (
                             <>
-                              {desktopPaddingTop > 0 && (
-                                <tr style={{ height: `${desktopPaddingTop}px` }}>
-                                  <td colSpan={9} style={{ padding: 0, height: `${desktopPaddingTop}px` }} />
-                                </tr>
-                              )}
-                              {pagedTransactions.slice(desktopStart, desktopEnd + 1).map((t, index) => (
+                              {pagedTransactions.map((t, index) => (
                                 <DesktopTransactionRow
                                   key={t.id}
                                   t={t}
@@ -8168,11 +8153,6 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                   isJustEdited={justEditedTransactionId === t.id}
                                 />
                               ))}
-                              {desktopPaddingBottom > 0 && (
-                                <tr style={{ height: `${desktopPaddingBottom}px` }}>
-                                  <td colSpan={9} style={{ padding: 0, height: `${desktopPaddingBottom}px` }} />
-                                </tr>
-                              )}
                             </>
                           )}
 

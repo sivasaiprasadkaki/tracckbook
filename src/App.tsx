@@ -5,7 +5,6 @@ import { Loader2 } from 'lucide-react';
 import { cn } from './lib/utils';
 import SmartUpdateManager from './components/SmartUpdateManager';
 import AutoLogoutManager from './components/AutoLogoutManager';
-import SplashScreen from './components/SplashScreen';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Login = lazy(() => import('./pages/Login'));
@@ -80,7 +79,6 @@ function NavigationHandler({
 export default function App() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [showSplash, setShowSplash] = useState(true);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('theme');
@@ -143,9 +141,6 @@ export default function App() {
 
   return (
     <Router>
-      {showSplash && (
-        <SplashScreen onFinish={() => setShowSplash(false)} minDuration={2400} />
-      )}
       <SmartUpdateManager theme={theme} />
       <AutoLogoutManager session={session} />
       <NavigationHandler 

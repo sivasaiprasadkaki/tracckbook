@@ -20,46 +20,13 @@
         background-color: #f8fafc;
         margin: 0;
         padding: 0;
-        overflow: hidden;
+        overflow-x: hidden;
+        overflow-y: auto;
       }
     </style>
   </head>
   <body>
-    <div id="root">
-      <div style="position:fixed;inset:0;width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 42%, #ffffff 0%, #f8fafc 55%, #edf2f7 100%);user-select:none;font-family:'Montserrat',sans-serif;">
-        <div style="width:170px;height:170px;background:#ffffff;border-radius:40px;display:flex;align-items:center;justify-content:center;box-shadow:0 25px 50px -12px rgba(15, 23, 42, 0.12), 0 8px 24px -4px rgba(15, 23, 42, 0.06), 0 0 0 1px rgba(15, 23, 42, 0.05);">
-          <div style="position:relative;width:120px;height:120px;">
-            <!-- The Unified Book & T Entity -->
-            <div style="position:absolute;top:20px;left:20px;width:80px;height:80px;">
-              <!-- Top Crossbar of the T -->
-              <div style="position:absolute;top:0;left:0;width:80px;height:16px;background-color:#0B1C33;border-radius:6px;box-shadow:0 4px 10px rgba(11,28,51,0.22);z-index:5;">
-                <div style="position:absolute;top:3.5px;left:8px;width:64px;height:2.5px;background-color:#ffffff;border-radius:2px;opacity:0.95;"></div>
-              </div>
-              <!-- Left Navy Book Cover / Leaf -->
-              <div style="position:absolute;top:14px;left:2px;width:30px;height:64px;background:linear-gradient(135deg, #071526 0%, #0B1C33 100%);border-radius:0 0 4px 8px;box-shadow:-2px 4px 10px rgba(11,28,51,0.15);z-index:3;">
-                <div style="position:absolute;top:6px;left:5px;width:2px;height:52px;background:rgba(255,255,255,0.12);border-radius:1px;"></div>
-              </div>
-              <!-- Center Bold Vertical Stem of the T -->
-              <div style="position:absolute;top:14px;left:29px;width:22px;height:64px;background-color:#0B1C33;border-radius:0 0 6px 6px;box-shadow:0 4px 12px rgba(11,28,51,0.28);z-index:6;">
-                <div style="position:absolute;top:4px;left:3px;width:2px;height:54px;background:rgba(255,255,255,0.2);border-radius:1px;"></div>
-              </div>
-              <!-- Right Emerald Green Ledger Pages with 3 Crisp White Lines -->
-              <div style="position:absolute;top:15px;left:49px;width:29px;height:63px;background:#10B981;border-radius:0 0 8px 0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;box-shadow:-2px 0 6px rgba(0,0,0,0.1), 0 6px 16px rgba(16,185,129,0.32);z-index:4;">
-                <div style="position:relative;width:17px;height:3px;background:#ffffff;border-radius:2px;z-index:2;"></div>
-                <div style="position:relative;width:17px;height:3px;background:#ffffff;border-radius:2px;z-index:2;"></div>
-                <div style="position:relative;width:12px;height:3px;background:#ffffff;border-radius:2px;z-index:2;"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div style="margin-top:34px;font-size:2.2rem;font-weight:700;color:#0f172a;letter-spacing:-0.02em;">
-          Track<span style="color:#10B981;">Book</span>
-        </div>
-        <div style="margin-top:6px;font-size:0.8rem;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:#64748b;">
-          Smart Financial Tracking
-        </div>
-      </div>
-    </div>
+    <div id="root"></div>
     <script>
       // Fail-safe: If the app doesn't load within 12 seconds, show a recovery button
       setTimeout(() => {
