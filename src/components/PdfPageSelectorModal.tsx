@@ -317,10 +317,12 @@ export default function PdfPageSelectorModal({
         const pageNum = sortedPages[idx];
         const page = await doc.getPage(pageNum);
 
-        // High resolution scale (1.5x - 2.0x) so receipt details, numbers & text are crystal clear
+        // Render at full 300 DPI PDF quality without downscaling, safely bounded by browser canvas limits
         const unscaledViewport = page.getViewport({ scale: 1 });
-        const targetWidth = 1400; // Sharp receipt width
-        const scale = Math.min(2.0, Math.max(1.2, targetWidth / unscaledViewport.width));
+        const desiredScale = 300 / 72; // 300 DPI print-grade clarity (~4.17x PDF points)
+        const maxEdgeScale = 4096 / Math.max(1, unscaledViewport.width, unscaledViewport.height);
+        const maxAreaScale = Math.sqrt(15_000_000 / Math.max(1, unscaledViewport.width * unscaledViewport.height));
+        const scale = Math.min(desiredScale, maxEdgeScale, maxAreaScale);
         const viewport = page.getViewport({ scale });
 
         const canvas = document.createElement('canvas');
@@ -338,12 +340,40 @@ export default function PdfPageSelectorModal({
           viewport
         }).promise;
 
-        const blob = await new Promise<Blob | null>(resolve => {
-          canvas.toBlob(resolve, 'image/jpeg', 0.85);
+        const CLOUDINARY_SAFE_MAX_BYTES = 9.8 * 1024 * 1024;
+        let blob = await new Promise<Blob | null>(resolve => {
+          canvas.toBlob(resolve, 'image/png');
         });
+        let ext = 'png';
+        let mimeType = 'image/png';
+
+        // If lossless PNG exceeds Cloudinary's 10MB file upload limit, use max quality (1.0) JPEG
+        if (blob && blob.size > CLOUDINARY_SAFE_MAX_BYTES) {
+          const maxJpgBlob = await new Promise<Blob | null>(resolve => {
+            canvas.toBlob(resolve, 'image/jpeg', 1.0);
+          });
+          if (maxJpgBlob && maxJpgBlob.size <= CLOUDINARY_SAFE_MAX_BYTES) {
+            blob = maxJpgBlob;
+            ext = 'jpg';
+            mimeType = 'image/jpeg';
+          } else {
+            const highJpgBlob = await new Promise<Blob | null>(resolve => {
+              canvas.toBlob(resolve, 'image/jpeg', 0.95);
+            });
+            if (highJpgBlob) {
+              blob = highJpgBlob;
+              ext = 'jpg';
+              mimeType = 'image/jpeg';
+            }
+          }
+        }
+
+        // Release canvas backing memory immediately
+        canvas.width = 0;
+        canvas.height = 0;
 
         if (blob) {
-          const imageFile = new File([blob], `${baseName}_p${pageNum}.jpg`, { type: 'image/jpeg' });
+          const imageFile = new File([blob], `${baseName}_p${pageNum}.${ext}`, { type: mimeType });
           generatedFiles.push(imageFile);
         }
       }

@@ -2805,6 +2805,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     progress?: number;
   }>>({});
   const imageFilesRef = useRef<Record<string, File>>({});
+  const pdfExtractedFilesRef = useRef<WeakSet<File>>(new WeakSet());
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const bookLongPressTimer = useRef<NodeJS.Timeout | null>(null);
   
@@ -4418,9 +4419,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
       // 1. Compress image in background
       console.log('[BackgroundUpload] Compressing image...', file.name);
       const isImage = file.type && file.type.startsWith('image/');
+      const isPdfPage = pdfExtractedFilesRef.current.has(file);
       let processedFile: File;
 
-      if (isImage) {
+      if (isImage && !isPdfPage) {
         const compressedBlob = await compressImage(file);
         processedFile = new File([compressedBlob], file.name || 'compressed.jpg', { type: file.type || 'image/jpeg' });
       } else {
@@ -4716,8 +4718,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               const file = imageFilesRef.current[blobUrl];
               if (!file) return null;
               const isImage = file.type && file.type.startsWith('image/');
+              const isPdfPage = pdfExtractedFilesRef.current.has(file);
               let processedFile: File;
-              if (isImage) {
+              if (isImage && !isPdfPage) {
                 const compressedBlob = await compressImage(file);
                 processedFile = new File([compressedBlob], file.name || `attachment_${i}.jpg`, { type: 'image/jpeg' });
               } else {
@@ -4920,8 +4923,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               const file = imageFilesRef.current[blobUrl];
               if (!file) return null;
               const isImage = file.type && file.type.startsWith('image/');
+              const isPdfPage = pdfExtractedFilesRef.current.has(file);
               let processedFile: File;
-              if (isImage) {
+              if (isImage && !isPdfPage) {
                 const compressedBlob = await compressImage(file);
                 processedFile = new File([compressedBlob], file.name || `receipt_${i}.jpg`, { type: 'image/jpeg' });
               } else {
@@ -13344,6 +13348,7 @@ Open TrackBook → Import Shared Entries`)}`}
           const availableSlots = Math.max(0, 6 - newImages.length);
           const filesToAdd = pageFiles.slice(0, availableSlots);
           filesToAdd.forEach(file => {
+            pdfExtractedFilesRef.current.add(file);
             const blobUrl = URL.createObjectURL(file);
             imageFilesRef.current[blobUrl] = file;
             newImages.push(blobUrl);
