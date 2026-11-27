@@ -22,6 +22,20 @@ class ErrorBoundary extends React.Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error', error, errorInfo);
+    const msg = error?.message || '';
+    const isChunkError =
+      msg.includes('Failed to fetch dynamically imported module') ||
+      msg.includes('Importing a module script failed') ||
+      msg.includes('Loading chunk');
+    if (isChunkError) {
+      try {
+        const lastReload = Number(sessionStorage.getItem('trackbook_chunk_reload_at') || '0');
+        if (Date.now() - lastReload > 15000) {
+          sessionStorage.setItem('trackbook_chunk_reload_at', String(Date.now()));
+          window.location.reload();
+        }
+      } catch {}
+    }
   }
 
   render() {

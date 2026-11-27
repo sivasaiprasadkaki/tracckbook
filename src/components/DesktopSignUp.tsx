@@ -123,7 +123,7 @@ export default function DesktopSignUp({
   const { runawayProps } = useRunawayButton(isSignUpFormValid);
 
   return (
-    <div className="min-h-screen bg-[#fbf8ff] text-[#1b1a23] antialiased flex flex-col lg:flex-row selection:bg-[#4648d4]/15 selection:text-[#4648d4] font-['Inter',sans-serif]">
+    <div className="min-h-screen bg-white text-slate-900 antialiased flex flex-col lg:flex-row selection:bg-indigo-500/15 selection:text-indigo-600">
       <style>{`
         .float-slow {
           animation: floatSlow 6s ease-in-out infinite;
@@ -160,10 +160,10 @@ export default function DesktopSignUp({
         initial={{ opacity: 0, x: -30 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-        className="hidden lg:flex w-1/2 bg-[#e8eafc] relative flex-col justify-center items-center p-12 overflow-hidden select-none font-['Inter',sans-serif]"
+        className="hidden lg:flex w-1/2 bg-indigo-50/60 relative flex-col justify-center items-center p-12 overflow-hidden select-none"
       >
         {/* Ambient Glows */}
-        <div className="absolute -top-32 -left-32 w-96 h-96 bg-[#4648d4]/15 rounded-full blur-3xl pointer-events-none animate-pulse" />
+        <div className="absolute -top-32 -left-32 w-96 h-96 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none animate-pulse" />
         <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-[#8455ef]/15 rounded-full blur-3xl pointer-events-none animate-pulse" style={{ animationDelay: '1.5s' }} />
 
         {/* Central Dashboard Mockup Card */}
@@ -173,32 +173,32 @@ export default function DesktopSignUp({
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.5, delay: 0.15 }}
-            className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-lg flex flex-col gap-4 float-slow font-['Inter',sans-serif]"
+            className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-lg flex flex-col gap-4 float-slow"
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#4648d4]/10 text-[#4648d4] flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
                   <span className="material-symbols-outlined text-2xl">account_balance_wallet</span>
                 </div>
                 <div>
-                  <h4 className="font-semibold text-[#1b1a23] text-sm font-['Inter',sans-serif]">Primary Cashbook</h4>
-                  <p className="text-xs text-[#464554] font-['Inter',sans-serif]">Personal & Business</p>
+                  <h4 className="font-semibold text-slate-900 text-sm">Primary Cashbook</h4>
+                  <p className="text-xs text-slate-500">Personal & Business</p>
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 font-['Inter',sans-serif]">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Live Sync
               </span>
             </div>
 
             <div className="pt-2">
-              <p className="text-xs font-semibold text-[#464554] uppercase tracking-wider font-['Inter',sans-serif]">Total Tracked Balance</p>
-              <h3 className="text-4xl font-bold text-[#4648d4] tracking-tight mt-1 font-['Inter',sans-serif] flex items-baseline">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Tracked Balance</p>
+              <h3 className="text-4xl font-bold text-indigo-600 tracking-tight mt-1 flex items-baseline tabular-nums">
                 <TypewriterText 
                   text="₹41,800.00" 
                   speed={85} 
                   delay={250} 
-                  cursorClassName="w-[3px] h-[0.8em] bg-[#4648d4] ml-1 inline-block align-baseline rounded-full" 
+                  cursorClassName="w-[3px] h-[0.8em] bg-indigo-600 ml-1 inline-block align-baseline rounded-full" 
                 />
               </h3>
             </div>
@@ -243,18 +243,18 @@ export default function DesktopSignUp({
             className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md flex flex-col gap-3 float-fast font-['Inter',sans-serif]"
           >
             <div className="flex justify-between items-center text-xs font-semibold">
-              <span className="text-[#464554] flex items-center gap-1.5 font-['Inter',sans-serif]">
-                <span className="material-symbols-outlined text-sm text-[#4648d4]">auto_awesome</span>
+              <span className="text-slate-500 flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-sm text-indigo-600">auto_awesome</span>
                 Expense Categorization
               </span>
-              <span className="text-[#4648d4] font-semibold font-['Inter',sans-serif]">100%</span>
+              <span className="text-indigo-600 font-semibold">100%</span>
             </div>
             <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
               <motion.div 
                 initial={{ width: 0 }}
                 animate={{ width: '100%' }}
                 transition={{ duration: 1.2, ease: "easeOut", delay: 0.5 }}
-                className="bg-gradient-to-r from-[#4648d4] to-[#8455ef] h-full rounded-full" 
+                className="bg-gradient-to-r from-indigo-600 to-[#8455ef] h-full rounded-full" 
               />
             </div>
           </motion.div>
@@ -264,10 +264,10 @@ export default function DesktopSignUp({
             initial={{ scale: 0.85, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: "spring", stiffness: 260, damping: 18, delay: 0.6 }}
-            className="bg-[#4648d4] text-white p-4 rounded-xl flex items-center gap-3 justify-center shadow-lg shadow-[#4648d4]/20"
+            className="bg-indigo-600 text-white p-4 rounded-xl flex items-center gap-3 justify-center shadow-lg shadow-indigo-600/20"
           >
             <span className="material-symbols-outlined text-xl">check_circle</span>
-            <span className="text-sm font-semibold tracking-wide font-['Inter',sans-serif]">Dashboard Ready for Real-Time Tracking</span>
+            <span className="text-sm font-semibold tracking-wide">Dashboard Ready for Real-Time Tracking</span>
           </motion.div>
         </div>
       </motion.div>
@@ -277,7 +277,7 @@ export default function DesktopSignUp({
         initial={{ opacity: 0, x: 30 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-        className="w-full lg:w-1/2 flex flex-col justify-between p-6 sm:p-12 lg:p-16 min-h-screen bg-[#fbf8ff] font-['Inter',sans-serif]"
+        className="w-full lg:w-1/2 flex flex-col justify-between p-6 sm:p-12 lg:p-16 min-h-screen bg-white"
       >
         {/* Brand Header */}
         <motion.div 
@@ -290,13 +290,13 @@ export default function DesktopSignUp({
             onClick={() => navigate('/')} 
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.97 }}
-            className="w-10 h-10 rounded-xl bg-[#4648d4] flex items-center justify-center text-white shadow-md shadow-[#4648d4]/20 cursor-pointer hover:opacity-90 transition-opacity"
+            className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/20 cursor-pointer hover:bg-indigo-700 transition-colors"
           >
             <span className="material-symbols-outlined text-2xl">menu_book</span>
           </motion.div>
           <span 
             onClick={() => navigate('/')} 
-            className="text-xl tracking-normal text-[#4648d4] cursor-pointer"
+            className="text-xl tracking-normal text-indigo-600 cursor-pointer"
             style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 400 }}
           >
             TrackBook
@@ -311,10 +311,10 @@ export default function DesktopSignUp({
             transition={{ duration: 0.5, delay: 0.1 }}
             className="mb-6"
           >
-            <h1 className="text-3xl lg:text-4xl font-bold text-[#1b1a23] tracking-tight leading-tight font-['Hanken_Grotesk',sans-serif]">
+            <h1 className="text-3xl lg:text-4xl font-bold text-slate-900 tracking-tight leading-tight">
               Build your financial command center
             </h1>
-            <p className="mt-2 text-[15px] text-[#464554] leading-relaxed font-normal font-['Inter',sans-serif]">
+            <p className="mt-2 text-[15px] text-slate-500 leading-relaxed font-normal">
               Create your TrackBook account and start turning everyday expenses into clear financial insights.
             </p>
           </motion.div>
@@ -376,14 +376,14 @@ export default function DesktopSignUp({
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder={fullName ? '' : (typedPlaceholder || 'Enter your name')}
-                  className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-[#4648d4] focus:ring-2 focus:ring-[#4648d4]/20 outline-none text-sm bg-white transition-all text-[#1b1a23] placeholder-slate-400 font-['Inter',sans-serif]"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400"
                 />
               </div>
             </div>
 
             {/* Email */}
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 uppercase tracking-wider mb-1.5 font-['Inter',sans-serif]">
+              <label className="block text-[11px] font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 EMAIL ADDRESS
               </label>
               <input
@@ -392,13 +392,13 @@ export default function DesktopSignUp({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="siva@gmail.com"
-                className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-[#4648d4] focus:ring-2 focus:ring-[#4648d4]/20 outline-none text-sm bg-white transition-all text-[#1b1a23] placeholder-slate-400 font-['Inter',sans-serif]"
+                className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400"
               />
             </div>
 
             {/* Password */}
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 uppercase tracking-wider mb-1.5 font-['Inter',sans-serif]">
+              <label className="block text-[11px] font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
                 PASSWORD
               </label>
               <div className="relative">
@@ -408,7 +408,7 @@ export default function DesktopSignUp({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Create a strong password"
-                  className="w-full pl-4 pr-11 py-3 rounded-xl border border-slate-300 focus:border-[#4648d4] focus:ring-2 focus:ring-[#4648d4]/20 outline-none text-sm bg-white transition-all text-[#1b1a23] placeholder-slate-400 font-['Inter',sans-serif]"
+                  className="w-full pl-4 pr-11 py-3 rounded-xl border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400"
                 />
                 <button
                   type="button"
@@ -464,7 +464,7 @@ export default function DesktopSignUp({
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Re-enter your password"
-                  className="w-full pl-4 pr-11 py-3 rounded-xl border border-slate-300 focus:border-[#4648d4] focus:ring-2 focus:ring-[#4648d4]/20 outline-none text-sm bg-white transition-all text-[#1b1a23] placeholder-slate-400 font-['Inter',sans-serif]"
+                  className="w-full pl-4 pr-11 py-3 rounded-xl border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400"
                 />
                 <button
                   type="button"
@@ -480,7 +480,7 @@ export default function DesktopSignUp({
             <motion.button
               {...runawayProps}
               disabled={loading}
-              className="w-full mt-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#4648d4] to-[#6052a8] text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-[#4648d4]/25 hover:shadow-lg hover:shadow-[#4648d4]/35 hover:brightness-105 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-['Inter',sans-serif]"
+              className="w-full mt-2 py-3.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-indigo-600/20 hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <>
@@ -495,7 +495,7 @@ export default function DesktopSignUp({
             {/* Divider */}
             <div className="relative flex items-center justify-center my-4">
               <div className="border-t border-slate-200 w-full" />
-              <span className="bg-[#fbf8ff] px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-widest font-['Inter',sans-serif]">
+              <span className="bg-white px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-widest">
                 OR
               </span>
             </div>
@@ -507,7 +507,7 @@ export default function DesktopSignUp({
               disabled={loading}
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.985 }}
-              className="w-full py-3 px-4 rounded-xl bg-white border border-slate-300 text-slate-700 font-medium text-sm hover:bg-slate-50 hover:border-slate-400 transition-all flex items-center justify-center gap-3 shadow-sm cursor-pointer disabled:opacity-60 font-['Inter',sans-serif]"
+              className="w-full py-3 px-4 rounded-xl bg-white border border-slate-300 text-slate-700 font-medium text-sm hover:bg-slate-50 hover:border-slate-400 transition-all flex items-center justify-center gap-3 shadow-sm cursor-pointer disabled:opacity-60"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
                 <path
@@ -538,7 +538,7 @@ export default function DesktopSignUp({
             transition={{ duration: 0.5, delay: 0.35 }}
             className="mt-6 text-center"
           >
-            <p className="text-sm text-[#464554] font-['Inter',sans-serif]">
+            <p className="text-sm text-slate-500">
               Already have an account?{' '}
               <button
                 type="button"
@@ -546,7 +546,7 @@ export default function DesktopSignUp({
                   setMode('signin');
                   navigate('/login');
                 }}
-                className="font-semibold text-[#4648d4] hover:underline cursor-pointer bg-transparent border-none p-0 inline font-['Inter',sans-serif]"
+                className="font-semibold text-indigo-600 hover:underline cursor-pointer bg-transparent border-none p-0 inline"
               >
                 Sign in
               </button>

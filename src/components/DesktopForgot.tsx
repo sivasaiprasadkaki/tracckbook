@@ -35,9 +35,9 @@ export default function DesktopForgot({
   const { runawayProps } = useRunawayButton(isEmailValid);
 
   return (
-    <div className="min-h-screen bg-[#fbf8ff] text-[#1b1a23] antialiased flex flex-col justify-between selection:bg-[#4648d4]/15 selection:text-[#4648d4] font-['Inter',sans-serif] relative overflow-x-hidden">
+    <div className="min-h-screen bg-white text-slate-900 antialiased flex flex-col justify-between selection:bg-indigo-500/15 selection:text-indigo-600 relative overflow-x-hidden">
       {/* Ambient background glows */}
-      <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-b from-[#4648d4]/10 to-transparent rounded-full blur-3xl pointer-events-none animate-pulse" />
+      <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-b from-indigo-500/10 to-transparent rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-5%] w-[400px] h-[400px] bg-[#8455ef]/10 rounded-full blur-3xl pointer-events-none animate-pulse" style={{ animationDelay: '1.2s' }} />
 
       {/* Header */}
@@ -53,11 +53,11 @@ export default function DesktopForgot({
           whileTap={{ scale: 0.98 }}
           className="flex items-center gap-3 cursor-pointer select-none"
         >
-          <div className="w-10 h-10 rounded-xl bg-[#4648d4] flex items-center justify-center text-white shadow-md shadow-[#4648d4]/20 hover:opacity-90 transition-opacity">
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/20 hover:bg-indigo-700 transition-colors">
             <span className="material-symbols-outlined text-2xl">menu_book</span>
           </div>
           <span 
-            className="text-xl tracking-normal text-[#4648d4]"
+            className="text-xl tracking-normal text-indigo-600"
             style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 400 }}
           >
             TrackBook
@@ -71,7 +71,7 @@ export default function DesktopForgot({
           initial={{ opacity: 0, scale: 0.95, y: 20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-          className="max-w-md w-full bg-white/90 backdrop-blur-xl rounded-3xl p-8 sm:p-10 border border-slate-200/80 shadow-2xl flex flex-col items-center text-center font-['Inter',sans-serif]"
+          className="max-w-md w-full bg-white rounded-3xl p-8 sm:p-10 border border-slate-200 shadow-xl flex flex-col items-center text-center"
         >
           <AnimatePresence mode="wait">
             {!success ? (
@@ -88,16 +88,16 @@ export default function DesktopForgot({
                   initial={{ scale: 0.5, rotate: -20, opacity: 0 }}
                   animate={{ scale: 1, rotate: 0, opacity: 1 }}
                   transition={{ type: "spring", stiffness: 300, damping: 18, delay: 0.1 }}
-                  className="w-14 h-14 rounded-2xl bg-indigo-50 text-[#4648d4] flex items-center justify-center mb-6 shadow-sm border border-indigo-100"
+                  className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-6 shadow-sm border border-indigo-100"
                 >
                   <span className="material-symbols-outlined text-3xl">lock_reset</span>
                 </motion.div>
 
                 {/* Headings */}
-                <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-tight font-['Hanken_Grotesk',sans-serif]">
+                <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-tight">
                   Reset your password
                 </h1>
-                <p className="mt-2 text-[14px] text-slate-600 leading-relaxed max-w-sm mb-6 font-normal font-['Inter',sans-serif]">
+                <p className="mt-2 text-[14px] text-slate-500 leading-relaxed max-w-sm mb-6 font-normal">
                   No worries. Enter your email and we’ll help you get back into your TrackBook account.
                 </p>
 
@@ -123,9 +123,9 @@ export default function DesktopForgot({
                 </AnimatePresence>
 
                 {/* Form */}
-                <form onSubmit={handleAuth} className="w-full space-y-4 font-['Inter',sans-serif]">
+                <form onSubmit={handleAuth} className="w-full space-y-4">
                   <div className="text-left">
-                    <label className="block text-[11px] font-semibold tracking-wider text-slate-700 uppercase mb-1.5 font-['Inter',sans-serif]">
+                    <label className="block text-[11px] font-semibold tracking-wider text-slate-700 uppercase mb-1.5">
                       EMAIL ADDRESS
                     </label>
                     <input
@@ -134,7 +134,7 @@ export default function DesktopForgot({
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="siva@gmail.com"
-                      className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-[#4648d4] focus:ring-2 focus:ring-[#4648d4]/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400 font-['Inter',sans-serif]"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400"
                     />
                   </div>
 
@@ -142,7 +142,7 @@ export default function DesktopForgot({
                   <motion.button
                     {...runawayProps}
                     disabled={loading}
-                    className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#4648d4] to-[#6052a8] text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-[#4648d4]/25 hover:shadow-lg hover:shadow-[#4648d4]/35 hover:brightness-105 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-['Inter',sans-serif]"
+                    className="w-full py-3.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-indigo-600/20 hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {loading ? (
                       <>
@@ -163,7 +163,7 @@ export default function DesktopForgot({
                       setMode('signin');
                       navigate('/login');
                     }}
-                    className="inline-flex items-center gap-2 text-sm font-semibold text-[#4648d4] hover:underline cursor-pointer bg-transparent border-none p-0 font-['Inter',sans-serif]"
+                    className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-600 hover:underline cursor-pointer bg-transparent border-none p-0"
                   >
                     <ArrowLeft size={16} />
                     <span>Back to Sign in</span>
@@ -189,14 +189,14 @@ export default function DesktopForgot({
                   <span className="material-symbols-outlined text-3xl">mark_email_read</span>
                 </motion.div>
 
-                <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-tight font-['Hanken_Grotesk',sans-serif]">
+                <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-tight">
                   Check your inbox
                 </h1>
-                <p className="mt-3 text-[14px] text-slate-600 leading-relaxed max-w-sm mb-6 font-['Inter',sans-serif]">
+                <p className="mt-3 text-[14px] text-slate-500 leading-relaxed max-w-sm mb-6">
                   We’ve sent password reset instructions to <span className="font-semibold text-slate-900">{email}</span>. It may take a few minutes to arrive.
                 </p>
 
-                <div className="w-full space-y-3 font-['Inter',sans-serif]">
+                <div className="w-full space-y-3">
                   <motion.button
                     type="button"
                     whileHover={{ scale: 1.01 }}
@@ -205,7 +205,7 @@ export default function DesktopForgot({
                       setMode('signin');
                       navigate('/login');
                     }}
-                    className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#4648d4] to-[#6052a8] text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-[#4648d4]/25 hover:shadow-lg hover:shadow-[#4648d4]/35 transition-all cursor-pointer font-['Inter',sans-serif]"
+                    className="w-full py-3.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-indigo-600/20 hover:shadow-lg transition-all cursor-pointer"
                   >
                     BACK TO SIGN IN
                   </motion.button>
@@ -213,7 +213,7 @@ export default function DesktopForgot({
                   <button
                     type="button"
                     onClick={handleResend}
-                    className="text-xs font-medium text-slate-500 hover:text-[#4648d4] transition-colors cursor-pointer bg-transparent border-none p-1 font-['Inter',sans-serif]"
+                    className="text-xs font-medium text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer bg-transparent border-none p-1"
                   >
                     Didn&apos;t receive the email? Click to resend
                   </button>

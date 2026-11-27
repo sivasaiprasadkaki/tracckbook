@@ -196,11 +196,13 @@ export function PdfExportQualityModal({
 
   if (!isOpen) return null;
 
+  const isDark = theme === 'dark';
+
   return (
     <AnimatePresence>
       <div 
         id="pdf-quality-modal-backdrop" 
-        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 dark:bg-black/75 backdrop-blur-xs"
       >
         <motion.div
           id="pdf-quality-modal-card"
@@ -210,25 +212,25 @@ export function PdfExportQualityModal({
           transition={{ type: 'spring', damping: 25, stiffness: 350 }}
           className={cn(
             "w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden flex flex-col transition-colors",
-            theme === 'dark' 
-              ? "bg-zinc-950 border-zinc-800 text-slate-100" 
-              : "bg-white border-slate-200 text-slate-800"
+            isDark
+              ? "border-zinc-800 bg-zinc-950 text-slate-100"
+              : "border-slate-200 bg-white text-slate-900"
           )}
         >
           {/* Header */}
           <div className={cn(
             "px-6 py-4.5 border-b flex items-center justify-between",
-            theme === 'dark' ? "border-zinc-800 bg-zinc-900/50" : "border-slate-100 bg-slate-50/70"
+            isDark ? "border-zinc-800 bg-zinc-900/60" : "border-slate-100 bg-slate-50/70"
           )}>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-xs">
                 <FileText size={20} />
               </div>
               <div>
-                <h3 className="font-bold text-base tracking-tight leading-tight">
+                <h3 className={cn("font-bold text-base tracking-tight leading-tight", isDark ? "text-white" : "text-slate-900")}>
                   Choose PDF Quality
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                <p className={cn("text-xs font-medium", isDark ? "text-slate-400" : "text-slate-500")}>
                   {cashbookName} • {transactions.length} transaction{transactions.length === 1 ? '' : 's'}
                   {totalReceipts > 0 && ` (${totalReceipts} receipt${totalReceipts === 1 ? '' : 's'})`}
                 </p>
@@ -238,7 +240,12 @@ export function PdfExportQualityModal({
               <button
                 id="btn-close-pdf-quality-modal"
                 onClick={onClose}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-150 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                className={cn(
+                  "p-1.5 rounded-lg transition-colors cursor-pointer",
+                  isDark
+                    ? "text-slate-400 hover:text-slate-200 hover:bg-zinc-800"
+                    : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                )}
               >
                 <X size={18} />
               </button>
@@ -250,7 +257,7 @@ export function PdfExportQualityModal({
             {/* 1. SELECTION STATE */}
             {state === 'select' && (
               <div className="space-y-4">
-                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-medium">
+                <p className={cn("text-xs leading-relaxed font-medium", isDark ? "text-slate-400" : "text-slate-500")}>
                   Select your preferred export quality. Your original cloud uploads remain permanently untouched.
                 </p>
 
@@ -261,8 +268,12 @@ export function PdfExportQualityModal({
                     className={cn(
                       "p-4 rounded-xl border-2 cursor-pointer transition-all duration-150 relative flex items-start gap-3.5",
                       selectedQuality === 'original'
-                        ? "border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/20"
-                        : "border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 bg-transparent"
+                        ? isDark
+                          ? "border-indigo-500 bg-indigo-950/35"
+                          : "border-indigo-600 bg-indigo-50/50"
+                        : isDark
+                        ? "border-zinc-800 hover:border-zinc-700 bg-zinc-900/50"
+                        : "border-slate-200 hover:border-slate-300 bg-white"
                     )}
                   >
                     <div className="pt-0.5">
@@ -270,7 +281,7 @@ export function PdfExportQualityModal({
                         "w-4 h-4 rounded-full border flex items-center justify-center transition-colors",
                         selectedQuality === 'original'
                           ? "border-indigo-600 bg-indigo-600"
-                          : "border-slate-400 dark:border-zinc-600"
+                          : isDark ? "border-zinc-600" : "border-slate-400"
                       )}>
                         {selectedQuality === 'original' && (
                           <div className="w-1.5 h-1.5 rounded-full bg-white" />
@@ -279,15 +290,18 @@ export function PdfExportQualityModal({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <Sparkles size={16} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
-                        <h4 className="font-bold text-sm text-slate-900 dark:text-white">
+                        <Sparkles size={16} className={cn("shrink-0", isDark ? "text-indigo-400" : "text-indigo-600")} />
+                        <h4 className={cn("font-bold text-sm", isDark ? "text-white" : "text-slate-900")}>
                           Original Quality
                         </h4>
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 font-mono">
+                        <span className={cn(
+                          "text-[10px] font-semibold px-2 py-0.5 rounded-full font-mono",
+                          isDark ? "bg-indigo-950/80 text-indigo-300" : "bg-indigo-50 text-indigo-600"
+                        )}>
                           Best for records and archiving
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                      <p className={cn("text-xs mt-1 leading-relaxed", isDark ? "text-slate-400" : "text-slate-500")}>
                         Export using the original uploaded files with maximum available quality.
                       </p>
                     </div>
@@ -299,8 +313,12 @@ export function PdfExportQualityModal({
                     className={cn(
                       "p-4 rounded-xl border-2 cursor-pointer transition-all duration-150 relative flex items-start gap-3.5",
                       selectedQuality === 'smart_compressed'
-                        ? "border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/20"
-                        : "border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 bg-transparent"
+                        ? isDark
+                          ? "border-indigo-500 bg-indigo-950/35"
+                          : "border-indigo-600 bg-indigo-50/50"
+                        : isDark
+                        ? "border-zinc-800 hover:border-zinc-700 bg-zinc-900/50"
+                        : "border-slate-200 hover:border-slate-300 bg-white"
                     )}
                   >
                     <div className="pt-0.5">
@@ -308,7 +326,7 @@ export function PdfExportQualityModal({
                         "w-4 h-4 rounded-full border flex items-center justify-center transition-colors",
                         selectedQuality === 'smart_compressed'
                           ? "border-indigo-600 bg-indigo-600"
-                          : "border-slate-400 dark:border-zinc-600"
+                          : isDark ? "border-zinc-600" : "border-slate-400"
                       )}>
                         {selectedQuality === 'smart_compressed' && (
                           <div className="w-1.5 h-1.5 rounded-full bg-white" />
@@ -317,26 +335,32 @@ export function PdfExportQualityModal({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <Zap size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        <h4 className="font-bold text-sm text-slate-900 dark:text-white">
+                        <Zap size={16} className={cn("shrink-0", isDark ? "text-emerald-400" : "text-emerald-600")} />
+                        <h4 className={cn("font-bold text-sm", isDark ? "text-white" : "text-slate-900")}>
                           Smart Compressed
                         </h4>
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 font-mono">
+                        <span className={cn(
+                          "text-[10px] font-semibold px-2 py-0.5 rounded-full font-mono",
+                          isDark ? "bg-emerald-950/80 text-emerald-300" : "bg-emerald-50 text-emerald-700"
+                        )}>
                           Best for WhatsApp, email and quick sharing
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                      <p className={cn("text-xs mt-1 leading-relaxed", isDark ? "text-slate-400" : "text-slate-500")}>
                         Reduce PDF file size while keeping receipts and text clearly readable.
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-zinc-800/80">
+                <div className={cn("pt-4 flex items-center justify-end gap-3 border-t", isDark ? "border-zinc-800" : "border-slate-100")}>
                   <button
                     type="button"
                     onClick={onClose}
-                    className="px-4 py-2.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-800 font-semibold text-xs sm:text-sm transition-colors cursor-pointer"
+                    className={cn(
+                      "px-4 py-2.5 rounded-xl font-semibold text-xs sm:text-sm transition-colors cursor-pointer",
+                      isDark ? "text-slate-400 hover:bg-zinc-900 hover:text-slate-200" : "text-slate-600 hover:bg-slate-100"
+                    )}
                   >
                     Cancel
                   </button>
@@ -362,36 +386,41 @@ export function PdfExportQualityModal({
             {state === 'generating' && (
               <div className="py-6 flex flex-col items-center text-center space-y-4">
                 <div className="relative">
-                  <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-100 dark:border-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-sm">
+                  <div className={cn(
+                    "w-16 h-16 rounded-2xl border flex items-center justify-center shadow-sm",
+                    isDark
+                      ? "bg-indigo-950/60 border-indigo-800/60 text-indigo-400"
+                      : "bg-indigo-50 border-indigo-200 text-indigo-600"
+                  )}>
                     <Loader2 size={32} className="animate-spin" />
                   </div>
                 </div>
 
                 <div className="space-y-1.5 max-w-sm">
-                  <h4 className="font-bold text-base text-slate-900 dark:text-white">
+                  <h4 className={cn("font-bold text-base", isDark ? "text-white" : "text-slate-900")}>
                     Generating PDF Statement
                   </h4>
-                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium animate-pulse">
+                  <p className={cn("text-xs sm:text-sm font-medium animate-pulse", isDark ? "text-slate-400" : "text-slate-500")}>
                     {statusMessage}
                   </p>
                 </div>
 
                 <div className="w-full max-w-xs space-y-1.5 pt-2">
-                  <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                  <div className={cn("w-full h-2 rounded-full overflow-hidden", isDark ? "bg-zinc-800" : "bg-slate-100")}>
                     <motion.div
-                      className="h-full bg-indigo-600 rounded-full"
+                      className="h-full bg-indigo-600 dark:bg-indigo-500 rounded-full"
                       initial={{ width: 0 }}
                       animate={{ width: `${progress}%` }}
                       transition={{ ease: "easeOut", duration: 0.2 }}
                     />
                   </div>
-                  <div className="flex justify-between text-[11px] text-slate-400 font-mono">
+                  <div className={cn("flex justify-between text-[11px] font-mono", isDark ? "text-slate-400" : "text-slate-500")}>
                     <span>{selectedQuality === 'original' ? 'Original Quality' : 'Smart Compressed'}</span>
                     <span>{progress}%</span>
                   </div>
                 </div>
 
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 max-w-xs pt-1">
+                <p className={cn("text-[11px] max-w-xs pt-1", isDark ? "text-slate-400" : "text-slate-500")}>
                   You can keep TrackBook open; your download will trigger automatically when ready.
                 </p>
               </div>
@@ -400,15 +429,20 @@ export function PdfExportQualityModal({
             {/* 3. READY STATE */}
             {state === 'ready' && (
               <div className="py-6 flex flex-col items-center text-center space-y-4">
-                <div className="w-16 h-16 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-900/50 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-sm">
+                <div className={cn(
+                  "w-16 h-16 rounded-2xl border flex items-center justify-center shadow-sm",
+                  isDark
+                    ? "bg-emerald-950/50 border-emerald-800/60 text-emerald-400"
+                    : "bg-emerald-50 border-emerald-200 text-emerald-600"
+                )}>
                   <CheckCircle2 size={36} />
                 </div>
 
                 <div className="space-y-1.5 max-w-sm">
-                  <h4 className="font-bold text-lg text-slate-900 dark:text-white">
+                  <h4 className={cn("font-bold text-lg", isDark ? "text-white" : "text-slate-900")}>
                     PDF Statement Ready!
                   </h4>
-                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                  <p className={cn("text-xs sm:text-sm", isDark ? "text-slate-400" : "text-slate-500")}>
                     Your financial statement was generated with {selectedQuality === 'original' ? 'maximum original quality' : 'smart compression'}.
                   </p>
                 </div>
@@ -426,7 +460,12 @@ export function PdfExportQualityModal({
                       href={blobUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="py-2.5 px-4 rounded-xl border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-zinc-800 font-semibold text-xs sm:text-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      className={cn(
+                        "py-2.5 px-4 rounded-xl border font-semibold text-xs sm:text-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer",
+                        isDark
+                          ? "border-zinc-700 text-slate-200 hover:bg-zinc-900"
+                          : "border-slate-200 text-slate-800 hover:bg-slate-50"
+                      )}
                     >
                       <ExternalLink size={14} />
                       <span>Preview</span>
@@ -436,7 +475,7 @@ export function PdfExportQualityModal({
 
                 <button
                   onClick={onClose}
-                  className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 pt-1 cursor-pointer"
+                  className={cn("text-xs pt-1 cursor-pointer", isDark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-900")}
                 >
                   Done
                 </button>
@@ -446,15 +485,20 @@ export function PdfExportQualityModal({
             {/* 4. ERROR STATE */}
             {state === 'error' && (
               <div className="py-6 flex flex-col items-center text-center space-y-4">
-                <div className="w-16 h-16 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-100 dark:border-rose-900/50 flex items-center justify-center text-rose-600 dark:text-rose-400 shadow-sm">
+                <div className={cn(
+                  "w-16 h-16 rounded-2xl border flex items-center justify-center shadow-sm",
+                  isDark
+                    ? "bg-rose-950/50 border-rose-800/60 text-rose-400"
+                    : "bg-rose-50 border-rose-200 text-rose-600"
+                )}>
                   <AlertCircle size={36} />
                 </div>
 
                 <div className="space-y-1.5 max-w-sm">
-                  <h4 className="font-bold text-lg text-slate-900 dark:text-white">
+                  <h4 className={cn("font-bold text-lg", isDark ? "text-white" : "text-slate-900")}>
                     Export Failed
                   </h4>
-                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                  <p className={cn("text-xs sm:text-sm", isDark ? "text-slate-400" : "text-slate-500")}>
                     {errorMessage || 'Unable to generate PDF report.'}
                   </p>
                 </div>
@@ -468,7 +512,10 @@ export function PdfExportQualityModal({
                   </button>
                   <button
                     onClick={onClose}
-                    className="px-4 py-2.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-800 font-semibold text-xs sm:text-sm cursor-pointer"
+                    className={cn(
+                      "px-4 py-2.5 rounded-xl font-semibold text-xs sm:text-sm cursor-pointer",
+                      isDark ? "text-slate-400 hover:bg-zinc-900" : "text-slate-600 hover:bg-slate-100"
+                    )}
                   >
                     Cancel
                   </button>
@@ -481,7 +528,7 @@ export function PdfExportQualityModal({
         {/* Dedicated Offline Warning Popup Dialog */}
         <AnimatePresence>
           {showOfflineModalWarning && (
-            <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-fade-in">
+            <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-xs animate-fade-in">
               <motion.div
                 initial={{ scale: 0.92, opacity: 0, y: 15 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -489,34 +536,54 @@ export function PdfExportQualityModal({
                 transition={{ type: 'spring', damping: 24, stiffness: 300 }}
                 className={cn(
                   "w-full max-w-sm p-6 rounded-3xl shadow-2xl space-y-5 text-center border transition-all duration-300",
-                  theme === 'dark' ? "bg-zinc-950 border-zinc-800 text-white" : "bg-white border-slate-200 text-slate-900"
+                  isDark
+                    ? "border-zinc-800 bg-zinc-950 text-slate-100"
+                    : "border-slate-200 bg-white text-slate-900"
                 )}
               >
-                <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shadow-inner">
+                <div className={cn(
+                  "mx-auto w-14 h-14 rounded-2xl flex items-center justify-center border shadow-inner",
+                  isDark
+                    ? "bg-amber-950/50 text-amber-400 border-amber-800/60"
+                    : "bg-amber-50 text-amber-600 border-amber-200"
+                )}>
                   <WifiOff size={26} className="stroke-[2.5]" />
                 </div>
                 
                 <div className="space-y-3">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-xs font-bold uppercase tracking-wider">
+                  <div className={cn(
+                    "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border",
+                    isDark
+                      ? "bg-amber-950/50 text-amber-400 border-amber-800/60"
+                      : "bg-amber-50 text-amber-700 border-amber-200"
+                  )}>
                     <WifiOff size={13} />
                     Offline Mode
                   </div>
-                  <h3 className="text-lg sm:text-xl font-black tracking-tight text-slate-900 dark:text-white">
+                  <h3 className={cn("text-lg sm:text-xl font-bold tracking-tight", isDark ? "text-white" : "text-slate-900")}>
                     You are Offline
                   </h3>
-                  <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-900/50 text-center">
-                    <p className="text-sm font-bold text-amber-800 dark:text-amber-300 leading-snug">
+                  <div className={cn(
+                    "p-3 rounded-2xl border text-center",
+                    isDark ? "bg-amber-950/40 border-amber-800/50" : "bg-amber-50 border-amber-200"
+                  )}>
+                    <p className={cn("text-sm font-bold leading-snug", isDark ? "text-amber-300" : "text-amber-800")}>
                       PDF reports cannot be downloaded while offline.
                     </p>
-                    <p className="text-xs text-amber-700/80 dark:text-amber-400/80 mt-1 font-medium">
+                    <p className={cn("text-xs mt-1 font-medium", isDark ? "text-amber-400/90" : "text-amber-700")}>
                       Please reconnect to the internet to generate and download PDF reports.
                     </p>
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                  <p className={cn("text-xs font-medium leading-relaxed", isDark ? "text-slate-400" : "text-slate-500")}>
                     Generating PDF reports requires an active internet connection to download and render receipt attachments. As soon as you are reconnected, PDF download will work normally.
                   </p>
-                  <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-zinc-900 text-[11px] text-slate-600 dark:text-slate-300 font-medium border border-slate-200/60 dark:border-zinc-800">
-                    💡 <span className="font-semibold text-slate-800 dark:text-slate-200">Tip:</span> Excel (.xlsx) reports are fully supported offline.
+                  <div className={cn(
+                    "p-2.5 rounded-xl text-[11px] font-medium border",
+                    isDark
+                      ? "bg-zinc-900 text-slate-400 border-zinc-800"
+                      : "bg-slate-50 text-slate-500 border-slate-200"
+                  )}>
+                    <span className={cn("font-semibold", isDark ? "text-slate-200" : "text-slate-900")}>Tip:</span> Excel (.xlsx) reports are fully supported offline.
                   </div>
                 </div>
                 <div className="pt-2">
@@ -524,7 +591,7 @@ export function PdfExportQualityModal({
                     type="button"
                     id="btn-close-offline-pdf-modal-warning"
                     onClick={() => setShowOfflineModalWarning(false)}
-                    className="w-full py-3 px-4 rounded-xl text-xs font-bold transition-all shadow-md bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer active:scale-98"
+                    className="w-full py-3 px-4 rounded-xl text-xs font-bold transition-all shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
                   >
                     Understood
                   </button>

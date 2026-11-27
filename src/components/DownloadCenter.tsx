@@ -74,9 +74,9 @@ export function DownloadCenterTrigger({
         "relative p-2.5 rounded-xl outline-none transition-all cursor-pointer flex items-center justify-center group shrink-0",
         isOpen 
           ? "bg-indigo-600 border border-indigo-600 text-white shadow-sm" 
-          : theme === 'dark' 
-          ? "bg-transparent text-slate-400 hover:text-white" 
-          : "bg-transparent text-slate-500 hover:text-slate-800"
+          : theme === 'dark'
+          ? "bg-transparent text-slate-400 hover:text-white hover:bg-zinc-900"
+          : "bg-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100"
       )}
       title={`Download Center (${activeCounts.pdf} PDF, ${activeCounts.excel} Excel, ${activeCounts.ai} AI Scan)`}
     >
@@ -106,7 +106,7 @@ export function DownloadCenterTrigger({
       )}
 
       {activeCounts.total > 0 ? (
-        <Loader2 size={18} className="animate-spin text-indigo-500 group-hover:text-indigo-400" />
+        <Loader2 size={18} className={cn("animate-spin", isOpen ? "text-white" : "text-indigo-600 dark:text-indigo-400")} />
       ) : (
         <DownloadCloud size={18} className="transition-transform group-hover:scale-110" />
       )}
@@ -131,6 +131,7 @@ interface DownloadCenterProps {
 }
 
 export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCenterProps) {
+  const isDark = theme === 'dark';
   const [tasks, setTasks] = useState<ExportTask[]>([]);
   const [activeCount, setActiveCount] = useState(0);
   const [showToast, setShowToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -139,6 +140,7 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
   const [activeFilter, setActiveFilter] = useState<'all' | 'export' | 'ai'>('all');
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<JobNotification[]>([]);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
   // Sync state with back-end export manager
   useEffect(() => {
@@ -229,7 +231,7 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
 
   return (
     <>
-      {/* 1. NOTIFICATIONS PORTAL OVERLAY (Feature 9) */}
+      {/* 1. NOTIFICATIONS PORTAL OVERLAY */}
       <div className="fixed top-20 right-4 z-[210] flex flex-col gap-2.5 max-w-sm w-full pointer-events-none select-none">
         <AnimatePresence>
           {notifications.map(notif => (
@@ -238,28 +240,38 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
               initial={{ opacity: 0, x: 50, y: -10 }}
               animate={{ opacity: 1, x: 0, y: 0 }}
               exit={{ opacity: 0, x: 50, scale: 0.9 }}
-              className="bg-zinc-950/95 border border-zinc-850 p-4 rounded-2xl shadow-2xl flex flex-col gap-3 pointer-events-auto backdrop-blur-md text-white"
+              className={cn(
+                "border p-4 rounded-2xl shadow-xl flex flex-col gap-3 pointer-events-auto",
+                isDark
+                  ? "bg-zinc-950 border-zinc-800 text-slate-100"
+                  : "bg-white border-slate-200 text-slate-900"
+              )}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex gap-2">
                   <div className={cn(
                     "p-1.5 rounded-xl text-white mt-0.5",
-                    notif.type === 'ai' ? "bg-indigo-600" : notif.type === 'excel' ? "bg-emerald-600" : "bg-blue-600"
+                    notif.type === 'ai' ? "bg-indigo-600" : notif.type === 'excel' ? "bg-emerald-600" : "bg-indigo-600"
                   )}>
                     {notif.type === 'ai' ? <Sparkles size={14} /> : notif.type === 'excel' ? <FileSpreadsheet size={14} /> : <FileText size={14} />}
                   </div>
                   <div>
-                    <h5 className="text-xs font-black tracking-tight font-sans">
+                    <h5 className={cn("text-xs font-bold tracking-tight font-sans", isDark ? "text-white" : "text-slate-900")}>
                       {notif.type === 'ai' ? 'AI Scan Complete' : notif.type === 'excel' ? 'Excel Export Ready' : 'PDF Export Ready'}
                     </h5>
-                    <p className="text-[11px] font-semibold text-zinc-400 leading-normal mt-0.5">
+                    <p className={cn("text-[11px] font-medium leading-normal mt-0.5", isDark ? "text-slate-400" : "text-slate-500")}>
                       {notif.message}
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={() => backgroundExportManager.dismissNotification(notif.id)}
-                  className="p-1 rounded-md text-zinc-500 hover:text-white hover:bg-zinc-900 transition-all cursor-pointer shrink-0"
+                  className={cn(
+                    "p-1 rounded-md transition-all cursor-pointer shrink-0",
+                    isDark
+                      ? "text-slate-400 hover:text-white hover:bg-zinc-900"
+                      : "text-slate-400 hover:text-slate-900 hover:bg-slate-100"
+                  )}
                 >
                   <X size={14} />
                 </button>
@@ -268,7 +280,12 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => backgroundExportManager.dismissNotification(notif.id)}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-white hover:bg-zinc-900 transition-colors cursor-pointer border border-zinc-900"
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer border",
+                    isDark
+                      ? "text-slate-400 hover:text-white hover:bg-zinc-900 border-zinc-800"
+                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-100 border-slate-200"
+                  )}
                 >
                   Dismiss
                 </button>
@@ -285,7 +302,7 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                       backgroundExportManager.downloadCompletedReport(notif.taskId);
                     }
                   }}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest bg-indigo-600 hover:bg-indigo-700 text-white transition-colors cursor-pointer"
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white transition-colors cursor-pointer"
                 >
                   {notif.type === 'ai' ? 'Review Entries' : 'Download'}
                 </button>
@@ -305,18 +322,19 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
             className="fixed top-6 left-1/2 z-[200] max-w-md w-full px-4 select-none pointer-events-none"
           >
             <div className={cn(
-              "p-4 rounded-2xl shadow-xl flex items-center gap-3 border pointer-events-auto backdrop-blur-md",
+              "p-4 rounded-2xl shadow-xl flex items-center gap-3 border pointer-events-auto",
+              isDark ? "bg-zinc-950" : "bg-white",
               showToast.type === 'success' 
-                ? "bg-emerald-500/10 border-emerald-500 text-emerald-800 dark:text-emerald-400"
+                ? isDark ? "border-emerald-800/60 text-emerald-300" : "border-emerald-200 text-emerald-800"
                 : showToast.type === 'error'
-                ? "bg-rose-500/10 border-rose-500 text-rose-800 dark:text-rose-400"
-                : "bg-indigo-500/10 border-indigo-500 text-indigo-800 dark:text-indigo-400"
+                ? isDark ? "border-rose-800/60 text-rose-300" : "border-rose-200 text-rose-800"
+                : isDark ? "border-indigo-800/60 text-indigo-300" : "border-indigo-200 text-indigo-700"
             )}>
               {showToast.type === 'success' && <CheckCircle size={22} className="shrink-0 text-emerald-500" />}
               {showToast.type === 'error' && <AlertTriangle size={22} className="shrink-0 text-rose-500" />}
               {showToast.type === 'info' && <Loader2 size={22} className="shrink-0 text-indigo-500 animate-spin" />}
               
-              <div className="flex-1 text-sm font-black tracking-tight leading-snug">
+              <div className="flex-1 text-sm font-bold tracking-tight leading-snug">
                 {showToast.message}
               </div>
             </div>
@@ -330,8 +348,8 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
           <>
             {/* Click-away backdrop overlay */}
             <div 
-              className="fixed inset-0 z-[140] bg-black/5 dark:bg-black/20"
-              onClick={() => setIsOpen(false)}
+              className={cn("fixed inset-0 z-[140]", isDark ? "bg-black/40" : "bg-slate-900/20")}
+              onClick={() => { setIsOpen(false); setConfirmClearAll(false); }}
             />
 
             <motion.div
@@ -341,39 +359,73 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
               exit={{ opacity: 0, y: 15, scale: 0.96 }}
               className={cn(
                 "fixed top-[70px] right-4 left-4 sm:left-auto sm:right-4 z-[150] w-auto sm:w-[420px] max-w-lg rounded-3xl p-5 border shadow-2xl overflow-hidden flex flex-col max-h-[85vh] transition-all",
-                theme === 'dark' 
-                  ? "bg-zinc-950/95 border-zinc-900 text-white backdrop-blur-xl" 
-                  : "bg-white/95 border-slate-100 text-slate-800 backdrop-blur-xl"
+                isDark
+                  ? "border-zinc-800 bg-zinc-950 text-slate-100"
+                  : "border-slate-200 bg-white text-slate-900"
               )}
             >
               {/* Header block */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-zinc-900">
+              <div className={cn("flex items-center justify-between pb-3 border-b", isDark ? "border-zinc-800" : "border-slate-100")}>
                 <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-xl bg-indigo-500/10 text-indigo-500">
+                  <div className={cn("p-1.5 rounded-xl", isDark ? "bg-indigo-950/70 text-indigo-400" : "bg-indigo-50 text-indigo-600")}>
                     <DownloadCloud size={18} />
                   </div>
                   <div>
-                    <h4 className="text-sm font-black tracking-tight font-sans">Download Center</h4>
-                    <p className="text-[10px] uppercase font-bold text-slate-400 font-mono">Persistent Export Queue</p>
+                    <h4 className={cn("text-sm font-bold tracking-tight font-sans", isDark ? "text-white" : "text-slate-900")}>Download Center</h4>
+                    <p className={cn("text-[10px] uppercase font-bold font-mono", isDark ? "text-slate-400" : "text-slate-500")}>Persistent Export Queue</p>
                   </div>
                 </div>
                 
                 <div className="flex items-center gap-2">
+                  {confirmClearAll ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await backgroundExportManager.clearAllData();
+                          setConfirmClearAll(false);
+                          triggerToast('Local export queue cleared', 'info');
+                        }}
+                        className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-700 text-white font-bold text-[9px] uppercase tracking-wider transition-colors cursor-pointer"
+                      >
+                        Confirm Wipe
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmClearAll(false);
+                        }}
+                        className={cn(
+                          "px-2 py-1 rounded font-bold text-[9px] uppercase tracking-wider transition-colors cursor-pointer",
+                          isDark ? "bg-zinc-800 hover:bg-zinc-700 text-slate-300" : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+                        )}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmClearAll(true);
+                      }}
+                      className={cn(
+                        "px-2 py-1 rounded font-bold text-[9px] uppercase tracking-wider transition-colors cursor-pointer border",
+                        isDark
+                          ? "bg-rose-950/40 hover:bg-rose-950/70 text-rose-400 border-rose-900/50"
+                          : "bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200"
+                      )}
+                      title="Wipe local IndexedDB databases"
+                    >
+                      Clear All Data
+                    </button>
+                  )}
                   <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      if (confirm("Are you sure you want to completely wipe all local databases? This action is irreversible.")) {
-                        await backgroundExportManager.clearAllData();
-                      }
-                    }}
-                    className="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 font-bold text-[9px] uppercase tracking-wider transition-colors cursor-pointer border border-rose-500/20"
-                    title="completely wipe local IndexedDB databases"
-                  >
-                    Clear All Data
-                  </button>
-                  <button
-                    onClick={() => setIsOpen(false)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-all cursor-pointer"
+                    onClick={() => { setIsOpen(false); setConfirmClearAll(false); }}
+                    className={cn(
+                      "p-1.5 rounded-lg transition-all cursor-pointer",
+                      isDark ? "text-slate-400 hover:text-slate-200 hover:bg-zinc-900" : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                    )}
                   >
                     <X size={16} />
                   </button>
@@ -381,14 +433,14 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
               </div>
 
               {/* Active / Archive Tabs */}
-              <div className="flex border-b border-slate-100 dark:border-zinc-900 mt-3 shrink-0">
+              <div className={cn("flex border-b mt-3 shrink-0", isDark ? "border-zinc-800" : "border-slate-100")}>
                 <button
                   onClick={() => { setActiveTab('active'); setExpandedTaskId(null); }}
                   className={cn(
-                    "flex-1 pb-2.5 text-xs font-black tracking-tight text-center border-b-2 cursor-pointer transition-all",
+                    "flex-1 pb-2.5 text-xs font-bold tracking-tight text-center border-b-2 cursor-pointer transition-all",
                     activeTab === 'active'
-                      ? "border-indigo-500 text-indigo-500 dark:text-indigo-400"
-                      : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      ? isDark ? "border-indigo-500 text-indigo-400" : "border-indigo-600 text-indigo-600"
+                      : isDark ? "border-transparent text-slate-400 hover:text-slate-200" : "border-transparent text-slate-500 hover:text-slate-900"
                   )}
                 >
                   Processing Center ({tasks.filter(t => !t.isArchived).length})
@@ -396,10 +448,10 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                 <button
                   onClick={() => { setActiveTab('archive'); setExpandedTaskId(null); }}
                   className={cn(
-                    "flex-1 pb-2.5 text-xs font-black tracking-tight text-center border-b-2 cursor-pointer transition-all flex items-center justify-center gap-1.5",
+                    "flex-1 pb-2.5 text-xs font-bold tracking-tight text-center border-b-2 cursor-pointer transition-all flex items-center justify-center gap-1.5",
                     activeTab === 'archive'
-                      ? "border-indigo-500 text-indigo-500 dark:text-indigo-400"
-                      : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      ? isDark ? "border-indigo-500 text-indigo-400" : "border-indigo-600 text-indigo-600"
+                      : isDark ? "border-transparent text-slate-400 hover:text-slate-200" : "border-transparent text-slate-500 hover:text-slate-900"
                   )}
                 >
                   <Archive size={13} />
@@ -414,12 +466,14 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                     key={f}
                     onClick={() => setActiveFilter(f)}
                     className={cn(
-                      "px-2.5 py-1 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all cursor-pointer border",
+                      "px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all cursor-pointer border",
                       activeFilter === f
-                        ? "bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400 font-extrabold"
-                        : theme === 'dark'
-                        ? "bg-zinc-900/40 hover:bg-zinc-900 border-zinc-900 text-slate-400"
-                        : "bg-slate-50 hover:bg-slate-100 border-slate-100 text-slate-500"
+                        ? isDark
+                          ? "bg-indigo-950/60 border-indigo-700/60 text-indigo-300"
+                          : "bg-indigo-50 border-indigo-200 text-indigo-600"
+                        : isDark
+                        ? "bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-slate-400"
+                        : "bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-500"
                     )}
                   >
                     {f === 'all' ? 'All Items' : f === 'export' ? 'Exports' : 'AI Scans'}
@@ -428,15 +482,15 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
               </div>
 
               {/* Task list container */}
-              <div className="flex-1 overflow-y-auto py-1 space-y-3 pr-1 max-h-[45vh] scrollbar-thin scrollbar-thumb-slate-200">
+              <div className="flex-1 overflow-y-auto py-1 space-y-3 pr-1 max-h-[45vh] scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-zinc-800">
                 {filteredTasks.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-10 text-center space-y-3">
-                    <div className="p-4 rounded-full bg-slate-50 dark:bg-zinc-900/60 text-slate-300 dark:text-zinc-650">
+                    <div className={cn("p-4 rounded-full", isDark ? "bg-indigo-950/60 text-indigo-400" : "bg-indigo-50 text-indigo-600")}>
                       <Inbox size={30} />
                     </div>
                     <div className="space-y-1">
-                      <p className="text-xs font-black text-slate-400 uppercase tracking-wider font-sans">No tasks found</p>
-                      <p className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 max-w-xs leading-relaxed font-sans">
+                      <p className={cn("text-xs font-bold uppercase tracking-wider font-sans", isDark ? "text-white" : "text-slate-900")}>No tasks found</p>
+                      <p className={cn("text-[11px] font-medium max-w-xs leading-relaxed font-sans", isDark ? "text-slate-400" : "text-slate-500")}>
                         {activeTab === 'active' 
                           ? "Run an export or AI scan to track progress." 
                           : "Your archived jobs will appear here."}
@@ -462,14 +516,12 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                         className={cn(
                           "p-3 rounded-2xl border transition-colors relative overflow-hidden group space-y-2 flex flex-col cursor-pointer",
                           isProcessing 
-                            ? "bg-indigo-500/5 border-indigo-500/20" 
+                            ? isDark ? "bg-indigo-950/30 border-indigo-800/50" : "bg-indigo-50/50 border-indigo-200"
                             : isFailed 
-                            ? "bg-rose-500/5 border-rose-500/20"
+                            ? isDark ? "bg-rose-950/30 border-rose-900/50" : "bg-rose-50/60 border-rose-200"
                             : isPending 
-                            ? "bg-amber-500/5 border-amber-500/20"
-                            : theme === 'dark' 
-                            ? "bg-zinc-900/10 hover:bg-zinc-900/20 border-zinc-900" 
-                            : "bg-slate-50/20 hover:bg-slate-50/50 border-slate-100"
+                            ? isDark ? "bg-amber-950/30 border-amber-900/50" : "bg-amber-50/60 border-amber-200"
+                            : isDark ? "bg-zinc-900/60 hover:bg-zinc-900 border-zinc-800" : "bg-slate-50/50 hover:bg-slate-50 border-slate-200"
                         )}
                         onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
                       >
@@ -479,12 +531,12 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                             <div className={cn(
                               "p-1.5 rounded-lg shrink-0 flex items-center justify-center",
                               isCompleted 
-                                ? "bg-emerald-500/10 text-emerald-500" 
+                                ? isDark ? "bg-emerald-950/60 text-emerald-400" : "bg-emerald-50 text-emerald-600"
                                 : isFailed 
-                                ? "bg-rose-500/10 text-rose-500"
+                                ? isDark ? "bg-rose-950/60 text-rose-400" : "bg-rose-50 text-rose-600"
                                 : isProcessing
-                                ? "bg-indigo-500/10 text-indigo-600 animate-pulse"
-                                : "bg-amber-500/10 text-amber-500"
+                                ? isDark ? "bg-indigo-950/60 text-indigo-400 animate-pulse" : "bg-indigo-50 text-indigo-600 animate-pulse"
+                                : isDark ? "bg-amber-950/60 text-amber-400" : "bg-amber-50 text-amber-600"
                             )}>
                               {isCompleted && <CheckCircle size={15} />}
                               {isFailed && <AlertTriangle size={15} />}
@@ -493,18 +545,18 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                             </div>
                             
                             <div className="min-w-0 flex-1">
-                              <h5 className="text-xs font-black tracking-tight truncate font-sans flex items-center gap-1.5" title={task.cashbookName}>
+                              <h5 className={cn("text-xs font-bold tracking-tight truncate font-sans flex items-center gap-1.5", isDark ? "text-white" : "text-slate-900")} title={task.cashbookName}>
                                 <TypeIcon size={12} className="shrink-0 text-slate-400" />
                                 <span className="truncate">{task.cashbookName}</span>
                               </h5>
-                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-0.5 truncate font-mono flex items-center gap-1.5">
+                              <p className={cn("text-[9px] font-bold uppercase tracking-widest leading-none mt-0.5 truncate font-mono flex items-center gap-1.5", isDark ? "text-slate-400" : "text-slate-500")}>
                                 <span>{taskType.toUpperCase()} • {taskType === 'ai' ? `${task.attachmentsCount} Receipts` : `${task.transactionsCount} Entries`}</span>
                                 {isProcessing && taskType === 'ai' && task.networkState && (
                                   <span className={cn(
                                     "text-[8px] font-extrabold tracking-widest rounded px-1.5 py-0.5 leading-none font-sans uppercase",
-                                    task.networkState === 'offline' && "bg-rose-500/10 text-rose-500 animate-pulse border border-rose-500/20",
-                                    task.networkState === 'slow' && "bg-amber-500/10 text-amber-500 animate-pulse border border-amber-500/20",
-                                    task.networkState === 'good' && "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                                    task.networkState === 'offline' && "bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 animate-pulse border border-rose-200 dark:border-rose-800",
+                                    task.networkState === 'slow' && "bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 animate-pulse border border-amber-200 dark:border-amber-800",
+                                    task.networkState === 'good' && "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
                                   )}>
                                     {task.networkState}
                                   </span>
@@ -530,10 +582,10 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                                   }
                                 }}
                                 className={cn(
-                                  "p-1 rounded-md transition-colors cursor-pointer flex items-center gap-1 text-[10px] font-black uppercase tracking-wider",
+                                  "p-1 rounded-md transition-colors cursor-pointer flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider",
                                   taskType === 'ai' 
-                                    ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 px-2 py-1"
-                                    : "text-emerald-500 hover:bg-emerald-500/10"
+                                    ? isDark ? "bg-indigo-950/70 text-indigo-300 hover:bg-indigo-900/70 px-2 py-1" : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-2 py-1"
+                                    : isDark ? "text-emerald-400 hover:bg-emerald-950/60" : "text-emerald-600 hover:bg-emerald-50"
                                 )}
                                 title={taskType === 'ai' ? "Review Scan" : "Download local file"}
                               >
@@ -551,7 +603,7 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                             {isFailed && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleRetry(task.id); }}
-                                className="p-1 rounded-md text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                                className={cn("p-1 rounded-md transition-colors cursor-pointer", isDark ? "text-rose-400 hover:bg-rose-950/60" : "text-rose-600 hover:bg-rose-50")}
                                 title="Retry process"
                               >
                                 <RefreshCw size={13} />
@@ -571,7 +623,10 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                                     triggerToast('Job moved to archive', 'success');
                                   }
                                 }}
-                                className="p-1 rounded-md text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors cursor-pointer"
+                                className={cn(
+                                  "p-1 rounded-md transition-colors cursor-pointer",
+                                  isDark ? "text-slate-400 hover:text-indigo-400 hover:bg-indigo-950/60" : "text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
+                                )}
                                 title={task.isArchived ? "Restore to active queue" : "Archive job"}
                               >
                                 <Archive size={13} />
@@ -581,7 +636,10 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                             {!isProcessing && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleDelete(task.id); }}
-                                className="p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors cursor-pointer"
+                                className={cn(
+                                  "p-1 rounded-md transition-colors cursor-pointer",
+                                  isDark ? "text-slate-400 hover:text-rose-400 hover:bg-rose-950/60" : "text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                                )}
                                 title="Delete task record"
                               >
                                 <Trash2 size={13} />
@@ -592,14 +650,14 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
 
                         {/* Middle: Progress message/logs info */}
                         <div className="space-y-1.5">
-                          <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-400 gap-2">
+                          <div className={cn("flex justify-between items-center text-[10px] font-bold uppercase tracking-widest gap-2", isDark ? "text-slate-400" : "text-slate-500")}>
                             <span className={cn(
-                              "font-semibold lowercase tracking-normal text-left leading-tight flex-1 min-w-0 truncate font-sans flex items-center gap-1.5",
-                              isFailed && "text-rose-500 uppercase tracking-widest font-black"
+                              "font-medium lowercase tracking-normal text-left leading-tight flex-1 min-w-0 truncate font-sans flex items-center gap-1.5",
+                              isFailed && "text-rose-500 uppercase tracking-widest font-bold"
                             )}>
                               <span>{task.message}</span>
                               {isProcessing && task.aiTimeRemaining && (
-                                <span className="font-mono text-[9px] text-indigo-500 dark:text-indigo-400 font-bold uppercase shrink-0 animate-pulse">
+                                <span className={cn("font-mono text-[9px] font-bold uppercase shrink-0 animate-pulse", isDark ? "text-indigo-400" : "text-indigo-600")}>
                                   ({task.aiTimeRemaining} remaining)
                                 </span>
                               )}
@@ -608,15 +666,15 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                           </div>
 
                           {/* Horizontal progress bar */}
-                          <div className="w-full h-1.5 bg-slate-100 dark:bg-zinc-900 rounded-full overflow-hidden">
+                          <div className={cn("w-full h-1.5 rounded-full overflow-hidden", isDark ? "bg-zinc-800" : "bg-slate-200/70")}>
                             <motion.div
                               className={cn(
                                 "h-full rounded-full",
                                 isCompleted 
                                   ? "bg-emerald-500" 
                                   : isFailed 
-                                  ? "bg-rose-500"
-                                  : "bg-indigo-500"
+                                  ? "bg-rose-500" 
+                                  : "bg-indigo-600 dark:bg-indigo-500"
                               )}
                               initial={{ width: 0 }}
                               animate={{ width: `${isCompleted ? 100 : task.progress}%` }}
@@ -625,14 +683,14 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                           </div>
                         </div>
 
-                        {/* Expanded details accordion (Feature 13) */}
+                        {/* Expanded details accordion */}
                         <AnimatePresence>
                           {isExpanded && (
                             <motion.div
                               initial={{ height: 0, opacity: 0 }}
                               animate={{ height: 'auto', opacity: 1 }}
                               exit={{ height: 0, opacity: 0 }}
-                              className="border-t border-slate-100/40 dark:border-zinc-900/40 pt-2.5 mt-1 text-[11px] font-sans text-slate-500 dark:text-zinc-400 space-y-2"
+                              className={cn("border-t pt-2.5 mt-1 text-[11px] font-sans space-y-2", isDark ? "border-zinc-800 text-slate-400" : "border-slate-200 text-slate-500")}
                               onClick={(e) => e.stopPropagation()}
                             >
                               <div className="grid grid-cols-2 gap-2">
@@ -640,7 +698,7 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                                   <p className="text-[9px] uppercase font-bold text-slate-400 font-mono flex items-center gap-1">
                                     <Calendar size={10} /> Created
                                   </p>
-                                  <p className="font-semibold text-slate-700 dark:text-slate-300">
+                                  <p className={cn("font-semibold", isDark ? "text-slate-200" : "text-slate-900")}>
                                     {new Date(task.createdAt).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: 'short' })}
                                   </p>
                                 </div>
@@ -648,17 +706,17 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                                   <p className="text-[9px] uppercase font-bold text-slate-400 font-mono flex items-center gap-1">
                                     <Clock size={10} /> Duration
                                   </p>
-                                  <p className="font-semibold text-slate-700 dark:text-slate-300">
+                                  <p className={cn("font-semibold", isDark ? "text-slate-200" : "text-slate-900")}>
                                     {task.durationMs ? `${(task.durationMs / 1000).toFixed(1)}s` : isProcessing ? 'In progress...' : '-'}
                                   </p>
                                 </div>
                               </div>
 
-                              <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-slate-50 dark:border-zinc-900/30">
+                              <div className={cn("grid grid-cols-2 gap-2 pt-1.5 border-t", isDark ? "border-zinc-800" : "border-slate-100")}>
                                 <div className="space-y-1">
                                   <p className="text-[9px] uppercase font-bold text-slate-400 font-mono">Job Status</p>
                                   <p className={cn(
-                                    "font-black uppercase tracking-wider text-[10px]",
+                                    "font-bold uppercase tracking-wider text-[10px]",
                                     isCompleted ? "text-emerald-500" : isFailed ? "text-rose-500" : "text-indigo-500"
                                   )}>
                                     {task.status}
@@ -668,14 +726,14 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                                   {taskType === 'ai' ? (
                                     <>
                                       <p className="text-[9px] uppercase font-bold text-slate-400 font-mono">Receipts Summary</p>
-                                      <p className="font-semibold text-slate-700 dark:text-slate-300">
+                                      <p className={cn("font-semibold", isDark ? "text-slate-200" : "text-slate-900")}>
                                         Total: {task.attachmentsCount} • Ok: {task.aiSuccessCount || 0} • Err: {task.aiFailedCount || 0}
                                       </p>
                                     </>
                                   ) : (
                                     <>
                                       <p className="text-[9px] uppercase font-bold text-slate-400 font-mono">Entries</p>
-                                      <p className="font-semibold text-slate-700 dark:text-slate-300">
+                                      <p className={cn("font-semibold", isDark ? "text-slate-200" : "text-slate-900")}>
                                         {task.transactionsCount} Transactions
                                       </p>
                                     </>
@@ -684,7 +742,10 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
                               </div>
 
                               {task.error && (
-                                <div className="p-1.5 rounded-lg bg-rose-500/5 border border-rose-500/10 text-rose-500 font-mono text-[9px] break-words">
+                                <div className={cn(
+                                  "p-1.5 rounded-lg border font-mono text-[9px] break-words",
+                                  isDark ? "bg-rose-950/50 border-rose-900/60 text-rose-400" : "bg-rose-50 border-rose-200 text-rose-600"
+                                )}>
                                   Error: {task.error}
                                 </div>
                               )}
@@ -698,9 +759,14 @@ export default function DownloadCenter({ theme, isOpen, setIsOpen }: DownloadCen
               </div>
 
               {/* Banner tooltip/notice */}
-              <div className="mt-2.5 p-3 rounded-2xl bg-slate-50 dark:bg-zinc-900/50 flex gap-2 border border-slate-100/50 dark:border-zinc-900/50 shrink-0">
-                <Info size={14} className="text-indigo-500 shrink-0 mt-0.5" />
-                <p className="text-[10px] font-semibold text-slate-500 dark:text-zinc-400 leading-normal font-sans">
+              <div className={cn(
+                "mt-2.5 p-3 rounded-2xl flex gap-2 border shrink-0",
+                isDark
+                  ? "bg-indigo-950/35 border-indigo-800/40"
+                  : "bg-indigo-50/70 border-indigo-200/70"
+              )}>
+                <Info size={14} className={cn("shrink-0 mt-0.5", isDark ? "text-indigo-400" : "text-indigo-600")} />
+                <p className={cn("text-[10px] font-medium leading-normal font-sans", isDark ? "text-slate-300" : "text-slate-700")}>
                   All PDF, Excel, and AI scanning compiles block-by-block asynchronously. You can switch books, add transactions, or close modals safely; our background queue takes care of everything.
                 </p>
               </div>

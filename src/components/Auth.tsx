@@ -152,7 +152,7 @@ export default function Auth({
             password,
           });
           if (!autoSignInError) {
-            navigate('/cashbooks');
+            navigate('/');
             return;
           }
         } catch (_) {}
@@ -196,7 +196,7 @@ export default function Auth({
         }
 
         setSuccess('Logged in successfully!');
-        navigate('/cashbooks');
+        navigate('/');
 
       } else if (mode === 'forgot') {
         const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {

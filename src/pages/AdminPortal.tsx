@@ -284,8 +284,7 @@ export default function AdminPortal() {
       sessionStorage.clear();
       if (savedTheme) localStorage.setItem('theme', savedTheme);
       if (savedAdmin) sessionStorage.setItem('admin_session', savedAdmin);
-      addLog("Purged index lists and local cached preferences cleanly.");
-      alert("Cached storage arrays clean! Credentials maintained.");
+      addLog("Purged index lists and local cached preferences cleanly. Credentials maintained.");
     }
   };
 

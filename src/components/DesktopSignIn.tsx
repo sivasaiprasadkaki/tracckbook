@@ -56,15 +56,15 @@ export default function DesktopSignIn({
   const { runawayProps } = useRunawayButton(isSignInFormValid);
 
   return (
-    <div className="min-h-screen bg-[#fbf8ff] text-[#1b1a23] antialiased flex flex-col justify-between selection:bg-[#4648d4]/15 selection:text-[#4648d4] font-['Inter',sans-serif]">
+    <div className="min-h-screen bg-white text-slate-900 antialiased flex flex-col justify-between selection:bg-indigo-500/15 selection:text-indigo-600">
       <style>{`
         .pulse-ring {
-          box-shadow: 0 0 0 0 rgba(132, 85, 239, 0.4);
+          box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
           animation: pulseRing 2.5s infinite cubic-bezier(0.66, 0, 0, 1);
         }
         @keyframes pulseRing {
           to {
-            box-shadow: 0 0 0 16px rgba(132, 85, 239, 0);
+            box-shadow: 0 0 0 16px rgba(99, 102, 241, 0);
           }
         }
         .float-card {
@@ -89,11 +89,11 @@ export default function DesktopSignIn({
           whileTap={{ scale: 0.98 }}
           className="flex items-center gap-3 cursor-pointer select-none"
         >
-          <div className="w-10 h-10 rounded-xl bg-[#4648d4] flex items-center justify-center text-white shadow-md shadow-[#4648d4]/20 hover:opacity-90 transition-opacity">
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/20 hover:bg-indigo-700 transition-colors">
             <span className="material-symbols-outlined text-2xl">menu_book</span>
           </div>
           <span 
-            className="text-xl tracking-normal text-[#4648d4]"
+            className="text-xl tracking-normal text-indigo-600"
             style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 400 }}
           >
             TrackBook
@@ -108,10 +108,10 @@ export default function DesktopSignIn({
           initial={{ opacity: 0, x: -30 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-          className="hidden lg:flex flex-col justify-center items-center relative p-10 lg:p-12 bg-slate-900 rounded-3xl overflow-hidden text-white shadow-2xl min-h-[560px] select-none"
+          className="hidden lg:flex flex-col justify-center items-center relative p-10 lg:p-12 bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 rounded-3xl overflow-hidden text-white shadow-2xl min-h-[560px] select-none"
         >
           {/* Ambient Glows */}
-          <div className="absolute top-0 right-0 w-80 h-80 bg-[#4648d4]/25 rounded-full blur-[100px] pointer-events-none animate-pulse" />
+          <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/25 rounded-full blur-[100px] pointer-events-none animate-pulse" />
           <div className="absolute bottom-0 left-0 w-80 h-80 bg-[#8455ef]/20 rounded-full blur-[100px] pointer-events-none animate-pulse" style={{ animationDelay: '1s' }} />
 
           {/* Floating Expense Card Mockup */}
@@ -119,32 +119,32 @@ export default function DesktopSignIn({
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.6, delay: 0.15 }}
-            className="relative z-10 w-full max-w-sm flex flex-col gap-5 float-card font-['Inter',sans-serif]"
+            className="relative z-10 w-full max-w-sm flex flex-col gap-5 float-card"
           >
             {/* Top Summary Card */}
-            <div className="bg-white/10 backdrop-blur-md border border-white/15 p-6 rounded-2xl shadow-xl">
+            <div className="bg-white/10 backdrop-blur-md border border-white/15 p-6 rounded-2xl shadow-lg">
               <div className="flex justify-between items-start mb-3">
                 <div>
-                  <span className="text-[11px] font-semibold tracking-wider text-slate-300 uppercase font-['Inter',sans-serif]">
+                  <span className="text-[11px] font-semibold tracking-wider text-indigo-200 uppercase">
                     TOTAL EXPENSES
                   </span>
-                  <div className="text-3xl font-bold tracking-tight text-white mt-1 font-['Inter',sans-serif] flex items-baseline">
+                  <div className="text-3xl font-bold tracking-tight text-white mt-1 flex items-baseline tabular-nums">
                     <TypewriterText 
                       text="₹41,800.00" 
                       speed={85} 
                       delay={250} 
-                      cursorClassName="w-[3px] h-[0.8em] bg-white ml-1 inline-block align-baseline rounded-full" 
+                      cursorClassName="w-[3px] h-[0.8em] bg-indigo-400 ml-1 inline-block align-baseline rounded-full" 
                     />
                   </div>
                 </div>
-                <div className="w-10 h-10 rounded-xl bg-[#8455ef]/30 text-[#8455ef] border border-[#8455ef]/40 flex items-center justify-center pulse-ring">
-                  <span className="material-symbols-outlined text-xl text-indigo-200">receipt_long</span>
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/25 text-indigo-300 border border-indigo-400/30 flex items-center justify-center pulse-ring">
+                  <span className="material-symbols-outlined text-xl text-indigo-300">receipt_long</span>
                 </div>
               </div>
 
               {/* Sparkline Curve */}
               <div className="pt-2">
-                <svg className="w-full h-12 stroke-indigo-300 fill-none" viewBox="0 0 300 60">
+                <svg className="w-full h-12 stroke-indigo-400 fill-none" viewBox="0 0 300 60">
                   <motion.path
                     d="M 0 45 C 50 30, 80 50, 130 20 C 180 -5, 230 40, 300 15"
                     strokeWidth="3"
@@ -155,7 +155,7 @@ export default function DesktopSignIn({
                   />
                   <path
                     d="M 0 45 C 50 30, 80 50, 130 20 C 180 -5, 230 40, 300 15 L 300 60 L 0 60 Z"
-                    fill="rgba(132, 85, 239, 0.15)"
+                    fill="rgba(99, 102, 241, 0.16)"
                     stroke="none"
                   />
                 </svg>
@@ -212,10 +212,10 @@ export default function DesktopSignIn({
               transition={{ duration: 0.5, delay: 0.1 }}
               className="mb-6"
             >
-              <h1 className="text-3xl sm:text-[34px] lg:text-[36px] font-bold tracking-tight text-[#1b1a23] leading-tight font-['Hanken_Grotesk',sans-serif]">
+              <h1 className="text-3xl sm:text-[34px] lg:text-[36px] font-bold tracking-tight text-slate-900 leading-tight">
                 Welcome back to TrackBook
               </h1>
-              <p className="mt-2 text-[15px] text-[#474556] leading-relaxed font-normal font-['Inter',sans-serif]">
+              <p className="mt-2 text-[15px] text-slate-500 leading-relaxed font-normal">
                 Track your expenses, understand your money, and stay in control.
               </p>
             </motion.div>
@@ -271,14 +271,14 @@ export default function DesktopSignIn({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="siva@gmail.com"
-                  className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-[#4648d4] focus:ring-2 focus:ring-[#4648d4]/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400 font-['Inter',sans-serif]"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400"
                 />
               </div>
 
               {/* Password */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-[11px] font-semibold tracking-wider text-slate-700 uppercase font-['Inter',sans-serif]">
+                  <label className="block text-[11px] font-semibold tracking-wider text-slate-700 uppercase">
                     PASSWORD
                   </label>
                   <button
@@ -287,7 +287,7 @@ export default function DesktopSignIn({
                       setMode('forgot');
                       navigate('/forgot');
                     }}
-                    className="text-xs font-semibold text-[#4648d4] hover:underline cursor-pointer bg-transparent border-none p-0 font-['Inter',sans-serif]"
+                    className="text-xs font-semibold text-indigo-600 hover:underline cursor-pointer bg-transparent border-none p-0"
                   >
                     Forgot password?
                   </button>
@@ -299,7 +299,7 @@ export default function DesktopSignIn({
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
-                    className="w-full pl-4 pr-11 py-3 rounded-xl border border-slate-300 focus:border-[#4648d4] focus:ring-2 focus:ring-[#4648d4]/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400 font-['Inter',sans-serif]"
+                    className="w-full pl-4 pr-11 py-3 rounded-xl border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/20 outline-none text-sm bg-white transition-all text-slate-900 placeholder-slate-400"
                   />
                   <button
                     type="button"
@@ -318,9 +318,9 @@ export default function DesktopSignIn({
                     type="checkbox"
                     checked={rememberMe}
                     onChange={(e) => setRememberMe(e.target.checked)}
-                    className="w-4 h-4 rounded text-[#4648d4] focus:ring-[#4648d4] border-slate-300 cursor-pointer"
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer"
                   />
-                  <span className="text-xs font-medium text-slate-600 font-['Inter',sans-serif]">Remember me</span>
+                  <span className="text-xs font-medium text-slate-600">Remember me</span>
                 </label>
               </div>
 
@@ -328,7 +328,7 @@ export default function DesktopSignIn({
               <motion.button
                 {...runawayProps}
                 disabled={loading}
-                className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#4648d4] to-[#6052a8] text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-[#4648d4]/25 hover:shadow-lg hover:shadow-[#4648d4]/35 hover:brightness-105 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-['Inter',sans-serif]"
+                className="w-full py-3.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs tracking-wider uppercase shadow-md shadow-indigo-600/20 hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {loading ? (
                   <>
@@ -343,7 +343,7 @@ export default function DesktopSignIn({
               {/* Divider */}
               <div className="relative flex items-center justify-center my-4">
                 <div className="border-t border-slate-200 w-full" />
-                <span className="bg-[#fbf8ff] px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-widest font-['Inter',sans-serif]">
+                <span className="bg-white px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-widest">
                   OR
                 </span>
               </div>
@@ -394,7 +394,7 @@ export default function DesktopSignIn({
                     setMode('signup');
                     navigate('/signup');
                   }}
-                  className="font-semibold text-[#4648d4] hover:underline cursor-pointer bg-transparent border-none p-0 inline font-['Inter',sans-serif]"
+                  className="font-semibold text-indigo-600 hover:underline cursor-pointer bg-transparent border-none p-0 inline"
                 >
                   Create an account
                 </button>

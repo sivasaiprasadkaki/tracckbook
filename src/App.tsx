@@ -2,14 +2,48 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { Loader2 } from 'lucide-react';
-import { cn } from './lib/utils';
 import SmartUpdateManager from './components/SmartUpdateManager';
 import AutoLogoutManager from './components/AutoLogoutManager';
 
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Login = lazy(() => import('./pages/Login'));
-const ResetPassword = lazy(() => import('./pages/ResetPassword'));
-const AdminPortal = lazy(() => import('./pages/AdminPortal'));
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  importer: () => Promise<{ default: T }>,
+  retries = 2
+): React.LazyExoticComponent<T> {
+  return lazy(async () => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const mod = await importer();
+        try {
+          sessionStorage.removeItem('trackbook_chunk_reload_at');
+        } catch {}
+        return mod;
+      } catch (err) {
+        lastError = err;
+        if (attempt < retries) {
+          await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
+        }
+      }
+    }
+
+    // If a stale chunk or transient dev-server reload caused the fetch failure, auto-reload once safely
+    try {
+      const lastReload = Number(sessionStorage.getItem('trackbook_chunk_reload_at') || '0');
+      if (Date.now() - lastReload > 15000) {
+        sessionStorage.setItem('trackbook_chunk_reload_at', String(Date.now()));
+        window.location.reload();
+        return new Promise<{ default: T }>(() => {});
+      }
+    } catch {}
+
+    throw lastError;
+  });
+}
+
+const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'));
+const Login = lazyWithRetry(() => import('./pages/Login'));
+const ResetPassword = lazyWithRetry(() => import('./pages/ResetPassword'));
+const AdminPortal = lazyWithRetry(() => import('./pages/AdminPortal'));
 
 function NavigationHandler({ 
   session, 
@@ -166,7 +200,6 @@ export default function App() {
               session ? (
                 <Dashboard session={session} theme={theme} setTheme={setTheme} />
               ) : (
-                // If we are still loading initial session, show a loader
                 loading ? (
                   <div className="min-h-screen flex items-center justify-center bg-white dark:bg-black">
                     <div className="flex flex-col items-center gap-4">

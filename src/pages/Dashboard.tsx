@@ -63,7 +63,8 @@ import {
   Phone,
   CheckCircle2,
   Mail,
-  Lock
+  Lock,
+  Compass
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -87,6 +88,17 @@ import { PdfExportQualityModal } from '../components/PdfExportQualityModal';
 import { buildTransactionsWorksheet } from '../services/exportManager';
 import TransactionProcessingModal, { ProcessingStep } from '../components/TransactionProcessingModal';
 import PdfPageSelectorModal from '../components/PdfPageSelectorModal';
+import {
+  SpotlightTour,
+  TourUpdateBanner,
+  TourStep,
+  TourScope,
+  TourModalCoach,
+  getTourStatus,
+  setTourStatus,
+  getMandatoryTourState,
+  setMandatoryTourState,
+} from '../components/SpotlightTour';
 
 interface TimelineStep {
   id: string;
@@ -409,6 +421,7 @@ const CashbookListCard = React.memo(({
   justEdited,
   theme,
   canDelete = true,
+  dataTour,
   onTouchStart,
   onTouchEnd,
   onPress,
@@ -422,6 +435,7 @@ const CashbookListCard = React.memo(({
   justEdited: boolean;
   theme: string;
   canDelete?: boolean;
+  dataTour?: string;
   onTouchStart: (id: string) => void;
   onTouchEnd: () => void;
   onPress: (id: string) => void;
@@ -432,6 +446,7 @@ const CashbookListCard = React.memo(({
   return (
     <div
       key={book.id}
+      data-tour={dataTour}
       onMouseDown={() => onTouchStart(book.id)}
       onMouseUp={onTouchEnd}
       onTouchStart={() => onTouchStart(book.id)}
@@ -490,6 +505,7 @@ const CashbookListCard = React.memo(({
         <div className="flex items-center gap-0.5 sm:gap-1 pl-2 sm:pl-3 border-l border-slate-200 dark:border-zinc-800 shrink-0">
           <button 
             type="button"
+            data-tour={dataTour ? 'book-edit-btn' : undefined}
             onClick={(e) => onEdit(book, e)}
             className="p-1.5 sm:p-2 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-zinc-800/80 rounded-none transition-colors cursor-pointer"
             title="Edit Book"
@@ -500,6 +516,7 @@ const CashbookListCard = React.memo(({
           {canDelete && (
             <button 
               type="button"
+              data-tour={dataTour ? 'book-delete-btn' : undefined}
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(book.id, e);
@@ -1198,7 +1215,8 @@ const MobileTransactionRow = React.memo(({
   handleDeleteTransaction,
   theme,
   index,
-  isJustEdited
+  isJustEdited,
+  isTourFirstRow
 }: {
   t: Transaction;
   runningBalance: number;
@@ -1218,6 +1236,7 @@ const MobileTransactionRow = React.memo(({
   theme: string;
   index: number;
   isJustEdited?: boolean;
+  isTourFirstRow?: boolean;
 }) => {
   return (
     <motion.div
@@ -1420,6 +1439,7 @@ const MobileTransactionRow = React.memo(({
 
         <div className="flex items-center gap-1.5 shrink-0">
           <button 
+            data-tour={isTourFirstRow ? 'entry-edit-btn' : undefined}
             onClick={(e) => { e.stopPropagation(); handleEditTransaction(t); }}
             className={cn(
               "w-8 h-8 flex items-center justify-center rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-90 border shadow-sm",
@@ -1430,6 +1450,7 @@ const MobileTransactionRow = React.memo(({
             <Pencil size={12.5} />
           </button>
           <button 
+            data-tour={isTourFirstRow ? 'entry-delete-btn' : undefined}
             onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }}
             className={cn(
               "w-8 h-8 flex items-center justify-center rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-90 border shadow-sm",
@@ -1462,7 +1483,8 @@ const DesktopTransactionRow = React.memo(({
   setPreviewZoom,
   theme,
   index,
-  isJustEdited
+  isJustEdited,
+  isTourFirstRow
 }: {
   t: Transaction;
   runningBalance: number;
@@ -1480,6 +1502,7 @@ const DesktopTransactionRow = React.memo(({
   theme: string;
   index: number;
   isJustEdited?: boolean;
+  isTourFirstRow?: boolean;
 }) => {
   return (
     <motion.tr 
@@ -1614,9 +1637,13 @@ const DesktopTransactionRow = React.memo(({
         <span>{formatCurrency(runningBalance)}</span>
       </td>
       <td className="px-3 sm:px-6 py-4">
-        <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className={cn(
+          "flex items-center justify-center gap-2 transition-opacity",
+          isTourFirstRow ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        )}>
           <button 
             type="button"
+            data-tour={isTourFirstRow ? 'entry-edit-btn' : undefined}
             onClick={() => handleEditTransaction(t)}
             className={cn(
               "p-1.5 text-slate-400 rounded-lg transition-all cursor-pointer",
@@ -1627,6 +1654,7 @@ const DesktopTransactionRow = React.memo(({
           </button>
           <button 
             type="button"
+            data-tour={isTourFirstRow ? 'entry-delete-btn' : undefined}
             onClick={() => handleDeleteTransaction(t.id)}
             className={cn(
               "p-1.5 text-slate-400 rounded-lg transition-all cursor-pointer",
@@ -2074,8 +2102,39 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   const [isHelpLoading, setIsHelpLoading] = useState(false);
   const [books, setBooks] = useState<Cashbook[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasInitialDataSynced, setHasInitialDataSynced] = useState(false);
+  const [isTourOpen, setIsTourOpen] = useState(false);
+  const [isTourMandatory, setIsTourMandatory] = useState(false);
+  const [activeTourScope, setActiveTourScope] = useState<TourScope>('home');
+  const [tourBannerScope, setTourBannerScope] = useState<TourScope | null>(null);
+  const [tourStepId, setTourStepId] = useState<string | null>(null);
+  const [tourFeedback, setTourFeedback] = useState<string | null>(null);
+  const [tourCreatedBookId, setTourCreatedBookId] = useState<string | null>(null);
+  const tourUserId = session?.user?.id;
+  const homeTourEvaluatedRef = useRef(false);
+  const cashbookTourEvaluatedRef = useRef(false);
+  const pendingCashbookTourRef = useRef(false);
+  const tourAutoLaunchTimerRef = useRef<number | null>(null);
+  const prevTourInteractiveRef = useRef<{
+    showForm: 'in' | 'out' | null;
+    showAiWarning: boolean;
+    showImportDropdown: boolean;
+    showImportModal: boolean;
+    showExcelImportModal: boolean;
+    showBookMenu: boolean;
+  }>({
+    showForm: null,
+    showAiWarning: false,
+    showImportDropdown: false,
+    showImportModal: false,
+    showExcelImportModal: false,
+    showBookMenu: false,
+  });
   const [activeBookId, setActiveBookIdState] = useState<string | null>(null);
   const [isEntriesLoading, setIsEntriesLoading] = useState(false);
+  const [bookCreateError, setBookCreateError] = useState<string | null>(null);
+  const [bookEditError, setBookEditError] = useState<string | null>(null);
+  const isCreatingBookSubmitRef = useRef(false);
 
   const setActiveBookId = (id: string | null) => {
     setActiveBookIdState(id);
@@ -3714,6 +3773,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     } finally {
       setIsLoading(false);
       setIsEntriesLoading(false);
+      setHasInitialDataSynced(true);
     }
   }, [session, activeBookId]);
 
@@ -3721,6 +3781,827 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
   useEffect(() => {
     fetchData();
   }, [session, fetchData]);
+
+  // Auto-clear celebratory inline tour feedback after 4 seconds
+  useEffect(() => {
+    if (!tourFeedback) return;
+    const t = window.setTimeout(() => setTourFeedback(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [tourFeedback]);
+
+  // Cancel pending auto-launch timer and reset Cashbook evaluation whenever navigating between Home and a Cashbook
+  useEffect(() => {
+    const expectedScope: TourScope = activeBookId ? 'cashbook' : 'home';
+    setTourBannerScope((prev) => (prev && prev !== expectedScope ? null : prev));
+    if (tourAutoLaunchTimerRef.current !== null) {
+      window.clearTimeout(tourAutoLaunchTimerRef.current);
+      tourAutoLaunchTimerRef.current = null;
+    }
+    if (!activeBookId) {
+      cashbookTourEvaluatedRef.current = false;
+    }
+  }, [activeBookId]);
+
+  // Seamlessly carry an active Home Spotlight Tour straight into Cashbook when user opens their book
+  useEffect(() => {
+    if (!isTourOpen) return;
+    if (activeBookId && activeTourScope === 'home') {
+      setTourStatus('completed', 'home', tourUserId);
+      cashbookTourEvaluatedRef.current = true;
+      pendingCashbookTourRef.current = false;
+      setTourCreatedBookId(null);
+      setActiveTourScope('cashbook');
+      setTourStepId('summary-cards');
+      setTourFeedback('Cashbook opened! First, let’s review this screen—then we’ll tap every button together.');
+    } else if (!activeBookId && activeTourScope === 'cashbook') {
+      setActiveTourScope('home');
+      setTourStepId(null);
+    }
+  }, [activeBookId, isTourOpen, activeTourScope, tourUserId]);
+
+  // Interactive Spotlight Tour — First-Time User Mandatory Onboarding vs. Existing-User Reminder Popup (Home)
+  useEffect(() => {
+    if (activeBookId) return;
+    if (isLoading || !hasInitialDataSynced || homeTourEvaluatedRef.current || isTourOpen) return;
+
+    homeTourEvaluatedRef.current = true;
+    const mandatoryState = getMandatoryTourState(tourUserId);
+    const homeStatus = getTourStatus('home', tourUserId);
+    const cashbookStatus = getTourStatus('cashbook', tourUserId);
+
+    const totalEntries = books.reduce(
+      (sum, b) => sum + (Array.isArray(b.transactions) ? b.transactions.length : 0),
+      0
+    );
+    const hasExistingRecords = books.length > 0 || totalEntries > 0;
+
+    // Case 1: Brand-new first-time user (or reloaded midway through mandatory setup) -> MANDATORY tour (no Skip)
+    if (mandatoryState === 'active' || (!hasExistingRecords && homeStatus === null && cashbookStatus === null)) {
+      setMandatoryTourState('active', tourUserId);
+      setIsTourMandatory(true);
+      if (tourAutoLaunchTimerRef.current !== null) {
+        window.clearTimeout(tourAutoLaunchTimerRef.current);
+      }
+      tourAutoLaunchTimerRef.current = window.setTimeout(() => {
+        tourAutoLaunchTimerRef.current = null;
+        setActiveTourScope('home');
+        if (books.length > 0) {
+          setTourCreatedBookId(books[0].id);
+          setTourStepId('open-created-book');
+          setTourFeedback('Welcome back! Tap your book to continue and finish your guided setup.');
+        } else {
+          setTourCreatedBookId(null);
+          setTourStepId(null);
+        }
+        setIsTourOpen(true);
+      }, 650);
+      return;
+    }
+
+    // Case 2: Already logged-in / existing user -> Show Reminder Popup on app open (starts tour ONLY if they tap Yes)
+    if (homeStatus === null && cashbookStatus === null) {
+      setIsTourMandatory(false);
+      setTourBannerScope('home');
+    }
+  }, [isLoading, hasInitialDataSynced, books, activeBookId, isTourOpen, tourUserId]);
+
+  // Interactive Spotlight Tour — Smart User Detection for Cashbook Screen
+  useEffect(() => {
+    if (!activeBookId || currentTabName !== 'entries') return;
+    if (isLoading || !hasInitialDataSynced || isEntriesLoading || isTourOpen) return;
+
+    const openedBook = books.find((b) => b.id === activeBookId);
+    if (!openedBook) return;
+
+    const mandatoryState = getMandatoryTourState(tourUserId);
+    const cashbookStatus = getTourStatus('cashbook', tourUserId);
+    const homeStatus = getTourStatus('home', tourUserId);
+    const shouldAutoLaunchPending = pendingCashbookTourRef.current;
+
+    if (cashbookTourEvaluatedRef.current && !shouldAutoLaunchPending && mandatoryState !== 'active') return;
+
+    cashbookTourEvaluatedRef.current = true;
+
+    // Resume mandatory tour if brand-new user hasn't finished yet
+    if (mandatoryState === 'active' && cashbookStatus !== 'completed') {
+      pendingCashbookTourRef.current = false;
+      setIsTourMandatory(true);
+      if (tourAutoLaunchTimerRef.current !== null) {
+        window.clearTimeout(tourAutoLaunchTimerRef.current);
+      }
+      tourAutoLaunchTimerRef.current = window.setTimeout(() => {
+        tourAutoLaunchTimerRef.current = null;
+        setTourBannerScope(null);
+        setActiveTourScope('cashbook');
+        setTourStepId('summary-cards');
+        setIsTourOpen(true);
+      }, 600);
+      return;
+    }
+
+    if (shouldAutoLaunchPending) {
+      pendingCashbookTourRef.current = false;
+      if (tourAutoLaunchTimerRef.current !== null) {
+        window.clearTimeout(tourAutoLaunchTimerRef.current);
+      }
+      tourAutoLaunchTimerRef.current = window.setTimeout(() => {
+        tourAutoLaunchTimerRef.current = null;
+        setTourBannerScope(null);
+        setActiveTourScope('cashbook');
+        setTourStepId('summary-cards');
+        setIsTourOpen(true);
+      }, 650);
+      return;
+    }
+
+    // Existing user who opened directly into a Cashbook before answering the reminder
+    if (cashbookStatus === null && homeStatus === null) {
+      setIsTourMandatory(false);
+      setTourBannerScope('cashbook');
+    }
+  }, [isLoading, hasInitialDataSynced, isEntriesLoading, activeBookId, currentTabName, books, isTourOpen, tourUserId]);
+
+  useEffect(() => {
+    return () => {
+      if (tourAutoLaunchTimerRef.current !== null) {
+        window.clearTimeout(tourAutoLaunchTimerRef.current);
+        tourAutoLaunchTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Guided Hands-On Progression: Automatically advance to the next button when the user opens/closes
+  // Cash In (full inside-form + image upload tour), Cash Out, Edit/Delete, AI Upload, Import Entries (Code & Excel), or Book Menu -> Reports
+  useEffect(() => {
+    const prev = prevTourInteractiveRef.current;
+
+    if (isTourOpen && activeBookId) {
+      if (prev.showForm === null && showForm === 'in' && tourStepId === 'cash-in-btn') {
+        setTourStepId('form-type-tabs');
+        setTourFeedback('Cash In form opened! Fill the mandatory (*) fields & see how bill uploads work.');
+      } else if (prev.showForm === 'in' && showForm === null) {
+        setTourStepId('cash-out-btn');
+        setTourFeedback('Cash In recorded! Now tap "- Cash Out" to log an expense & see your Net Balance update.');
+      } else if (prev.showForm === null && showForm === 'out' && tourStepId === 'cash-out-btn') {
+        setTourStepId('form-type-tabs');
+        setTourFeedback('Cash Out form opened! Fill the mandatory (*) fields & save your expense live.');
+      } else if (prev.showForm === 'out' && showForm === null) {
+        setTourStepId('net-balance-updated');
+        setTourFeedback('Both Cash In & Cash Out recorded! Look at your live updated Net Balance.');
+      } else if (
+        prev.showAiWarning &&
+        !showAiWarning &&
+        currentTabName === 'entries' &&
+        tourStepId === 'ai-upload-btn'
+      ) {
+        setTourStepId('import-entries');
+        setTourFeedback('Great! Now tap the Import icon to learn about Import by Code & Excel.');
+      } else if (!prev.showImportDropdown && showImportDropdown && tourStepId === 'import-entries') {
+        setTourStepId('import-by-code-btn');
+        setTourFeedback('Import options opened! Let’s check both TrackBook Share Code & Excel Import.');
+      } else if (prev.showImportModal && !showImportModal && !showImportDropdown && !showExcelImportModal) {
+        // User previewed Import by Code and closed it -> open dropdown right on Import by Excel next!
+        setShowImportDropdown(true);
+        setTourStepId('import-by-excel-btn');
+        setTourFeedback('Now let’s see how Import by Excel (.xlsx, .xls, .csv) works!');
+      } else if (prev.showExcelImportModal && !showExcelImportModal && !showImportDropdown && !showImportModal) {
+        setTourStepId('book-menu');
+        setTourFeedback('Nice! Now tap the 3-lines Book Menu icon to open Reports.');
+      } else if (
+        prev.showImportDropdown &&
+        !showImportDropdown &&
+        !showImportModal &&
+        !showExcelImportModal &&
+        (tourStepId === 'import-by-code-btn' || tourStepId === 'import-by-excel-btn')
+      ) {
+        setTourStepId('book-menu');
+        setTourFeedback('Nice! Now tap the 3-lines Book Menu icon to open Reports.');
+      } else if (!prev.showBookMenu && showBookMenu && tourStepId === 'book-menu') {
+        setTourStepId('book-menu-reports');
+      } else if (
+        prev.showBookMenu &&
+        !showBookMenu &&
+        currentTabName === 'entries' &&
+        tourStepId === 'book-menu-reports'
+      ) {
+        setTourStepId('book-menu');
+      }
+    }
+
+    prevTourInteractiveRef.current = {
+      showForm,
+      showAiWarning,
+      showImportDropdown,
+      showImportModal,
+      showExcelImportModal,
+      showBookMenu,
+    };
+  }, [
+    isTourOpen,
+    activeBookId,
+    currentTabName,
+    tourStepId,
+    showForm,
+    showAiWarning,
+    showImportDropdown,
+    showImportModal,
+    showExcelImportModal,
+    showBookMenu,
+  ]);
+
+  // When user taps "Reports" during the Cashbook tour, seamlessly launch the Reports walkthrough steps!
+  useEffect(() => {
+    if (isTourOpen && activeTourScope === 'cashbook' && activeBookId && currentTabName === 'reports') {
+      if (
+        tourStepId !== 'reports-summary' &&
+        tourStepId !== 'reports-export-excel' &&
+        tourStepId !== 'reports-export-pdf' &&
+        tourStepId !== 'book-back-btn'
+      ) {
+        setTourStepId('reports-summary');
+        setTourFeedback('Reports opened! Here you can view charts & export Excel/PDF statements.');
+      }
+    }
+  }, [isTourOpen, activeTourScope, activeBookId, currentTabName, tourStepId]);
+
+  const handleFinishTour = useCallback(() => {
+    // If user finished the inside-form Cash In walkthrough via "Next: Cash Out", close the form and continue to Cash Out!
+    if (activeBookId && showForm === 'in') {
+      setShowForm(null);
+      setTourStepId('cash-out-btn');
+      setTourFeedback('Awesome! Now tap "- Cash Out" to record an expense and see Net Balance update.');
+      return;
+    }
+
+    // If user finished the inside-form Cash Out walkthrough via "Next: Net Balance", close the form and show Net Balance update!
+    if (activeBookId && showForm === 'out') {
+      setShowForm(null);
+      setTourStepId('net-balance-updated');
+      setTourFeedback('Both Cash In & Cash Out covered! Look at how your live Net Balance updates here.');
+      return;
+    }
+
+    // If user finished the Import dropdown walkthrough ("Import by Code" & "Import by Excel"), close dropdown and go to Book Menu!
+    if (activeBookId && showImportDropdown && !showImportModal && !showExcelImportModal) {
+      setShowImportDropdown(false);
+      setTourStepId('book-menu');
+      setTourFeedback('Great! Now tap the 3-lines Book Menu icon to open Reports.');
+      return;
+    }
+
+    if (tourAutoLaunchTimerRef.current !== null) {
+      window.clearTimeout(tourAutoLaunchTimerRef.current);
+      tourAutoLaunchTimerRef.current = null;
+    }
+    setTourStatus('completed', activeTourScope, tourUserId);
+    if (activeTourScope === 'cashbook') {
+      setTourStatus('completed', 'home', tourUserId);
+      setMandatoryTourState('done', tourUserId);
+      setIsTourMandatory(false);
+      pendingCashbookTourRef.current = false;
+    } else if (activeTourScope === 'home' && getTourStatus('cashbook', tourUserId) === null) {
+      pendingCashbookTourRef.current = true;
+    }
+    setShowBookMenu(false);
+    setShowImportDropdown(false);
+    setTourCreatedBookId(null);
+    setIsTourOpen(false);
+    setTourBannerScope(null);
+    setTourStepId(null);
+    setTourFeedback(null);
+  }, [activeTourScope, activeBookId, showForm, showImportDropdown, showImportModal, showExcelImportModal, tourUserId]);
+
+  const handleSkipTour = useCallback(() => {
+    // First-time sign-in users must complete the guided tour before leaving
+    if (isTourMandatory) return;
+
+    if (tourAutoLaunchTimerRef.current !== null) {
+      window.clearTimeout(tourAutoLaunchTimerRef.current);
+      tourAutoLaunchTimerRef.current = null;
+    }
+    setTourStatus('completed', 'home', tourUserId);
+    setTourStatus('completed', 'cashbook', tourUserId);
+    pendingCashbookTourRef.current = false;
+    setShowBookMenu(false);
+    setShowImportDropdown(false);
+    setTourCreatedBookId(null);
+    setIsTourOpen(false);
+    setTourBannerScope(null);
+    setTourStepId(null);
+    setTourFeedback(null);
+  }, [isTourMandatory, tourUserId]);
+
+  const handleDismissTourBanner = useCallback(() => {
+    setTourStatus('dismissed', 'home', tourUserId);
+    setTourStatus('dismissed', 'cashbook', tourUserId);
+    pendingCashbookTourRef.current = false;
+    setTourBannerScope(null);
+  }, [tourUserId]);
+
+  const handleStartTourFromBanner = useCallback(() => {
+    const scope: TourScope = tourBannerScope || (activeBookId ? 'cashbook' : 'home');
+    setTourBannerScope(null);
+    setTourCreatedBookId(null);
+    setIsTourMandatory(false);
+    if (scope === 'home') {
+      pendingCashbookTourRef.current = true;
+      cashbookTourEvaluatedRef.current = false;
+    }
+    setActiveTourScope(scope);
+    setTourStepId(scope === 'cashbook' ? 'summary-cards' : null);
+    setTourFeedback(null);
+    setIsTourOpen(true);
+  }, [tourBannerScope, activeBookId]);
+
+  const handleReplayTour = useCallback(() => {
+    vibrate(15);
+    setIsProfileOpen(false);
+    setIsEditingName(false);
+    setShowBookMenu(false);
+    setShowImportDropdown(false);
+    setTourBannerScope(null);
+    setTourFeedback(null);
+    setTourCreatedBookId(null);
+    setIsTourMandatory(false);
+
+    const scope: TourScope = activeBookId ? 'cashbook' : 'home';
+    if (scope === 'home') {
+      pendingCashbookTourRef.current = true;
+      cashbookTourEvaluatedRef.current = false;
+    } else {
+      pendingCashbookTourRef.current = false;
+    }
+    setActiveTourScope(scope);
+    setTourStepId(scope === 'cashbook' ? 'summary-cards' : null);
+
+    if (activeBookId && currentTabName !== 'entries') {
+      const targetBook = books.find((b) => b.id === activeBookId);
+      if (targetBook) {
+        const slug = getBookSlug(targetBook.name, targetBook.id);
+        navigate(`/cashbooks/${slug}/entries`);
+      }
+      window.setTimeout(() => {
+        setIsTourOpen(true);
+      }, 320);
+    } else {
+      window.setTimeout(() => {
+        setIsTourOpen(true);
+      }, 140);
+    }
+  }, [activeBookId, currentTabName, books, navigate]);
+
+  const tourModalCoach = useMemo<TourModalCoach | null>(() => {
+    if (!isTourOpen) return null;
+    if (isCreatingBook) {
+      return {
+        stepLabel: 'Live Practice · Create Book',
+        title: 'Create Your Cashbook Now',
+        compactText: 'Type book name & tap "Create Book"',
+        instruction: 'Type a name (e.g., "Daily Expenses") and tap "Create Book". Next, we’ll show you Book Edit/Delete & open it!',
+      };
+    }
+    if (isMediaPickerOpen || isPdfSelectorOpen) {
+      return {
+        stepLabel: 'Uploading Bill / Receipt Image',
+        title: 'Choose Camera, Gallery, or PDF Pages',
+        compactText: 'Pick Camera, Gallery, or PDF pages to attach',
+        instruction: 'Select a photo from Gallery, snap a live photo with Camera, or pick pages from any PDF (up to 6 attachments per entry).',
+      };
+    }
+    if (showAiWarning || (activeBookId && currentTabName === 'ai-upload')) {
+      return {
+        stepLabel: 'AI Upload Opened',
+        title: 'Scan Receipts & PDF Bills with AI',
+        compactText: 'AI auto-extracts bills & PDFs into entries',
+        instruction: 'Upload any receipt photo or PDF here and TrackBook AI automatically extracts amounts, dates, and items into entries.',
+        continueLabel: 'Next: Import Entries',
+        onContinue: () => {
+          setShowAiWarning(false);
+          if (currentTabName === 'ai-upload' && activeBookId) {
+            const targetBook = books.find((b) => b.id === activeBookId);
+            if (targetBook) {
+              navigate(`/cashbooks/${getBookSlug(targetBook.name, targetBook.id)}/entries`);
+            }
+          }
+          setTourStepId('import-entries');
+          setTourFeedback('Now tap the Import icon to see Import by Code & Excel options.');
+        },
+      };
+    }
+    if (showImportModal) {
+      return {
+        stepLabel: 'Import by TrackBook Code',
+        title: 'Restore Shared Entries with a 5-Char Code',
+        compactText: 'Enter a 5-char code (e.g. TBK-82KD1) to import',
+        instruction: 'Enter any 5-character TrackBook Share Code (like TBK-82KD1) received from another user or backup to instantly import all shared entries & bill links.',
+        continueLabel: 'Next: Import by Excel',
+        onContinue: () => {
+          setShowImportModal(false);
+          setShowImportDropdown(true);
+          setTourStepId('import-by-excel-btn');
+          setTourFeedback('Now let’s see how Import by Excel (.xlsx, .xls, .csv) works!');
+        },
+      };
+    }
+    if (showExcelImportModal) {
+      return {
+        stepLabel: 'Import by Excel / CSV',
+        title: 'Upload .xlsx, .xls, or .csv Spreadsheets',
+        compactText: 'Upload Excel/CSV with Date, Details, Amount & Type',
+        instruction: 'Upload any Excel or CSV file containing Date & Time, Details, Amount, and Type columns. TrackBook previews every row and imports them in one tap!',
+        continueLabel: 'Next: Book Menu',
+        onContinue: () => {
+          setShowExcelImportModal(false);
+          setShowImportDropdown(false);
+          setTourStepId('book-menu');
+          setTourFeedback('Great! Now tap the 3-lines Book Menu icon to open Reports.');
+        },
+      };
+    }
+    return null;
+  }, [
+    isTourOpen,
+    isCreatingBook,
+    isMediaPickerOpen,
+    isPdfSelectorOpen,
+    showAiWarning,
+    activeBookId,
+    currentTabName,
+    books,
+    navigate,
+    showImportModal,
+    showExcelImportModal,
+  ]);
+
+  const isTourAmountFilled = Boolean(amount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0);
+  const isTourDetailsFilled = Boolean(description && description.trim().length > 0);
+  const tourLiveTotals = useMemo(() => {
+    const b = activeBookId ? books.find((bk) => bk.id === activeBookId) : undefined;
+    if (!b || !Array.isArray(b.transactions)) return { in: 0, out: 0, net: 0 };
+    let totalIn = 0;
+    let totalOut = 0;
+    for (const t of b.transactions) {
+      const val = Number(t.amount) || 0;
+      if (t.type === 'in') totalIn += val;
+      else totalOut += val;
+    }
+    return { in: totalIn, out: totalOut, net: totalIn - totalOut };
+  }, [books, activeBookId]);
+
+  const tourSteps = useMemo<TourStep[]>(() => {
+    if (!activeBookId) {
+      const homeSteps: TourStep[] = [
+        {
+          id: 'home-search',
+          selector: '[data-tour="home-search"]',
+          title: 'Search Your Books',
+          description: 'Quickly locate any cashbook by name with instant live filtering as you type.',
+          preferredPlacement: 'bottom',
+        },
+        {
+          id: 'download-center',
+          selector: '#btn-download-center-trigger',
+          title: 'Reports & Download Center',
+          description: 'Track active PDF/Excel report exports and AI receipt scans, or reopen previously downloaded files.',
+          preferredPlacement: 'bottom',
+        },
+        {
+          id: 'profile-menu',
+          selector: '[data-tour="profile-menu"]',
+          title: 'Settings, Theme & Tutorial',
+          description: 'Switch between Light & Dark mode, edit Profile Settings, access Help, or replay this interactive walkthrough anytime.',
+          preferredPlacement: 'bottom',
+        },
+        {
+          id: 'create-book',
+          selector: '[data-tour="create-book"]',
+          title: 'Now Tap "+ Create a Book"',
+          description: 'Let’s create your cashbook right now! Tap the highlighted "+ Create a Book" button to open the creation dialog.',
+          preferredPlacement: 'bottom',
+          interactive: true,
+          requireAction: true,
+          showHandPointer: true,
+          actionHint: 'Tap "+ Create a Book" where the hand is pointing',
+        },
+      ];
+
+      if (tourCreatedBookId) {
+        homeSteps.push(
+          {
+            id: 'book-edit-btn',
+            selector: '[data-tour="book-edit-btn"]',
+            title: 'Edit Book Name (Pencil Icon)',
+            description: 'Need to rename a cashbook later? Tap this pencil icon anytime to update your book’s name instantly.',
+            preferredPlacement: 'bottom',
+          },
+          {
+            id: 'book-delete-btn',
+            selector: '[data-tour="book-delete-btn"]',
+            title: 'Delete Book (Trash Icon)',
+            description: 'Tap this trash icon to remove a cashbook you no longer need. A safety confirmation always appears before deleting.',
+            preferredPlacement: 'bottom',
+          },
+          {
+            id: 'open-created-book',
+            selector: '[data-tour="tour-open-book"]',
+            title: 'Tap Your Book to Open It',
+            description: 'Awesome—your cashbook is ready! Tap directly on it now to go inside and explore every Cashbook button & icon.',
+            preferredPlacement: 'top',
+            interactive: true,
+            requireAction: true,
+            showHandPointer: true,
+            actionHint: 'Tap your cashbook to open it',
+          }
+        );
+      }
+
+      return homeSteps;
+    }
+
+    // Inside-Form Spotlight Walkthrough for BOTH Cash In (+) and Cash Out (-) forms!
+    if (showForm === 'in' || showForm === 'out') {
+      const isOutForm = showForm === 'out';
+      return [
+        {
+          id: 'form-type-tabs',
+          selector: '[data-tour="form-type-tabs"]',
+          title: isOutForm ? 'Cash Out (- Expense) Selected' : 'Cash In / Cash Out Switcher',
+          description: isOutForm
+            ? 'You are now recording a Cash Out (- Expense). You can switch between Cash In and Cash Out anytime right here.'
+            : 'Switch between Cash In (+ Income) and Cash Out (- Expense) anytime without leaving this form.',
+          preferredPlacement: 'bottom',
+        },
+        {
+          id: 'form-amount',
+          selector: '[data-tour="form-amount"]',
+          title: isOutForm ? 'Mandatory Field: Expense Amount (₹) *' : 'Mandatory Field: Amount (₹) *',
+          description: isOutForm
+            ? 'Amount (*) is mandatory—enter the expense amount greater than 0 (e.g., 200) to unlock Next!'
+            : 'Amount (*) is mandatory—you must enter a value greater than 0 before saving. Tap this box and type an amount (e.g., 500) now to unlock Next!',
+          preferredPlacement: 'bottom',
+          interactive: true,
+          requireAction: !isTourAmountFilled,
+          showHandPointer: !isTourAmountFilled,
+          requireActionLabel: 'Enter amount *',
+          actionHint: isTourAmountFilled
+            ? 'Amount entered! Tap Next to continue'
+            : isOutForm
+            ? 'Mandatory: Type an expense amount > 0 (e.g., 200)'
+            : 'Mandatory: Type an amount > 0 (e.g., 500)',
+        },
+        {
+          id: 'form-details',
+          selector: '[data-tour="form-details"]',
+          title: isOutForm ? 'Mandatory Field: Expense Details *' : 'Mandatory Field: Details *',
+          description: isOutForm
+            ? 'Details (*) is also mandatory before saving. Type what this expense was for (e.g., "Groceries" or "Fuel") to unlock Next!'
+            : 'Details (*) is also mandatory before saving. Type a short remark (e.g., "Salary" or "Opening Cash") here now to unlock Next!',
+          preferredPlacement: 'bottom',
+          interactive: true,
+          requireAction: !isTourDetailsFilled,
+          showHandPointer: !isTourDetailsFilled,
+          requireActionLabel: 'Enter details *',
+          actionHint: isTourDetailsFilled
+            ? 'Details entered! Tap Next to continue'
+            : isOutForm
+            ? 'Mandatory: Type expense details (e.g., "Groceries")'
+            : 'Mandatory: Type a short remark (e.g., "Salary")',
+        },
+        {
+          id: 'form-category-mode',
+          selector: '[data-tour="form-category-mode"]',
+          title: 'Choose Category & Payment Mode',
+          description: isOutForm
+            ? 'Select an expense Category (Food, Travel, Bills, or Custom) and Payment Mode (Cash, UPI, Bank, Card) for accurate Reports.'
+            : 'Pick a Category (or create a Custom one) and Payment Mode (Cash, UPI, Bank, Card) for clear Reports.',
+          preferredPlacement: 'top',
+          interactive: true,
+          actionHint: 'Pick a category or mode, or tap Next',
+        },
+        {
+          id: 'form-bill-upload',
+          selector: '[data-tour="form-bill-upload"]',
+          title: 'How to Upload Bill & Receipt Images',
+          description: 'Tap this dashed box to upload up to 6 bill photos (Camera or Gallery) or import pages from any PDF (up to 500 MB). Tap any uploaded image to zoom, use < > arrows to reorder, or tap X to remove.',
+          preferredPlacement: 'top',
+          interactive: true,
+          showHandPointer: true,
+          actionHint: 'Tap here to try attaching a photo/PDF, or tap Next',
+        },
+        {
+          id: 'form-image-layout',
+          selector: '[data-tour="form-image-layout"]',
+          title: 'PDF Image Layout (MERGE vs. SPLIT)',
+          description: 'When you upload 2 or more bill photos, choose MERGE (2 bills side-by-side per PDF page) or SPLIT (1 full page per bill) for clean PDF exports.',
+          preferredPlacement: 'top',
+        },
+        {
+          id: 'form-save-btn',
+          selector: '[data-tour="form-save-btn"]',
+          title: isOutForm ? 'Save Your Cash Out Entry' : 'Save Your Cash In Entry',
+          description: isOutForm
+            ? 'Both mandatory fields (Amount * & Details *) are ready! Tap "Save" to log this expense live and immediately see your updated Net Balance.'
+            : 'Both mandatory fields (Amount * & Details *) are ready! Tap "Save" to record this Cash In entry live and watch your Net Balance update—or tap "Next: Cash Out".',
+          preferredPlacement: 'top',
+          interactive: true,
+          showHandPointer: true,
+          actionHint: isOutForm
+            ? 'Tap "Save" to log expense & view Net Balance'
+            : 'Tap "Save" to add this entry live, or tap "Next: Cash Out"',
+        },
+      ];
+    }
+
+    // Inside-Dropdown Spotlight Walkthrough when user taps Import Entries (explains BOTH Import by Code & Import by Excel!)
+    if (showImportDropdown && !showImportModal && !showExcelImportModal) {
+      return [
+        {
+          id: 'import-by-code-btn',
+          selector: '[data-tour="import-by-code-btn"]',
+          title: 'Import by TrackBook Code',
+          description: 'Have a 5-character Share Code (e.g., TBK-82KD1) from another TrackBook user or your own backup? Tap here, enter the code, and all shared entries & bill attachments import into your book instantly.',
+          preferredPlacement: 'bottom',
+          padding: 4,
+          interactive: true,
+          actionHint: 'Tap to preview Code Import, or tap Next for Excel',
+        },
+        {
+          id: 'import-by-excel-btn',
+          selector: '[data-tour="import-by-excel-btn"]',
+          title: 'Import by Excel (.xlsx, .xls, .csv)',
+          description: 'Already keep records in Excel or Google Sheets? Tap here to upload an .xlsx, .xls, or .csv sheet. TrackBook checks required columns (Date & Time, Details, Amount, Type), shows a live row preview, and imports everything in one tap!',
+          preferredPlacement: 'bottom',
+          padding: 4,
+          interactive: true,
+          actionHint: 'Tap to preview Excel Import, or tap "Next: Book Menu"',
+        },
+      ];
+    }
+
+    if (currentTabName === 'reports') {
+      return [
+        {
+          id: 'reports-summary',
+          selector: '[data-tour="reports-summary"]',
+          title: 'Reports Summary & Cash Flow Chart',
+          description: 'View your Total Cash In, Total Cash Out, Net Balance, and visual Cash Flow distribution bar in one clean dashboard.',
+          preferredPlacement: 'bottom',
+        },
+        {
+          id: 'reports-export-excel',
+          selector: '[data-tour="reports-export-excel"]',
+          title: 'Export as Microsoft Excel',
+          description: 'Tap this card anytime to download all entries as an Excel spreadsheet compatible with Excel, Google Sheets, and Numbers.',
+          preferredPlacement: 'top',
+        },
+        {
+          id: 'reports-export-pdf',
+          selector: '[data-tour="reports-export-pdf"]',
+          title: 'Export as PDF Statement',
+          description: 'Tap here to generate a printable business PDF statement—complete with attached receipt images—and track it in Download Center.',
+          preferredPlacement: 'top',
+        },
+        {
+          id: 'book-back-btn',
+          selector: '[data-tour="book-back-btn"]',
+          title: 'Back Arrow (Entries & Home)',
+          description: 'Tap this back arrow to return to your Cashbook entries, and tap again to go back to all Cashbooks. You’ve mastered TrackBook!',
+          preferredPlacement: 'bottom',
+        },
+      ];
+    }
+
+    const cashbookSteps: TourStep[] = [
+      // Phase 1: Explain the Cashbook Screen Overview
+      {
+        id: 'summary-cards',
+        selector: '[data-tour="summary-cards"]',
+        title: 'Live Balance Summary',
+        description: 'This is your Cashbook dashboard! Your Net Balance, Total Cash In (+), and Total Cash Out (-) update here in real time after every entry.',
+        preferredPlacement: 'bottom',
+      },
+      {
+        id: 'entry-search',
+        selector: '[data-tour="entry-search"]',
+        title: 'Search Icon & Bar',
+        description: 'Type any remark, amount, payment mode, or category name here to filter matching transactions instantly.',
+        preferredPlacement: 'bottom',
+      },
+      {
+        id: 'entry-filters',
+        selector: '[data-tour="entry-filters"]',
+        title: 'Type & Date Filters',
+        description: 'Filter your entries by Cash In / Cash Out type, or narrow by Today, This Week, This Month, or a Custom date.',
+        preferredPlacement: 'bottom',
+      },
+      {
+        id: 'select-all-entries',
+        selector: '[data-tour="select-all-entries"]',
+        title: 'Select All (Bulk Share & Delete)',
+        description: 'Select multiple entries at once to share them via a 5-character TrackBook sync code or delete them in bulk.',
+        preferredPlacement: 'bottom',
+      },
+      // Phase 2: Hands-on Animated Hand-Tap Practice on Every Button & Icon!
+      {
+        id: 'cash-in-btn',
+        selector: '[data-tour="cash-in-btn"]',
+        title: 'Tap "+ Cash In" (+ Income)',
+        description: 'Now let’s try every button live! Tap "+ Cash In" where the hand is pointing to explore the income form & bill photo uploads.',
+        preferredPlacement: 'top',
+        padding: 6,
+        interactive: true,
+        requireAction: true,
+        showHandPointer: true,
+        actionHint: 'Tap "+ Cash In" to open the income form',
+      },
+      {
+        id: 'cash-out-btn',
+        selector: '[data-tour="cash-out-btn"]',
+        title: 'Tap "- Cash Out" (- Expense)',
+        description: 'Now tap "- Cash Out" to walk through the expense form, fill the mandatory fields, and watch your Net Balance update!',
+        preferredPlacement: 'top',
+        padding: 6,
+        interactive: true,
+        requireAction: true,
+        showHandPointer: true,
+        actionHint: 'Tap "- Cash Out" to open the expense form',
+      },
+      {
+        id: 'net-balance-updated',
+        selector: '[data-tour="summary-cards"]',
+        title: 'Live Net Balance Updated!',
+        description: `Look here! Total Cash In (${formatCurrency(tourLiveTotals.in)}) − Total Cash Out (${formatCurrency(tourLiveTotals.out)}) = Net Balance (${formatCurrency(tourLiveTotals.net)}). Every Cash In, Cash Out, edit, or delete updates this balance automatically in real time!`,
+        preferredPlacement: 'bottom',
+      },
+      {
+        id: 'entry-edit-btn',
+        selector: '[data-tour="entry-edit-btn"]',
+        title: 'Edit Any Entry (Pencil Icon)',
+        description: 'Made a typo or want to attach a bill photo later? Tap this Pencil icon on any entry to edit its amount, date, details, category, mode, or bill images—your balance updates instantly.',
+        preferredPlacement: 'top',
+        padding: 6,
+      },
+      {
+        id: 'entry-delete-btn',
+        selector: '[data-tour="entry-delete-btn"]',
+        title: 'Delete Entry (Trash Icon)',
+        description: 'Tap this red Trash icon on any entry to delete it safely (a confirmation check always protects you from accidental taps). For multiple entries, use Select All above.',
+        preferredPlacement: 'top',
+        padding: 6,
+      },
+      {
+        id: 'ai-upload-btn',
+        selector: '[data-tour="ai-upload-btn"]',
+        title: 'Tap "AI Upload" (Bill Scanner)',
+        description: 'Now tap "AI Upload" to see how TrackBook AI scans receipt photos and PDFs into automatic entries.',
+        preferredPlacement: 'top',
+        padding: 6,
+        interactive: true,
+        requireAction: true,
+        showHandPointer: true,
+        actionHint: 'Tap "AI Upload" to see AI bill scanning',
+      },
+      {
+        id: 'import-entries',
+        selector: '[data-tour="import-entries"]',
+        title: 'Tap the Import Entries Icon',
+        description: 'Now tap this cloud icon to explore both "Import by TrackBook Code" and "Import by Excel / CSV"!',
+        preferredPlacement: 'bottom',
+        interactive: true,
+        requireAction: true,
+        showHandPointer: true,
+        actionHint: 'Tap the Import icon to see Code & Excel import options',
+      },
+      {
+        id: 'book-menu',
+        selector: '[data-tour="book-menu"]',
+        title: 'Tap the 3-Lines Book Menu',
+        description: 'Finally, tap this 3-lines menu icon to open your Cashbook menu so we can explore Reports & Exports!',
+        preferredPlacement: 'bottom',
+        interactive: true,
+        requireAction: true,
+        showHandPointer: true,
+        actionHint: 'Tap the 3-lines icon to open Book Menu',
+      },
+    ];
+
+    if (showBookMenu) {
+      cashbookSteps.push({
+        id: 'book-menu-reports',
+        selector: '[data-tour="book-menu-reports"]',
+        title: 'Tap "Reports"',
+        description: 'Tap "Reports" right now to see your visual Cash Flow charts and one-tap PDF & Excel statement exports!',
+        preferredPlacement: 'left',
+        padding: 4,
+        interactive: true,
+        requireAction: true,
+        showHandPointer: true,
+        actionHint: 'Tap "Reports" to open the Reports screen',
+      });
+    }
+
+    return cashbookSteps;
+  }, [activeBookId, currentTabName, showForm, tourCreatedBookId, showBookMenu, showImportDropdown, showImportModal, showExcelImportModal, isTourAmountFilled, isTourDetailsFilled, tourLiveTotals]);
 
   // 1. Live Supabase Realtime WebSocket Channels: Cross-device instant sync (Mobile <-> Desktop)
   useEffect(() => {
@@ -3973,16 +4854,18 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     };
   }, [session, supabase]);
 
-  // Autofocus Amount (not Details) when form is shown
+  // Autofocus Amount (not Details) when form is shown (skipped during Spotlight Tour so mobile keyboard doesn't cover the form tour)
   useEffect(() => {
     if (showForm) {
       setFormErrors({});
-      setTimeout(() => {
-        amountInputRef.current?.focus();
-        amountInputRef.current?.select();
-      }, 120);
+      if (!isTourOpen) {
+        setTimeout(() => {
+          amountInputRef.current?.focus();
+          amountInputRef.current?.select();
+        }, 120);
+      }
     }
-  }, [showForm]);
+  }, [showForm, isTourOpen]);
 
   // Save to localStorage as fallback (without heavy images to avoid quota errors)
   useEffect(() => {
@@ -4002,9 +4885,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
     }
   }, [books, session]);
 
-  // Close dropdown on click outside
+  // Close dropdown on click outside (never dismiss open menus when tapping SpotlightTour controls)
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
+      if ((event.target as HTMLElement | null)?.closest?.('[data-tour-ui="true"]')) {
+        return;
+      }
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsProfileOpen(false);
       }
@@ -4208,25 +5094,54 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
   const handleCreateBook = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newBookName.trim() || !session) return;
-    
-    // Optimization: Don't show submitting overlay for simple book creation if it's too slow
-    // Or just make it very quick.
+    if (isCreatingBookSubmitRef.current || !session) return;
+
+    const trimmedName = newBookName.trim();
+    if (!trimmedName) {
+      setBookCreateError('Please enter a book name.');
+      return;
+    }
+
+    // Prevent duplicate cashbook names (case-insensitive)
+    const duplicateBook = books.find(
+      (b) => (b.name || '').trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (duplicateBook) {
+      vibrate(30);
+      setBookCreateError(`A cashbook named "${trimmedName}" already exists. Please use a different name.`);
+      return;
+    }
+
+    isCreatingBookSubmitRef.current = true;
+    setBookCreateError(null);
     setIsSubmitting(true);
     setSubmittingMessage('Creating new book...');
-    
+
     const newBook: Cashbook = {
       id: safeUUID(),
-      name: newBookName,
+      name: trimmedName,
       transactions: [],
       createdAt: new Date()
     };
 
-    // Update local state immediately for perceived speed
-    setBooks(prev => [...prev, newBook]);
+    // Update local state immediately for perceived speed (deduplicated by ID)
+    setBooks(prev => (prev.some(b => b.id === newBook.id) ? prev : [...prev, newBook]));
+    cachedCashbooks = null;
     setNewBookName('');
     setIsCreatingBook(false);
     setIsSubmitting(false);
+
+    // If the user created this real book during the Spotlight Tour, show Edit/Delete book icons first, then tap to open!
+    if (isTourOpen) {
+      setTourCreatedBookId(newBook.id);
+      setTourFeedback(`"${newBook.name}" created! Let’s see how to Edit or Delete a book, then tap it to open.`);
+      setTourStepId('book-edit-btn');
+    }
+
+    // Release double-tap guard after short cooldown so rapid mobile taps never create duplicates
+    window.setTimeout(() => {
+      isCreatingBookSubmitRef.current = false;
+    }, 500);
 
     // Then handle Supabase in background
     if (supabase) {
@@ -4242,34 +5157,52 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             user_name: effectiveUserName
           }]);
         if (error) throw error;
+        cachedCashbooks = null;
         notifyCrossViewSync();
       } catch (error) {
         console.error('Error creating book in Supabase:', error);
-        // If it fails, we might want to revert local state, but usually it's fine
       }
     }
   };
 
   const handleUpdateBook = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editBookName.trim() || !isEditingBook || !session) return;
+    if (!isEditingBook || !session) return;
 
+    const trimmedName = editBookName.trim();
+    if (!trimmedName) {
+      setBookEditError('Please enter a book name.');
+      return;
+    }
+
+    // Prevent renaming to an already-existing cashbook name (case-insensitive)
+    const duplicateBook = books.find(
+      (b) => b.id !== isEditingBook && (b.name || '').trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (duplicateBook) {
+      vibrate(30);
+      setBookEditError(`A cashbook named "${trimmedName}" already exists. Please choose a different name.`);
+      return;
+    }
+
+    setBookEditError(null);
     const savedId = isEditingBook;
 
     if (supabase) {
       try {
         const { error } = await supabase
           .from('cashbooks')
-          .update({ name: editBookName })
+          .update({ name: trimmedName })
           .eq('id', isEditingBook);
         if (error) throw error;
+        cachedCashbooks = null;
         notifyCrossViewSync();
       } catch (error) {
         console.error('Error updating book in Supabase:', error);
       }
     }
 
-    setBooks(books.map(b => b.id === isEditingBook ? { ...b, name: editBookName } : b));
+    setBooks(prev => prev.map(b => b.id === savedId ? { ...b, name: trimmedName } : b));
     setIsEditingBook(null);
     setEditBookName('');
 
@@ -4518,6 +5451,15 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
+      if (isTourOpen && (showForm === 'in' || showForm === 'out')) {
+        if (errors.amount) {
+          setTourStepId('form-amount');
+          setTourFeedback('Amount (*) is mandatory! Please enter an amount greater than 0 first.');
+        } else if (errors.description) {
+          setTourStepId('form-details');
+          setTourFeedback('Details (*) is mandatory! Please enter a short remark before saving.');
+        }
+      }
       if (errors.amount) {
         amountInputRef.current?.focus();
       } else if (errors.description) {
@@ -5094,6 +6036,19 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             setJustEditedTransactionId(null);
           }, 2500);
         }, 100);
+
+        // Advance live interactive Spotlight Tour automatically after recording a real entry
+        if (isTourOpen) {
+          window.setTimeout(() => {
+            if (effectiveFormType === 'in') {
+              setTourStepId('cash-out-btn');
+              setTourFeedback('Cash In saved! Now tap Cash Out to log an expense.');
+            } else {
+              setTourStepId('ai-upload-btn');
+              setTourFeedback('Expense saved & Net Balance updated! Next, tap AI Upload.');
+            }
+          }, 300);
+        }
       }
     } catch (error: any) {
       console.error('[handleAddTransaction] Error in transaction flow:', error);
@@ -7124,7 +8079,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
             {/* Center: Desktop Search (Centered) */}
             <div className="hidden sm:flex flex-1 justify-center px-4">
-              <div className="w-full max-w-md relative group">
+              <div data-tour="home-search" className="w-full max-w-md relative group">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={18} />
                 <input 
                   type="text"
@@ -7143,8 +8098,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             <div className="flex items-center gap-2 sm:gap-3">
               {/* Mobile Search Button (Right side) */}
               <button 
+                data-tour="home-search"
                 onClick={() => { vibrate(); setIsSearchExpanded(true); }}
                 className="sm:hidden p-2 text-slate-400 hover:text-indigo-600 transition-colors"
+                aria-label="Search books"
               >
                 <Search size={20} />
               </button>
@@ -7154,6 +8111,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               <div className="relative shrink-0" ref={dropdownRef}>
                 <button 
+                  data-tour="profile-menu"
                   onClick={() => { vibrate(); setIsProfileOpen(!isProfileOpen); }}
                   className="flex items-center gap-1.5 sm:gap-2 p-1 pr-2 sm:pr-3 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-all"
                 >
@@ -7226,6 +8184,17 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       >
                         <Settings size={18} />
                         <span className="font-medium flex-1 text-left">Profile Settings</span>
+                      </button>
+
+                      <button 
+                        onClick={handleReplayTour}
+                        className={cn(
+                          "w-full flex items-center gap-3 p-3 rounded-xl transition-all",
+                          theme === 'dark' ? "hover:bg-zinc-900 text-indigo-400" : "hover:bg-indigo-50/70 text-indigo-700"
+                        )}
+                      >
+                        <Compass size={18} />
+                        <span className="font-medium flex-1 text-left">Replay App Tutorial</span>
                       </button>
 
                       <button 
@@ -7326,6 +8295,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   ) : (
                     books.length > 0 && (
                       <button
+                        data-tour="create-book"
                         onClick={() => { vibrate(); setIsCreatingBook(true); }}
                         className={cn(
                           "group/shortcut relative flex-1 sm:flex-none py-2 sm:py-2.5 px-4 sm:px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm sm:text-base hover:scale-[1.02] active:scale-[0.98] duration-200 cursor-pointer",
@@ -7367,6 +8337,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   </div>
                   <div className="flex flex-col sm:flex-row items-center gap-2 w-full justify-center">
                     <button
+                      data-tour="create-book"
                       onClick={() => { vibrate(); setIsCreatingBook(true); }}
                       className={cn(
                         "w-full sm:w-auto py-2 sm:py-2.5 px-5 sm:px-8 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 active:scale-95 text-xs sm:text-sm cursor-pointer",
@@ -7380,9 +8351,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
               ) : (
                 /* FULL-WIDTH CASHBOOK LIST WITH SEPARATOR LINES */
-                <div className="w-full border border-slate-200 dark:border-zinc-800 divide-y divide-slate-200 dark:divide-zinc-800 bg-white dark:bg-zinc-950 rounded-none shadow-xs">
-                  {filteredBooks.map((book) => {
+                <div data-tour="books-list" className="w-full border border-slate-200 dark:border-zinc-800 divide-y divide-slate-200 dark:divide-zinc-800 bg-white dark:bg-zinc-950 rounded-none shadow-xs">
+                  {filteredBooks.map((book, idx) => {
                     const displayInfo = getBookDisplayInfo(book);
+                    const isTourTargetBook =
+                      (tourCreatedBookId && book.id === tourCreatedBookId) ||
+                      (!tourCreatedBookId && idx === 0);
                     return (
                       <CashbookListCard
                         key={book.id}
@@ -7392,6 +8366,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         justEdited={justEditedBookId === book.id}
                         theme={theme}
                         canDelete={(book as any).role !== 'Viewer'}
+                        dataTour={isTourTargetBook ? 'tour-open-book' : undefined}
                         onTouchStart={onTouchStartBook}
                         onTouchEnd={onTouchEndBook}
                         onPress={handleBookPress}
@@ -7437,6 +8412,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <div className="flex items-center gap-2 sm:gap-4">
                 <div className="flex items-center gap-1.5 sm:gap-2.5">
                   <button 
+                    data-tour="book-back-btn"
                     onClick={() => {
                       vibrate();
                       if (currentTabName !== 'entries') {
@@ -7465,6 +8441,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   <div className="relative" ref={importMenuRef}>
                     <button
                       type="button"
+                      data-tour="import-entries"
                       onClick={() => setShowImportDropdown(!showImportDropdown)}
                       className={cn(
                         "p-2 rounded-xl transition-all cursor-pointer flex items-center gap-1 active:scale-95 duration-150 shrink-0",
@@ -7487,7 +8464,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 8, scale: 0.95 }}
                           className={cn(
-                            "absolute right-0 mt-2 w-56 rounded-2xl shadow-2xl p-1.5 z-50 border backdrop-blur-xl",
+                            "absolute right-0 mt-2 w-56 rounded-2xl shadow-2xl p-1.5 z-[110] border backdrop-blur-xl",
                             theme === 'dark' ? "bg-zinc-950/95 border-zinc-900 text-white" : "bg-white/95 border-slate-200 text-slate-900"
                           )}
                         >
@@ -7497,6 +8474,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
                           <button
                             type="button"
+                            data-tour="import-by-code-btn"
                             onClick={() => {
                               setShowImportDropdown(false);
                               setShowImportModal(true);
@@ -7509,12 +8487,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             <Code2 size={15} className="text-amber-500 shrink-0" />
                             <div>
                               <p className="font-bold text-xs">Import by TrackBook Code</p>
-                              <p className="text-[10px] text-slate-400">Restore via 6-digit sync code</p>
+                              <p className="text-[10px] text-slate-400">Restore via 5-char share code</p>
                             </div>
                           </button>
 
                           <button
                             type="button"
+                            data-tour="import-by-excel-btn"
                             onClick={() => {
                               setShowImportDropdown(false);
                               setExcelPreviewRows([]);
@@ -7542,6 +8521,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   {/* 3-Lines (Hamburger) Book Actions Menu */}
                   <div className="relative" ref={bookMenuRef}>
                     <button 
+                      data-tour="book-menu"
                       onClick={() => setShowBookMenu(!showBookMenu)}
                       className={cn(
                         "p-2 rounded-xl transition-all cursor-pointer flex items-center justify-center active:scale-95 duration-150 shrink-0",
@@ -7580,6 +8560,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           return (
                             <button
                               key={tab.id}
+                              data-tour={tab.id === 'reports' ? 'book-menu-reports' : undefined}
                               onClick={() => {
                                 setShowBookMenu(false);
                                 vibrate();
@@ -7602,6 +8583,25 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                             </button>
                           );
                         })}
+
+                        <div className={cn(
+                          "my-1.5 border-t",
+                          theme === 'dark' ? "border-zinc-800" : "border-slate-100"
+                        )} />
+
+                        <button
+                          type="button"
+                          onClick={handleReplayTour}
+                          className={cn(
+                            "w-full flex items-center gap-2.5 p-2 rounded-xl transition-all cursor-pointer text-left text-xs font-semibold",
+                            theme === 'dark'
+                              ? "text-indigo-400 hover:bg-zinc-900"
+                              : "text-indigo-700 hover:bg-indigo-50/70"
+                          )}
+                        >
+                          <Compass size={14} className="shrink-0" />
+                          <span>Replay App Tutorial</span>
+                        </button>
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -7612,7 +8612,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
             {currentTabName === 'entries' && (
               <>
                 {/* Mobile Summary Card (Reference Image Style) */}
-              <div className={cn(
+              <div data-tour="summary-cards" className={cn(
                 "lg:hidden rounded-2xl border shadow-sm overflow-hidden transition-colors duration-300",
                 theme === 'dark' ? "bg-zinc-950 border-zinc-900" : "bg-white border-slate-100"
               )}>
@@ -7661,8 +8661,9 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
 
               {/* Action Buttons Row (Desktop Only) */}
-              <div className="hidden lg:flex items-center gap-3">
+              <div data-tour="add-entry" className="hidden lg:flex items-center gap-3">
                 <button
+                  data-tour="cash-in-btn"
                   onClick={() => { vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
                   className={cn(
                     "group/shortcut relative flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
@@ -7678,6 +8679,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   </span>
                 </button>
                 <button
+                  data-tour="cash-out-btn"
                   onClick={() => { vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
                   className={cn(
                     "group/shortcut relative flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold transition-all active:scale-95 cursor-pointer",
@@ -7693,6 +8695,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   </span>
                 </button>
                 <button
+                  data-tour="ai-upload-btn"
                   onClick={() => { 
                     vibrate(); 
                     setShowAiWarning(true);
@@ -7714,7 +8717,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               {/* Filters & Search Row */}
               <div className="flex flex-col lg:flex-row items-center gap-3 sm:gap-4">
-                <div className="flex-1 relative w-full">
+                <div data-tour="entry-search" className="flex-1 relative w-full">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <input 
                     type="text"
@@ -7730,6 +8733,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <div className="hidden lg:flex items-center gap-2 pb-1 sm:pb-0">
                   {selectedTransactions.size === 0 ? (
                     <button
+                      data-tour="select-all-entries"
                       onClick={toggleSelectAll}
                       className={cn(
                         "flex items-center gap-2 px-4 h-11 rounded-xl font-bold transition-all text-sm whitespace-nowrap cursor-pointer hover:scale-[1.02] active:scale-[0.98] duration-200",
@@ -7773,33 +8777,35 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </button>
                     </>
                   )}
-                  <div className="relative min-w-[120px]">
-                    <select 
-                      value={transactionTypeFilter}
-                      onChange={(e) => setTransactionTypeFilter(e.target.value as any)}
-                      className={cn(
-                        "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold appearance-none",
-                        theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
-                      )}
-                    >
-                      <option value="all">All Types</option>
-                      <option value="in">Cash In</option>
-                      <option value="out">Cash Out</option>
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
-                  </div>
-                  <div className="relative min-w-[140px]">
-                    <select 
-                      value={transactionDurationFilter}
-                      onChange={(e) => setTransactionDurationFilter(e.target.value)}
-                      className={cn(
-                        "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold appearance-none",
-                        theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
-                      )}
-                    >
-                      {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                  <div data-tour="entry-filters" className="flex items-center gap-2">
+                    <div className="relative min-w-[120px]">
+                      <select 
+                        value={transactionTypeFilter}
+                        onChange={(e) => setTransactionTypeFilter(e.target.value as any)}
+                        className={cn(
+                          "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold appearance-none",
+                          theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
+                        )}
+                      >
+                        <option value="all">All Types</option>
+                        <option value="in">Cash In</option>
+                        <option value="out">Cash Out</option>
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                    </div>
+                    <div className="relative min-w-[140px]">
+                      <select 
+                        value={transactionDurationFilter}
+                        onChange={(e) => setTransactionDurationFilter(e.target.value)}
+                        className={cn(
+                          "w-full pl-4 pr-10 h-11 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm font-bold appearance-none",
+                          theme === 'dark' ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-200 text-black"
+                        )}
+                      >
+                        {DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                    </div>
                   </div>
                   {transactionDurationFilter === 'Custom' && (
                     <div className="relative min-w-[150px]">
@@ -7821,7 +8827,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 <div className="lg:hidden w-full flex flex-col gap-2.5">
 
                   {/* ROW 3: [All Types] [All] */}
-                  <div className="grid grid-cols-2 gap-2.5 w-full">
+                  <div data-tour="entry-filters" className="grid grid-cols-2 gap-2.5 w-full">
                     <div className="relative w-full">
                       <select 
                         value={transactionTypeFilter}
@@ -7868,7 +8874,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
 
               {/* Balance Cards Row (Desktop Only) */}
-              <div className="hidden lg:grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+              <div data-tour="summary-cards" className="hidden lg:grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
                 <div className={cn(
                   "p-6 rounded-3xl border flex items-center gap-4 shadow-sm transition-colors duration-300",
                   theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
@@ -7965,6 +8971,57 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </p>
                     </div>
                   ) : filteredTransactions.length === 0 ? (
+                    isTourOpen && (tourStepId === 'entry-edit-btn' || tourStepId === 'entry-delete-btn') ? (
+                      <div className={cn(
+                        "rounded-2xl border p-4 space-y-3 shadow-sm",
+                        theme === 'dark' ? "bg-zinc-950 border-indigo-900/50" : "bg-white border-indigo-200"
+                      )}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded-md bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400 mb-1">
+                              Sample Entry · Tour Preview
+                            </span>
+                            <p className={cn("font-bold text-sm", theme === 'dark' ? "text-white" : "text-slate-900")}>
+                              Sample Payment Entry
+                            </p>
+                            <p className="text-[11px] text-slate-400 mt-0.5">Sales · Cash</p>
+                          </div>
+                          <span className="font-black text-base text-emerald-600 dark:text-emerald-400 tabular-nums">
+                            +₹500.00
+                          </span>
+                        </div>
+                        <div className={cn(
+                          "pt-2.5 border-t flex items-center justify-between",
+                          theme === 'dark' ? "border-zinc-800" : "border-slate-100"
+                        )}>
+                          <span className="text-[11px] font-semibold text-slate-400">Today · 10:30 AM</span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              data-tour="entry-edit-btn"
+                              className={cn(
+                                "w-8 h-8 flex items-center justify-center rounded-lg border shadow-sm",
+                                theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-indigo-400" : "bg-slate-50 border-slate-200 text-indigo-600"
+                              )}
+                              aria-label="Edit Transaction Preview"
+                            >
+                              <Pencil size={12.5} />
+                            </button>
+                            <button
+                              type="button"
+                              data-tour="entry-delete-btn"
+                              className={cn(
+                                "w-8 h-8 flex items-center justify-center rounded-lg border shadow-sm",
+                                theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-rose-400" : "bg-rose-50 border-rose-200 text-rose-600"
+                              )}
+                              aria-label="Delete Transaction Preview"
+                            >
+                              <Trash2 size={12.5} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
                     <div className={cn(
                       "py-12 text-center rounded-3xl border transition-colors duration-300",
                       theme === 'dark' ? "bg-slate-900 border-slate-800" : "bg-white border-slate-100"
@@ -7978,6 +9035,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         theme === 'dark' ? "text-slate-500" : "text-black"
                       )}>No entries found</p>
                     </div>
+                    )
                   ) : (
                     (() => {
                       // Group transactions by date for headers in viewport
@@ -8023,6 +9081,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                   theme={theme}
                                   index={visibleSlice.indexOf(t)}
                                   isJustEdited={justEditedTransactionId === t.id}
+                                  isTourFirstRow={isTourOpen && visibleSlice.indexOf(t) === 0}
                                 />
                               ))}
                             </div>
@@ -8118,6 +9177,48 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                               </td>
                             </tr>
                           ) : filteredTransactions.length === 0 ? (
+                            isTourOpen && (tourStepId === 'entry-edit-btn' || tourStepId === 'entry-delete-btn') ? (
+                              <tr className={cn(theme === 'dark' ? "bg-indigo-950/20" : "bg-indigo-50/40")}>
+                                <td className="px-3 sm:px-6 py-4">
+                                  <div className="w-5 h-5 rounded border-2 border-slate-300 dark:border-slate-700" />
+                                </td>
+                                <td className="px-3 sm:px-6 py-4 whitespace-nowrap">
+                                  <p className={cn("font-bold text-sm", theme === 'dark' ? "text-slate-200" : "text-slate-800")}>Today</p>
+                                  <p className="text-[10px] font-bold text-slate-400">10:30 AM</p>
+                                </td>
+                                <td className="px-3 sm:px-6 py-4">
+                                  <div className="flex items-center gap-2">
+                                    <p className={cn("text-sm font-bold", theme === 'dark' ? "text-white" : "text-black")}>Sample Payment Entry</p>
+                                    <span className="px-1.5 py-0.5 text-[9px] font-black rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 uppercase">Tour Preview</span>
+                                  </div>
+                                </td>
+                                <td className="px-3 sm:px-6 py-4 text-sm font-bold text-slate-500">Sales</td>
+                                <td className="px-3 sm:px-6 py-4 text-sm font-bold text-slate-500">Cash</td>
+                                <td className="px-3 sm:px-6 py-4 text-xs text-slate-400">—</td>
+                                <td className="px-3 sm:px-6 py-4 text-right font-black text-emerald-600 tabular-nums">+₹500.00</td>
+                                <td className="px-3 sm:px-6 py-4 text-right font-black tabular-nums">₹500.00</td>
+                                <td className="px-3 sm:px-6 py-4">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <button
+                                      type="button"
+                                      data-tour="entry-edit-btn"
+                                      className="p-1.5 text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg"
+                                      aria-label="Edit Entry Preview"
+                                    >
+                                      <Pencil size={16} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      data-tour="entry-delete-btn"
+                                      className="p-1.5 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 rounded-lg"
+                                      aria-label="Delete Entry Preview"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : (
                             <tr>
                               <td colSpan={9} className="px-6 py-20 text-center">
                                 <div className="flex flex-col items-center justify-center space-y-3">
@@ -8134,6 +9235,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                 </div>
                               </td>
                             </tr>
+                            )
                           ) : (
                             <>
                               {pagedTransactions.map((t, index) => (
@@ -8155,6 +9257,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                                   theme={theme}
                                   index={index}
                                   isJustEdited={justEditedTransactionId === t.id}
+                                  isTourFirstRow={isTourOpen && index === 0}
                                 />
                               ))}
                             </>
@@ -8184,7 +9287,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
               </div>
 
               {/* Mobile Sticky Bottom Buttons */}
-              <div className={cn(
+              <div data-tour="add-entry" className={cn(
                 "lg:hidden fixed bottom-0 left-0 right-0 p-4 pb-6 backdrop-blur-lg border-t z-40 transition-colors duration-300",
                 theme === 'dark' ? "bg-slate-900/80 border-slate-800" : "bg-white/80 border-slate-100"
               )}>
@@ -8192,6 +9295,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   <div className="flex flex-col gap-3 w-full">
                     {/* Row 1: AI UPLOAD */}
                     <button
+                      data-tour="ai-upload-btn"
                       onClick={() => { 
                         vibrate(); 
                         setShowAiWarning(true);
@@ -8210,6 +9314,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     {/* Row 2: CASH IN & CASH OUT */}
                     <div className="grid grid-cols-2 gap-3">
                       <button
+                        data-tour="cash-in-btn"
                         onClick={() => { vibrate(); vibrate(); setShowForm('in'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
                         className={cn(
                           "flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
@@ -8222,6 +9327,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                         CASH IN
                       </button>
                       <button
+                        data-tour="cash-out-btn"
                         onClick={() => { vibrate(); vibrate(); setShowForm('out'); setTransactionDate(safeToDateTimeLocal(new Date())); }}
                         className={cn(
                           "flex items-center justify-center gap-2 py-3.5 rounded-2xl font-black shadow-sm transition-all active:scale-95 cursor-pointer text-xs sm:text-sm border",
@@ -8962,6 +10068,8 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
             {currentTabName === 'reports' && (
               <div className="space-y-6 max-w-4xl mx-auto py-6 px-4 pb-20">
+                {/* Summary Cards & Cash Flow Chart */}
+                <div data-tour="reports-summary" className="space-y-6">
                 {/* Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className={cn(
@@ -9021,10 +10129,12 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   )}
                 </div>
+                </div>
 
                 {/* Quick Export Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div 
+                    data-tour="reports-export-excel"
                     onClick={() => {
                       if (activeBook) {
                         backgroundExportManager.enqueueExcelTask(activeBook.id, activeBook.name, filteredTransactions);
@@ -9046,6 +10156,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   </div>
 
                   <div 
+                    data-tour="reports-export-pdf"
                     onClick={() => {
                       if (activeBook) {
                         vibrate(15);
@@ -10534,6 +11645,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
         {isCreatingBook && (
           <div className={cn(
             "fixed inset-0 z-[100] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
+            isTourOpen && "pt-14 sm:pt-4",
             theme === 'dark' ? "bg-black/60" : "bg-slate-900/40"
           )}>
             <motion.div
@@ -10550,24 +11662,43 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   "text-xl font-bold transition-colors duration-300",
                   theme === 'dark' ? "text-white" : "text-black"
                 )}>Create New Book</h3>
-                <button onClick={() => setIsCreatingBook(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
-                  <X size={20} className="text-slate-400" />
-                </button>
+                {!(isTourOpen && isTourMandatory) && (
+                  <button
+                    onClick={() => {
+                      setIsCreatingBook(false);
+                      setBookCreateError(null);
+                    }}
+                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                  >
+                    <X size={20} className="text-slate-400" />
+                  </button>
+                )}
               </div>
               <form onSubmit={handleCreateBook} className="space-y-4">
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Book Name</label>
                   <input
-                    autoFocus
+                    autoFocus={!isTourOpen}
                     type="text"
                     placeholder="e.g., Personal, Business"
                     value={newBookName}
-                    onChange={(e) => setNewBookName(e.target.value)}
+                    onChange={(e) => {
+                      setNewBookName(e.target.value);
+                      if (bookCreateError) setBookCreateError(null);
+                    }}
                     className={cn(
-                      "w-full px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
-                      theme === 'dark' ? "bg-slate-800 border-slate-800 text-white" : "bg-slate-50 border-slate-200 text-black"
+                      "w-full px-4 py-3 rounded-xl border focus:ring-2 outline-none transition-all",
+                      bookCreateError
+                        ? "border-rose-500 focus:ring-rose-500/30 bg-rose-50/40 dark:bg-rose-950/20 text-rose-900 dark:text-rose-100"
+                        : theme === 'dark' ? "bg-slate-800 border-slate-800 text-white focus:ring-indigo-500" : "bg-slate-50 border-slate-200 text-black focus:ring-indigo-500"
                     )}
                   />
+                  {bookCreateError && (
+                    <p className="text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 pt-1">
+                      <AlertCircle size={13} className="shrink-0" />
+                      <span>{bookCreateError}</span>
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Creation Date</label>
@@ -10583,8 +11714,10 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                 </div>
                 <button
                   type="submit"
+                  disabled={!newBookName.trim() || isSubmitting}
                   className={cn(
-                    "w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all",
+                    "w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all cursor-pointer",
+                    (!newBookName.trim() || isSubmitting) && "opacity-60 cursor-not-allowed",
                     theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
                   )}
                 >
@@ -10617,7 +11750,13 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   "text-xl font-bold transition-colors duration-300",
                   theme === 'dark' ? "text-white" : "text-black"
                 )}>Edit Book Name</h3>
-                <button onClick={() => setIsEditingBook(null)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                <button
+                  onClick={() => {
+                    setIsEditingBook(null);
+                    setBookEditError(null);
+                  }}
+                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                >
                   <X size={20} className="text-slate-400" />
                 </button>
               </div>
@@ -10628,17 +11767,30 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     autoFocus
                     type="text"
                     value={editBookName}
-                    onChange={(e) => setEditBookName(e.target.value)}
+                    onChange={(e) => {
+                      setEditBookName(e.target.value);
+                      if (bookEditError) setBookEditError(null);
+                    }}
                     className={cn(
-                      "w-full px-4 py-3 rounded-xl border focus:ring-2 focus:ring-indigo-500 outline-none transition-all",
-                      theme === 'dark' ? "bg-slate-800 border-slate-800 text-white" : "bg-slate-50 border-slate-200 text-black"
+                      "w-full px-4 py-3 rounded-xl border focus:ring-2 outline-none transition-all",
+                      bookEditError
+                        ? "border-rose-500 focus:ring-rose-500/30 bg-rose-50/40 dark:bg-rose-950/20 text-rose-900 dark:text-rose-100"
+                        : theme === 'dark' ? "bg-slate-800 border-slate-800 text-white focus:ring-indigo-500" : "bg-slate-50 border-slate-200 text-black focus:ring-indigo-500"
                     )}
                   />
+                  {bookEditError && (
+                    <p className="text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 pt-1">
+                      <AlertCircle size={13} className="shrink-0" />
+                      <span>{bookEditError}</span>
+                    </p>
+                  )}
                 </div>
                 <button
                   type="submit"
+                  disabled={!editBookName.trim()}
                   className={cn(
-                    "w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all",
+                    "w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all cursor-pointer",
+                    !editBookName.trim() && "opacity-60 cursor-not-allowed",
                     theme === 'dark' ? "shadow-none" : "shadow-lg shadow-indigo-100"
                   )}
                 >
@@ -10912,7 +12064,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </div>
 
                       {/* Primary Actions */}
-                      <div className="pt-2">
+                      <div className="pt-2 space-y-2.5">
                         <button
                           disabled={profileLoading}
                           onClick={handleSaveProfileName}
@@ -10926,6 +12078,20 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                           ) : (
                             'Save Settings'
                           )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleReplayTour}
+                          className={cn(
+                            "w-full py-3 rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer border",
+                            theme === 'dark'
+                              ? "bg-slate-950/60 border-slate-800 text-indigo-400 hover:bg-slate-800"
+                              : "bg-indigo-50/60 border-indigo-100 text-indigo-700 hover:bg-indigo-100/70"
+                          )}
+                        >
+                          <Compass size={15} />
+                          Replay App Tutorial
                         </button>
                       </div>
                     </div>
@@ -11147,7 +12313,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
 
               <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-h-[80vh] overflow-y-auto no-scrollbar">
                 {/* Type Tabs */}
-                <div className="flex flex-col gap-4">
+                <div data-tour="form-type-tabs" className="flex flex-col gap-4">
                   <div className={cn(
                     "p-1 rounded-xl flex gap-1 transition-colors duration-300",
                     theme === 'dark' ? "bg-slate-800" : "bg-slate-100"
@@ -11204,7 +12370,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       </div>
                     </div>
 
-                    <div className="space-y-1.5">
+                    <div data-tour="form-amount" className="space-y-1.5">
                       <div className="flex items-center justify-between">
                         <label className="text-[10px] font-black uppercase tracking-widest flex items-center gap-1 text-slate-400">
                           Amount (₹) <span className="text-rose-500 font-bold">*</span>
@@ -11269,7 +12435,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div data-tour="form-details" className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-[10px] font-black uppercase tracking-widest flex items-center gap-1 text-slate-400">
                         Details <span className="text-rose-500 font-bold">*</span>
@@ -11340,7 +12506,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div data-tour="form-category-mode" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</label>
                       <div className="space-y-2">
@@ -11407,7 +12573,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                   </div>
 
                   {/* Image Layout Selection */}
-                  <div className="space-y-2">
+                  <div data-tour="form-image-layout" className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Image Layout in PDF</label>
                     <div className={cn(
                       "p-1 rounded-xl flex gap-1 transition-colors duration-300",
@@ -11446,7 +12612,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div data-tour="form-bill-upload" className="space-y-1.5">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bills / Attachments (Max 6)</label>
                     <div className="space-y-3">
                       {selectedImages.length > 0 && (
@@ -11629,6 +12795,7 @@ export default function Dashboard({ session, theme, setTheme }: { session: any, 
                       Cancel
                     </button>
                     <button
+                      data-tour="form-save-btn"
                       type="submit"
                       onClick={() => { vibrate(30); }}
                       className={cn(
@@ -12859,6 +14026,7 @@ Open TrackBook → Import Shared Entries`)}`}
         {showImportModal && (
           <div className={cn(
             "fixed inset-0 z-[150] flex items-center justify-center p-4 backdrop-blur-sm transition-colors duration-300",
+            isTourOpen && "pt-16 sm:pt-4",
             theme === 'dark' ? "bg-black/60" : "bg-slate-900/40"
           )}>
             <motion.div
@@ -12987,6 +14155,7 @@ Open TrackBook → Import Shared Entries`)}`}
         {showExcelImportModal && (
           <div className={cn(
             "fixed inset-0 z-[150] flex items-center justify-center p-3 sm:p-4 backdrop-blur-sm transition-colors duration-300",
+            isTourOpen && "pt-16 sm:pt-4",
             theme === 'dark' ? "bg-black/70" : "bg-slate-900/40"
           )}>
             <motion.div
@@ -13708,6 +14877,46 @@ Open TrackBook → Import Shared Entries`)}`}
           </motion.div>
         )}
       </AnimatePresence>
+      {/* Existing-User Reminder Popup (Starts Tour ONLY when user taps Yes) */}
+      <TourUpdateBanner
+        visible={tourBannerScope !== null && !isTourOpen}
+        theme={theme}
+        title={
+          tourBannerScope === 'cashbook'
+            ? "Want a quick tour of this Cashbook?"
+            : "Welcome back! Want a quick TrackBook tour?"
+        }
+        message={
+          tourBannerScope === 'cashbook'
+            ? "See how to use Cash In/Out, Bill Photo Uploads, Edit & Delete, AI Upload, Import by Code/Excel, and PDF/Excel Reports."
+            : "We’ve added an interactive walkthrough covering Cash In/Out, Bill Photo Uploads, Edit & Delete, Import by Code & Excel, and Reports. Start the tour now?"
+        }
+        onAccept={handleStartTourFromBanner}
+        onDismiss={handleDismissTourBanner}
+      />
+
+      {/* Real-Time Interactive Spotlight App Tour Overlay */}
+      <SpotlightTour
+        isOpen={isTourOpen}
+        steps={tourSteps}
+        theme={theme}
+        activeStepId={tourStepId}
+        onActiveStepIdChange={setTourStepId}
+        modalCoach={tourModalCoach}
+        feedbackMessage={tourFeedback}
+        finishLabel={
+          activeBookId && showForm === 'in'
+            ? 'Next: Cash Out'
+            : activeBookId && showForm === 'out'
+            ? 'Next: Net Balance'
+            : activeBookId && showImportDropdown && !showImportModal && !showExcelImportModal
+            ? 'Next: Book Menu'
+            : undefined
+        }
+        allowSkip={!isTourMandatory}
+        onFinish={handleFinishTour}
+        onSkip={handleSkipTour}
+      />
     </div>
   );
 }

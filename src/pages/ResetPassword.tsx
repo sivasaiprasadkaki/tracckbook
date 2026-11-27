@@ -105,24 +105,24 @@ export default function ResetPassword() {
 
   if (checking) {
     return (
-      <div className="min-h-screen bg-[#f3f7ff] dark:bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 dark:bg-black flex items-center justify-center">
         <Loader2 size={40} className="text-indigo-600 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-[#f3f7ff] dark:bg-black font-lora transition-colors duration-300">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-black transition-colors duration-300">
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-[400px] bg-white dark:bg-zinc-950 rounded-[32px] p-8 shadow-[0_10px_40px_rgba(0,0,0,0.04)] border border-white/50 dark:border-zinc-800"
+        className="w-full max-w-[400px] bg-white dark:bg-zinc-950 rounded-[28px] p-8 shadow-[0_10px_40px_rgba(15,23,42,0.06)] border border-slate-200 dark:border-zinc-900"
       >
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Lock className="text-indigo-600 dark:text-indigo-400" size={32} />
+          <div className="w-16 h-16 bg-indigo-50 dark:bg-indigo-950/40 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Lock className="text-indigo-600 dark:text-indigo-400" size={30} />
           </div>
-          <h1 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight mb-2">Reset Password</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight mb-2">Reset Password</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
             Please enter your new password below.
           </p>
@@ -130,14 +130,14 @@ export default function ResetPassword() {
 
         <form onSubmit={handleResetPassword} className="space-y-4">
           {error && (
-            <div className="bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 p-3 rounded-xl flex items-start gap-3 text-xs font-medium border border-rose-100 dark:border-rose-900/30">
+            <div className="bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 p-3 rounded-xl flex items-start gap-3 text-xs font-medium border border-rose-100 dark:border-rose-900/40">
               <AlertCircle size={16} className="shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
 
           {success && (
-            <div className="bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 p-3 rounded-xl flex items-start gap-3 text-xs font-medium border border-emerald-100 dark:border-emerald-900/30">
+            <div className="bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 p-3 rounded-xl flex items-start gap-3 text-xs font-medium border border-emerald-100 dark:border-emerald-900/40">
               <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
               <span>{success}</span>
             </div>
@@ -152,7 +152,7 @@ export default function ResetPassword() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter new password"
-                className="w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 focus:border-indigo-500 dark:focus:border-indigo-500 rounded-xl py-3 px-4 outline-none transition-all text-sm font-medium dark:text-white"
+                className="w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 focus:border-indigo-500 rounded-xl py-3 px-4 outline-none transition-all text-sm font-medium text-slate-900 dark:text-white"
               />
               <button
                 type="button"
@@ -173,7 +173,7 @@ export default function ResetPassword() {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Confirm new password"
-                className="w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 focus:border-indigo-500 dark:focus:border-indigo-500 rounded-xl py-3 px-4 outline-none transition-all text-sm font-medium dark:text-white"
+                className="w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 focus:border-indigo-500 rounded-xl py-3 px-4 outline-none transition-all text-sm font-medium text-slate-900 dark:text-white"
               />
               <button
                 type="button"
@@ -192,7 +192,7 @@ export default function ResetPassword() {
               "w-full rounded-xl py-3.5 font-bold transition-all flex items-center justify-center gap-2 mt-4 text-white cursor-pointer",
               success 
                 ? "bg-emerald-600 shadow-lg shadow-emerald-200 dark:shadow-none" 
-                : "bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 dark:shadow-none",
+                : "bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20 dark:shadow-none",
               (loading || !!success) && "opacity-90 cursor-not-allowed"
             )}
           >
